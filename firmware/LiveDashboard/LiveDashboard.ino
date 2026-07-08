@@ -217,7 +217,8 @@ void connectWiFi() {
 
   if (WiFi.status() == WL_CONNECTED) {
     logOK("WIFI", "connected, IP = " + WiFi.localIP().toString() +
-                  ", RSSI = " + String(WiFi.RSSI()) + " dBm");
+                  ", RSSI = " + String(WiFi.RSSI()) + " dBm" +
+                  ", MAC = " + WiFi.macAddress());
   } else {
     logErr("WIFI", String("could NOT connect to '") + WIFI_SSID +
                    "'. Check: name/password in secrets.h? 2.4GHz? in range?");
