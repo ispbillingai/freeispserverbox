@@ -1,5 +1,5 @@
-/*
-  secrets.example.h — TEMPLATE ONLY, safe to keep on GitHub.
+﻿/*
+  secrets.example.h â€” TEMPLATE ONLY, safe to keep on GitHub.
 
   HOW TO USE:
   1. Copy this file and rename the copy to  secrets.h  (same folder).
@@ -7,12 +7,13 @@
   3. secrets.h is in .gitignore, so your real passwords NEVER reach GitHub.
 */
 
-// ---- WiFi (the network the ESP32 joins — can be the MikroTik's own WiFi) ----
+// ---- WiFi (the network the ESP32 joins â€” can be the MikroTik's own WiFi) ----
 #define WIFI_SSID  "YOUR_WIFI_NAME"
 #define WIFI_PASS  "YOUR_WIFI_PASSWORD"
 
 // ---- MikroTik REST API (RouterOS v7, plain http on the LAN) ----
-// Create a READ-ONLY user on the router first — see LiveDashboard.ino header.
-#define MT_HOST  "192.168.88.1"          // router LAN IP
+// Create a READ-ONLY user on the router first â€” see LiveDashboard.ino header.
+#define MT_HOST  "auto"                  // auto = use the WiFi gateway; or set an IP
 #define MT_USER  "espbox"                // the read-only user you created
 #define MT_PASS  "READ_ONLY_PASSWORD"
+
