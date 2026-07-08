@@ -142,7 +142,54 @@ void value(int x, int y, uint8_t size, uint16_t color, const String& s, int boxW
 }
 
 // ---- WiFi ----
+const char* authName(wifi_auth_mode_t m) {
+  switch (m) {
+    case WIFI_AUTH_OPEN:            return "OPEN";
+    case WIFI_AUTH_WEP:             return "WEP";
+    case WIFI_AUTH_WPA_PSK:         return "WPA";
+    case WIFI_AUTH_WPA2_PSK:        return "WPA2";
+    case WIFI_AUTH_WPA_WPA2_PSK:    return "WPA/WPA2";
+    case WIFI_AUTH_WPA3_PSK:        return "WPA3";
+    case WIFI_AUTH_WPA2_WPA3_PSK:   return "WPA2/WPA3";
+    default:                        return "other";
+  }
+}
+
+// scan and print EVERY network the ESP32 can see — tells us instantly
+// whether the problem is name, channel, or security type
+bool scanForTarget() {
+  logInfo("WIFI", "scanning for networks...");
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+  int n = WiFi.scanNetworks(false, true);   // include hidden SSIDs
+  if (n <= 0) {
+    logErr("WIFI", "scan found NOTHING at all (antenna? try nearer the router)");
+    return false;
+  }
+  bool found = false;
+  logOK("WIFI", String(n) + " networks visible:");
+  for (int i = 0; i < n; i++) {
+    String ssid = WiFi.SSID(i);
+    bool isTarget = (ssid == WIFI_SSID);
+    if (isTarget) found = true;
+    Serial.printf("   %s '%s'  ch%d  %ddBm  %s\n",
+                  isTarget ? ">>>" : "   ",
+                  ssid.length() ? ssid.c_str() : "(hidden)",
+                  WiFi.channel(i), WiFi.RSSI(i),
+                  authName(WiFi.encryptionType(i)));
+  }
+  if (!found) {
+    logErr("WIFI", String("'") + WIFI_SSID + "' is NOT in the list above. "
+           "Check: exact WiFi name (CAPS matter)? router WiFi enabled? "
+           "channel 12/13 (set router to ch 1-11)?");
+  }
+  WiFi.scanDelete();
+  return found;
+}
+
 void connectWiFi() {
+  scanForTarget();
   logInfo("WIFI", String("connecting to '") + WIFI_SSID + "' ...");
   tft.setTextSize(1);
   tft.setTextColor(C_WARN, C_BG);
