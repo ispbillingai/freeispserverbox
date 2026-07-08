@@ -71,7 +71,8 @@ uint32_t lastGoodPoll = 0;
 uint32_t pollFails    = 0;
 String   lastErr      = "";
 
-int    usersOnline = -1;        // -1 = not read yet
+int    usersOnline = -1;        // hotspot active, -1 = not read yet
+int    pppoeOnline = -1;        // ppp active sessions
 int    cpuLoad     = -1;        // %
 float  freeMemMB   = -1, totMemMB = -1;
 String rosVersion  = "-", boardName = "-", rosUptime = "-";
@@ -184,15 +185,20 @@ void fetchPorts() {
 }
 
 void fetchUsers() {
-  JsonDocument doc;
   // hotspot active sessions = customers online RIGHT NOW
-  if (!restGet("USERS", "/rest/ip/hotspot/active?.proplist=user", doc)) {
-    // no hotspot package / not set up -> just show "-", not an error state
-    return;
+  JsonDocument doc;
+  if (restGet("USERS", "/rest/ip/hotspot/active?.proplist=user", doc)) {
+    int n = doc.as<JsonArray>().size();
+    if (n != usersOnline) logOK("USERS", String(n) + " hotspot users online");
+    usersOnline = n;
   }
-  int n = doc.as<JsonArray>().size();
-  if (n != usersOnline) logOK("USERS", String(n) + " hotspot users online");
-  usersOnline = n;
+  // pppoe/ppp active sessions
+  JsonDocument doc2;
+  if (restGet("USERS", "/rest/ppp/active?.proplist=name", doc2)) {
+    int n = doc2.as<JsonArray>().size();
+    if (n != pppoeOnline) logOK("USERS", String(n) + " pppoe users online");
+    pppoeOnline = n;
+  }
 }
 
 void fetchSystem() {
@@ -315,7 +321,9 @@ void drawStatic() {
   switch (page) {
     case 0:
       titleBar("HOME");
-      label(10, 24, "USERS ONLINE");
+      label(10, 24, "HOTSPOT");
+      label(88, 24, "PPPOE");
+      tft.drawFastVLine(80, 24, 44, C_BAR);
       label(10, 78, "ROUTER");
       label(70, 78, "UPTIME");
       break;
@@ -345,8 +353,9 @@ void drawLive() {
 
   switch (page) {
     case 0: {
-      // the big number customers care about
-      value(10, 36, 5, C_ACCENT, usersOnline < 0 ? "-" : String(usersOnline), 110);
+      // the two numbers customers care about: online via hotspot / via pppoe
+      value(10, 36, 4, C_ACCENT, usersOnline < 0 ? "-" : String(usersOnline), 66);
+      value(88, 36, 4, C_GOOD,   pppoeOnline < 0 ? "-" : String(pppoeOnline), 66);
       value(10, 90, 1, routerOk ? C_GOOD : C_BAD, routerOk ? "UP" : "DOWN", 40);
       value(70, 90, 1, C_VALUE, rosUptime, 86);
       if (!routerOk && lastErr.length())
@@ -370,18 +379,41 @@ void drawLive() {
     case 2: {
       value(20, 20, 1, C_GOOD,   String(ports[0].rxMbps, 1), 40);
       value(80, 20, 1, C_ACCENT, String(ports[0].txMbps, 1), 36);
-      int gx = 4, gy = 35, gw = tft.width() - 8, gh = tft.height() - 40;
+      // axis strip on the left for the scale numbers, plot to its right
+      int ax = 3, aw = 25;                        // axis strip x/width
+      int gx = ax + aw, gy = 35;
+      int gw = tft.width() - gx - 4, gh = tft.height() - 40;
+
+      // scale follows the data: peak of what's on screen, rounded to a
+      // friendly step (1/2/5/10/20/50/100...) so labels read naturally
       float peak = 1.0f;
-      for (int i = 0; i < HIST; i++) {
+      for (int i = HIST - gw; i < HIST; i++) {
+        if (i < 0) continue;
         if (rxHist[i] > peak) peak = rxHist[i];
         if (txHist[i] > peak) peak = txHist[i];
       }
+      const float steps[] = {1, 2, 5, 10, 20, 50, 100, 200, 500, 1000};
+      float top = 1000;
+      for (float s : steps) if (peak <= s) { top = s; break; }
+
+      // axis labels: top / half / 0 (redrawn each frame, scale is live)
+      tft.fillRect(ax, gy - 4, aw - 2, gh + 10, C_BG);
+      tft.setTextSize(1);
+      tft.setTextColor(C_LABEL, C_BG);
+      tft.setCursor(ax, gy - 3);           tft.print((int)top);
+      tft.setCursor(ax, gy + gh / 2 - 3);  tft.print(top >= 2 ? String((int)(top / 2)) : String(top / 2, 1));
+      tft.setCursor(ax, gy + gh - 7);      tft.print("0");
+      tft.drawRect(gx - 1, gy - 1, gw + 2, gh + 2, C_LABEL);
+
       tft.fillRect(gx, gy, gw, gh, C_BG);
+      // faint mid gridline (bars draw over it)
+      for (int x = gx; x < gx + gw; x += 6)
+        tft.drawPixel(x, gy + gh / 2, C_BAR);
       for (int x = 0; x < gw && x < HIST; x++) {
         int idx = HIST - gw + x;
         if (idx < 0) continue;
-        int hr = (int)(rxHist[idx] / peak * (gh - 2));
-        int ht = (int)(txHist[idx] / peak * (gh - 2));
+        int hr = (int)(rxHist[idx] / top * (gh - 2));
+        int ht = (int)(txHist[idx] / top * (gh - 2));
         if (hr > 0) tft.drawFastVLine(gx + x, gy + gh - hr, hr, C_GOOD);
         if (ht > 0) tft.drawFastVLine(gx + x, gy + gh - ht, ht > hr ? ht - hr : 1, C_ACCENT);
       }
