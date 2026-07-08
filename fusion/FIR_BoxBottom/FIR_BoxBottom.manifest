@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Box bottom section: the bay where the RB951 lies flat (standoffs + walls), front open for the port plate. Includes a reference 951 block."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

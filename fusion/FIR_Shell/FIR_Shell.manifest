@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "The real 280x280 FreeISP shell (TUB) with full detail: 951 mounting, port-plate snap seat, module shelf, extension/adapter zone, divider, gland, cable channels + tie-downs, siren clamp, wall keyholes."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

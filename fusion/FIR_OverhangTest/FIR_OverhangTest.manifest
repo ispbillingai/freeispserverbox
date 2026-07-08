@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "EXTREME overhang/cantilever test: tabs sticking out 5-40mm to find your printer's true unsupported reach. Print with NO support, look from the side."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

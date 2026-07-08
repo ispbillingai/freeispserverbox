@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Premium edge-router-style smart-module shell: vented, chamfered, screen+LED+TAP+logo top."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

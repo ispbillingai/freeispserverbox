@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Big-box inverter-style front: module window, TAP, low main switch, vents, self-locking door."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

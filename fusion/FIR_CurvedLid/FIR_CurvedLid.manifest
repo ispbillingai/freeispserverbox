@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "The snap-on CURVED LID (cover): 280 x 65, whole top curves, thin shell. Step 1 = the shell; ports (on the flat bottom band) + side grooves/click come next."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

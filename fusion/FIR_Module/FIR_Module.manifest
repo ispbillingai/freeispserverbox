@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Generates the FIR smart-module: base tray + screw-down lid faceplate."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

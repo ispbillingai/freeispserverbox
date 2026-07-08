@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "50x50mm faceplate test coupon: logo + every detail type, to dial in the printer."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

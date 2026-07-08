@@ -1,0 +1,10 @@
+# real credentials never go to GitHub — keep them in secrets.h next to the .ino
+secrets.h
+
+# Arduino build output
+build/
+*.bin.tmp
+
+# Windows noise
+Thumbs.db
+desktop.ini

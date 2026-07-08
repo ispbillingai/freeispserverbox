@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "One-run assembly view: main box + faceplate + module + bottom box, all positioned."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

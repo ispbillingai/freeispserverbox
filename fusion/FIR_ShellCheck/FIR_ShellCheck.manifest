@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "ALIGNMENT CHECK: tub + 951 cradle + MikroTik (with ports) seated + bottom-lid front face (with ports), all transparent so you can see the ports + groove line up."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

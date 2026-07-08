@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "The main 300x250x120 enclosure - open front for the faceplate, vents, mounts. For assembly viewing."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

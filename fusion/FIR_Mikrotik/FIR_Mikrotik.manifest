@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "A model of the RB951 MikroTik router (114x139x29) with its measured port face (DC jack, reset, PWR/ACT LEDs, 5 RJ45) - used to assemble + verify alignment."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

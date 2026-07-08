@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Internal tray: hides RB951 router + power extension, mounts the smart-module, routes cables."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

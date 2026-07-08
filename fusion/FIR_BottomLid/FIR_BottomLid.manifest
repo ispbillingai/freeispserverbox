@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "The integrated-port bottom lid (from Francis's sketch): slanted top, 3 port sections (SWITCH | POWER | MIKROTIK), device cradles so the switch + 951 drop in and line up."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

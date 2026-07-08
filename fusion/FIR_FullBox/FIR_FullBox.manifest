@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Complete FreeISP box assembly - every part placed + labelled (951, PoE, extension, PSU, terminals, port plate) with walls + lifted lid, so you see what goes where."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

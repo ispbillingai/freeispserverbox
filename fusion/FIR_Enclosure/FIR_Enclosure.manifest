@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "The FreeISP printed 'Authority' enclosure ~230x200x120 - rounded shell, open front for faceplate, 2-tier tray (951 + module), back cable glands + keyhole wall mounts."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

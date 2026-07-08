@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Open carrier plate: components screw on, faceplate in front, tray behind - no sealed box."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

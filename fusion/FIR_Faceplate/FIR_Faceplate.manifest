@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Builds the FIR front faceplate (logo, screen, LEDs, RFID TAP, door, label)."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

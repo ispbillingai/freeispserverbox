@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Real-size OPEN module chassis: bolt-points for all boards, no cover - for bench build/test."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

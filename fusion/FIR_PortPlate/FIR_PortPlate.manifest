@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Flat RB951 port plate - exact measured openings (jack/reset/PWR/ACT/5x LAN), prints flat for crisp holes, mounts into the box."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

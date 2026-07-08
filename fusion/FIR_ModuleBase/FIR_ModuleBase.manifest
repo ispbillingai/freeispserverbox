@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Smart-module base: ESP32 + buck + 18650 + TP4056 + MPU + buzzer/reed alarm + cable routing."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

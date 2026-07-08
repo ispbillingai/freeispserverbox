@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Quick outer-casing shell at the real enclosure footprint - thin walls, open top+bottom, prints in ~10 min to check the real size."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

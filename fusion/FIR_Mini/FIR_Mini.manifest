@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Scaled-down miniature of the 280x280 box layout - floor, walls, and the capture posts/dividers/clamps for each component, so you can print it fast and see how things are held."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

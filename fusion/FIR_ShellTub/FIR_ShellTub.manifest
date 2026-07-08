@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "The main SHELL TUB: 280x280x80, 5 walls + OPEN BOTTOM (the removable bottom lid fills it). Rounded outer corners. Lid seat + bolt bosses + device cradles come next."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

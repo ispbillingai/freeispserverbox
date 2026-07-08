@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "5cm bottom wiring compartment: main switch front, glands bottom, terminals, bolts under main box."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
