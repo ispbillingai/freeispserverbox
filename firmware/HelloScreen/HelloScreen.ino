@@ -217,7 +217,8 @@ void connectWiFi() {
 
   if (WiFi.status() == WL_CONNECTED) {
     logOK("WIFI", "connected, IP = " + WiFi.localIP().toString() +
-                  ", RSSI = " + String(WiFi.RSSI()) + " dBm");
+                  ", RSSI = " + String(WiFi.RSSI()) + " dBm" +
+                  ", MAC = " + WiFi.macAddress());
   } else {
     logErr("WIFI", String("could NOT connect to '") + WIFI_SSID +
                    "'. Check: name/password in secrets.h? 2.4GHz? in range?");
@@ -232,9 +233,14 @@ void pollRouter() {
     return;
   }
 
+  // "auto" = talk to the router that gave us our IP (the WiFi gateway).
+  // This can never point at the wrong subnet.
+  String host = (strcmp(MT_HOST, "auto") == 0) ? WiFi.gatewayIP().toString()
+                                               : String(MT_HOST);
+
   HTTPClient http;
   // simple documented GET; proplist trims the reply for ArduinoJson
-  String url = String("http://") + MT_HOST +
+  String url = String("http://") + host +
                "/rest/interface/ethernet?.proplist=name,rx-bytes,tx-bytes,running";
   http.setConnectTimeout(3000);
   http.setTimeout(8000);            // router gets 8s to answer
@@ -250,7 +256,7 @@ void pollRouter() {
     lastErr = httpExplain(code);
     // show whatever the router DID send — a hotspot login page shows up here
     String peek = (code > 0) ? http.getString().substring(0, 120) : "";
-    logErr("PORTS", "poll failed after " + String(took) + "ms: " + lastErr +
+    logErr("PORTS", "poll of " + host + " failed after " + String(took) + "ms: " + lastErr +
                     (peek.length() ? ("  reply starts: " + peek) : ""));
     http.end();
     return;
@@ -298,7 +304,7 @@ void pollRouter() {
   rxHist[HIST - 1] = ports[0].rxMbps;
   txHist[HIST - 1] = ports[0].txMbps;
 
-  if (!routerOk) logOK("PORTS", "router link UP, " + String(i) + " ports read");
+  if (!routerOk) logOK("PORTS", "router " + host + " link UP, " + String(i) + " ports read");
   routerOk = true;
   lastGoodPoll = now;
   lastErr = "";
