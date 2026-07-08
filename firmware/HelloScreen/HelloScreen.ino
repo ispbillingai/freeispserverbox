@@ -1,28 +1,52 @@
 /*
-  DemoDashboard.ino — FreeISP box screen PREVIEW with FAKE data.
+  LiveDashboard.ino — FIRST REAL DATA on the FreeISP box screen.
 
-  Shows what the real box UI will look like: 4 pages that auto-rotate
-  every 5 seconds, with live-updating (mock) numbers:
-    Page 1  HOME    — users online, WiFi status, heartbeat dot
-    Page 2  PORTS   — ether1..ether5 up/down + live Mbps
-    Page 3  SYSTEM  — clock, uptime, battery bar
-    Page 4  CLIMATE — temperature + humidity inside the box
+  No new wiring. Screen stays exactly as it is. This sketch:
+    1. Connects to your WiFi
+    2. Reads the RB951 MikroTik over its REST API (RouterOS v7, local LAN)
+    3. Shows REAL port up/down + REAL live traffic speed on the TFT
 
-  Wiring (same as FriendTest — screen label -> ESP32):
-    GND->GND, VCC->5V, BLK->3V3
-    SCL->18, SDA->23, CS->5, DC->2, RST->4
+  Pages (auto-rotate 5s, PORTS + TRAFFIC repaint live):
+    Page 1  STATUS  — WiFi, IP address, router link OK/FAIL
+    Page 2  PORTS   — ether1..5 real up/down + Mbps from the router
+    Page 3  TRAFFIC — live scrolling DL/UL graph of the WAN port (ether1)
+
+  ------------------------------------------------------------------
+  BEFORE FIRST UPLOAD — three one-time steps:
+  ------------------------------------------------------------------
+  A) Copy secrets.example.h -> secrets.h (same folder), fill in your
+     WiFi name/password and the router user below. secrets.h never
+     goes to GitHub.
+
+  B) Create a READ-ONLY user on the MikroTik (WinBox: New Terminal,
+     or the web terminal at http://192.168.88.1):
+
+       /user group add name=espread policy=read,rest-api,api
+       /user add name=espbox group=espread password=PICK_A_PASSWORD
+
+     Also make sure the www service is on (it is by default):
+       /ip service print     -> "www" should not be disabled
+
+     Use that name/password in secrets.h. NEVER put admin in here.
+
+  C) Arduino IDE: Sketch > Include Library > Manage Libraries,
+     install "ArduinoJson" (by Benoit Blanchon).
 
   Board = "ESP32 Dev Module", COM6, hold BOOT while uploading.
-
-  >>> IF YOUR WORKING SKETCH USED A DIFFERENT TAB OR ROTATION,
-  >>> CHANGE THESE TWO LINES TO MATCH IT: <<<
+  Serial Monitor @ 115200 shows every step and every failure reason.
+  ------------------------------------------------------------------
 */
-#define SCREEN_TAB  INITR_GREENTAB   // or INITR_BLACKTAB
-#define SCREEN_ROT  1                // 1 or 3 = landscape
+#define SCREEN_TAB  INITR_GREENTAB   // match your working DemoDashboard
+#define SCREEN_ROT  1
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 #include <SPI.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <esp_wifi.h>
+#include "secrets.h"
 
 #define TFT_CS   5
 #define TFT_DC   2
@@ -32,40 +56,64 @@ Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
 // ---- colors (RGB565) ----
 #define C_BG      ST77XX_BLACK
-#define C_BAR     0x0339            // deep blue title bar
+#define C_BAR     0x0339
 #define C_TITLE   ST77XX_WHITE
-#define C_LABEL   0x8C71            // grey
+#define C_LABEL   0x8C71
 #define C_VALUE   ST77XX_WHITE
-#define C_GOOD    0x07E8            // green
-#define C_BAD     0xF965            // red
-#define C_ACCENT  0x07FF            // cyan
-#define C_WARN    0xFFE0            // yellow
+#define C_GOOD    0x07E8
+#define C_BAD     0xF965
+#define C_ACCENT  0x07FF
+#define C_WARN    0xFFE0
 
-const uint32_t PAGE_MS   = 5000;    // page rotate interval
-const uint32_t UPDATE_MS = 250;     // dynamic value refresh
+const uint32_t PAGE_MS  = 5000;    // page rotate
+const uint32_t POLL_MS  = 2000;    // MikroTik REST poll
+const uint32_t LIVE_MS  = 500;     // screen live repaint
 
+// ---- state ----
 uint8_t  page = 0;
-uint32_t lastPage = 0, lastUpdate = 0;
+uint32_t lastPage = 0, lastPoll = 0, lastLive = 0;
 bool     heartbeat = false;
 
-// ---- fake data (random-walk so it looks alive) ----
-int   usersOnline = 12;
-float dlMbps = 18.4, ulMbps = 3.2;
-int   battery = 78;
-float tempC = 26.5, humid = 58.0;
-bool  portUp[5] = { true, true, false, true, false };
+// ---- router data ----
+const int NPORTS = 5;
+struct Port {
+  String   name;
+  bool     running = false;
+  uint64_t rxBytes = 0, txBytes = 0;
+  float    rxMbps  = 0, txMbps  = 0;
+  bool     seen    = false;
+};
+Port     ports[NPORTS];
+bool     routerOk     = false;      // last REST call succeeded
+uint32_t lastGoodPoll = 0;          // millis of last success
+uint32_t pollFails    = 0;
+String   lastErr      = "";
 
-void fakeDataStep() {
-  usersOnline = constrain(usersOnline + random(-1, 2), 5, 40);
-  dlMbps = constrain(dlMbps + random(-15, 16) / 10.0, 0.3, 95.0);
-  ulMbps = constrain(ulMbps + random(-5, 6) / 10.0, 0.1, 20.0);
-  if (random(0, 40) == 0) battery = constrain(battery + random(-2, 2), 20, 100);
-  tempC = constrain(tempC + random(-2, 3) / 10.0, 18.0, 38.0);
-  humid = constrain(humid + random(-3, 4) / 10.0, 30.0, 90.0);
-  if (random(0, 60) == 0) portUp[random(0, 5)] ^= 1;   // rare port flip
+// traffic history for the graph (ether1 = WAN), newest at the end
+const int HIST = 100;
+float rxHist[HIST] = {0}, txHist[HIST] = {0};
+
+// ---- logging ----
+void logLine(const char* lvl, const char* tag, const String& msg) {
+  Serial.printf("[%6lus] %s [%s] %s\n", millis() / 1000, lvl, tag, msg.c_str());
+}
+#define logInfo(tag, msg) logLine("..", tag, msg)
+#define logOK(tag, msg)   logLine("OK", tag, msg)
+#define logErr(tag, msg)  logLine("!!", tag, msg)
+
+String httpExplain(int code) {
+  switch (code) {
+    case 200: return "OK";
+    case 401: return "401 wrong user/password (check secrets.h + router user)";
+    case 403: return "403 user not allowed (group needs read,rest-api,api policy)";
+    case 404: return "404 wrong URL (RouterOS v7? REST path right?)";
+    case -1:  return "connection failed (router IP right? same network? www service on?)";
+    case -11: return "read timeout (router busy or link flaky)";
+    default:  return "HTTP " + String(code);
+  }
 }
 
-// ---- small helpers ----
+// ---- screen helpers (same style as DemoDashboard) ----
 void titleBar(const char* t) {
   tft.fillScreen(C_BG);
   tft.fillRect(0, 0, tft.width(), 16, C_BAR);
@@ -85,7 +133,6 @@ void label(int x, int y, const char* s) {
   tft.print(s);
 }
 
-// print a value in a cleared box so old digits never linger
 void value(int x, int y, uint8_t size, uint16_t color, const String& s, int boxW) {
   tft.fillRect(x, y, boxW, size * 8, C_BG);
   tft.setTextSize(size);
@@ -94,112 +141,221 @@ void value(int x, int y, uint8_t size, uint16_t color, const String& s, int boxW
   tft.print(s);
 }
 
-String clockStr() {           // fake clock: starts 08:00:00 at power-on
-  uint32_t s = 8UL * 3600 + millis() / 1000;
-  char b[9];
-  snprintf(b, sizeof(b), "%02lu:%02lu:%02lu", (s / 3600) % 24, (s / 60) % 60, s % 60);
-  return String(b);
+// ---- WiFi ----
+void connectWiFi() {
+  logInfo("WIFI", String("connecting to '") + WIFI_SSID + "' ...");
+  tft.setTextSize(1);
+  tft.setTextColor(C_WARN, C_BG);
+  tft.setCursor(10, 60);
+  tft.print("WiFi: connecting...");
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  esp_wifi_set_ps(WIFI_PS_NONE);   // CRITICAL: stops ESP32 dozing off MikroTik APs
+
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    logOK("WIFI", "connected, IP = " + WiFi.localIP().toString() +
+                  ", RSSI = " + String(WiFi.RSSI()) + " dBm");
+  } else {
+    logErr("WIFI", String("could NOT connect to '") + WIFI_SSID +
+                   "'. Check: name/password in secrets.h? 2.4GHz? in range?");
+  }
 }
 
-String upStr() {
-  uint32_t s = millis() / 1000;
-  char b[12];
-  snprintf(b, sizeof(b), "%lud %02lu:%02lu", s / 86400, (s / 3600) % 24, (s / 60) % 60);
-  return String(b);
+// ---- MikroTik REST ----
+void pollRouter() {
+  if (WiFi.status() != WL_CONNECTED) {
+    routerOk = false;
+    lastErr = "no WiFi";
+    return;
+  }
+
+  HTTPClient http;
+  String url = String("http://") + MT_HOST + "/rest/interface/ethernet/print";
+  http.begin(url);
+  http.setAuthorization(MT_USER, MT_PASS);
+  http.addHeader("Content-Type", "application/json");
+  // .proplist keeps the reply small enough for ArduinoJson
+  int code = http.POST("{\".proplist\":[\"name\",\"rx-bytes\",\"tx-bytes\",\"running\"]}");
+
+  if (code != 200) {
+    routerOk = false;
+    pollFails++;
+    lastErr = httpExplain(code);
+    logErr("PORTS", "poll failed: " + lastErr);
+    http.end();
+    return;
+  }
+
+  String body = http.getString();
+  http.end();
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    routerOk = false;
+    lastErr = String("JSON parse: ") + err.c_str();
+    logErr("PORTS", lastErr);
+    return;
+  }
+
+  uint32_t now = millis();
+  float dt = (lastGoodPoll > 0) ? (now - lastGoodPoll) / 1000.0f : 0;
+
+  JsonArray arr = doc.as<JsonArray>();
+  int i = 0;
+  for (JsonObject o : arr) {
+    if (i >= NPORTS) break;
+    Port& p = ports[i];
+    p.name    = o["name"].as<String>();
+    p.running = (strcmp(o["running"] | "false", "true") == 0);
+    uint64_t rx = strtoull(o["rx-bytes"] | "0", nullptr, 10);
+    uint64_t tx = strtoull(o["tx-bytes"] | "0", nullptr, 10);
+    if (p.seen && dt > 0.2f) {
+      p.rxMbps = (rx - p.rxBytes) * 8.0f / dt / 1e6f;   // bytes delta -> Mbps
+      p.txMbps = (tx - p.txBytes) * 8.0f / dt / 1e6f;
+      if (p.rxMbps < 0) p.rxMbps = 0;                   // counter reset guard
+      if (p.txMbps < 0) p.txMbps = 0;
+    }
+    p.rxBytes = rx;
+    p.txBytes = tx;
+    p.seen = true;
+    i++;
+  }
+
+  // shift graph history, append ether1 (index 0 = WAN)
+  memmove(rxHist, rxHist + 1, sizeof(float) * (HIST - 1));
+  memmove(txHist, txHist + 1, sizeof(float) * (HIST - 1));
+  rxHist[HIST - 1] = ports[0].rxMbps;
+  txHist[HIST - 1] = ports[0].txMbps;
+
+  if (!routerOk) logOK("PORTS", "router link UP, " + String(i) + " ports read");
+  routerOk = true;
+  lastGoodPoll = now;
+  lastErr = "";
 }
 
-// ---- pages: drawStatic once, drawLive every 250ms ----
+// ---- pages ----
 void drawStatic() {
   switch (page) {
     case 0:
-      titleBar("HOME");
-      label(10, 26, "USERS ONLINE");
-      label(10, 70, "WIFI");
-      label(80, 70, "SERVER");
-      tft.setTextSize(1);
-      tft.setTextColor(C_GOOD, C_BG);
-      tft.setCursor(10, 82);  tft.print("CONNECTED");
-      tft.setCursor(80, 82);  tft.print("OK");
-      label(10, 110, "freeisp.net  *paka box*");
+      titleBar("STATUS");
+      label(10, 26, "WIFI");
+      label(10, 56, "IP ADDRESS");
+      label(10, 86, "ROUTER LINK");
       break;
     case 1:
       titleBar("PORTS");
-      for (int i = 0; i < 5; i++) {
-        label(14, 24 + i * 20, ("ether" + String(i + 1)).c_str());
-      }
+      // port names are drawn live (they come from the router)
       break;
     case 2:
-      titleBar("SYSTEM");
-      label(10, 26, "TIME");
-      label(10, 62, "UPTIME");
-      label(10, 92, "BATTERY");
-      tft.drawRect(10, 104, 104, 14, C_LABEL);   // battery outline
-      tft.fillRect(114, 107, 4, 8, C_LABEL);     // battery nub
-      break;
-    case 3:
-      titleBar("CLIMATE");
-      label(10, 26, "BOX TEMPERATURE");
-      label(10, 74, "HUMIDITY");
+      titleBar("TRAFFIC ether1");
+      label(4, 20, "DL");
+      label(60, 20, "UL");
+      tft.drawRect(3, 34, tft.width() - 6, tft.height() - 38, C_LABEL);
       break;
   }
 }
 
 void drawLive() {
-  // heartbeat dot, top-right, blinks on every page
   heartbeat = !heartbeat;
   tft.fillCircle(tft.width() - 8, 8, 3, heartbeat ? C_GOOD : C_BAR);
 
   switch (page) {
-    case 0:
-      value(10, 38, 3, C_ACCENT, String(usersOnline), 60);
+    case 0: {
+      bool wifi = (WiFi.status() == WL_CONNECTED);
+      value(10, 38, 1, wifi ? C_GOOD : C_BAD,
+            wifi ? "CONNECTED  " + String(WiFi.RSSI()) + " dBm" : "DOWN", 140);
+      value(10, 68, 1, C_VALUE, wifi ? WiFi.localIP().toString() : "-", 110);
+      value(10, 98, 1, routerOk ? C_GOOD : C_BAD, routerOk ? "OK" : "FAIL", 30);
+      if (!routerOk && lastErr.length())
+        value(10, 110, 1, C_WARN, lastErr.substring(0, 26), 150);
+      else
+        value(10, 110, 1, C_LABEL, "fails: " + String(pollFails), 150);
       break;
+    }
     case 1:
-      for (int i = 0; i < 5; i++) {
+      for (int i = 0; i < NPORTS; i++) {
         int y = 24 + i * 20;
-        tft.fillCircle(7, y + 3, 3, portUp[i] ? C_GOOD : C_BAD);
-        if (portUp[i]) {
-          float m = (i == 0) ? dlMbps : ulMbps / (i + 1) + i;   // vary per port
-          value(66, y, 1, C_VALUE, String(m, 1) + " Mbps", 70);
-        } else {
-          value(66, y, 1, C_BAD, "down", 70);
-        }
+        Port& p = ports[i];
+        tft.fillCircle(7, y + 3, 3, !p.seen ? C_LABEL : (p.running ? C_GOOD : C_BAD));
+        value(14, y, 1, C_VALUE, p.seen ? p.name : "...", 48);
+        if (!p.seen)          value(66, y, 1, C_LABEL, "-", 90);
+        else if (!p.running)  value(66, y, 1, C_BAD, "down", 90);
+        else value(66, y, 1, C_VALUE,
+                   String(p.rxMbps, 1) + "/" + String(p.txMbps, 1) + " M", 90);
       }
       break;
     case 2: {
-      value(10, 38, 2, C_VALUE, clockStr(), 110);
-      value(10, 74, 1, C_VALUE, upStr(), 90);
-      int w = battery;                                   // 0-100 -> 0-100px
-      uint16_t bc = battery > 50 ? C_GOOD : (battery > 25 ? C_WARN : C_BAD);
-      tft.fillRect(12, 106, w, 10, bc);
-      tft.fillRect(12 + w, 106, 100 - w, 10, C_BG);
-      value(78, 92, 1, bc, String(battery) + "%", 30);
+      value(20, 20, 1, C_GOOD,   String(ports[0].rxMbps, 1), 36);
+      value(76, 20, 1, C_ACCENT, String(ports[0].txMbps, 1), 36);
+      // graph area
+      int gx = 4, gy = 35, gw = tft.width() - 8, gh = tft.height() - 40;
+      float peak = 1.0f;
+      for (int i = 0; i < HIST; i++) {
+        if (rxHist[i] > peak) peak = rxHist[i];
+        if (txHist[i] > peak) peak = txHist[i];
+      }
+      tft.fillRect(gx, gy, gw, gh, C_BG);
+      for (int x = 0; x < gw && x < HIST; x++) {
+        int idx = HIST - gw + x;
+        if (idx < 0) continue;
+        int hr = (int)(rxHist[idx] / peak * (gh - 2));
+        int ht = (int)(txHist[idx] / peak * (gh - 2));
+        if (hr > 0) tft.drawFastVLine(gx + x, gy + gh - hr, hr, C_GOOD);
+        if (ht > 0) tft.drawFastVLine(gx + x, gy + gh - ht, ht > hr ? ht - hr : 1, C_ACCENT);
+      }
       break;
     }
-    case 3:
-      value(10, 38, 3, tempC > 32 ? C_WARN : C_ACCENT, String(tempC, 1) + " C", 120);
-      value(10, 86, 3, C_VALUE, String(humid, 0) + " %", 100);
-      break;
   }
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial.println(">>> DemoDashboard: fake FreeISP stats, 4 rotating pages");
+  Serial.println();
+  Serial.println("==========================================");
+  Serial.println(" LiveDashboard v1 - REAL MikroTik data");
+  Serial.println(" WiFi + RouterOS v7 REST, no new wiring");
+  Serial.println("==========================================");
+
   tft.initR(SCREEN_TAB);
   tft.setRotation(SCREEN_ROT);
+  titleBar("BOOT");
+
+  connectWiFi();
   drawStatic();
 }
 
 void loop() {
   uint32_t now = millis();
+
+  // WiFi self-heal: if it drops, retry every 15s
+  static uint32_t lastWifiTry = 0;
+  if (WiFi.status() != WL_CONNECTED && now - lastWifiTry > 15000) {
+    lastWifiTry = now;
+    logInfo("WIFI", "link down, reconnecting...");
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+  }
+
+  if (now - lastPoll >= POLL_MS) {
+    lastPoll = now;
+    pollRouter();
+  }
   if (now - lastPage >= PAGE_MS) {
     lastPage = now;
-    page = (page + 1) % 4;
+    page = (page + 1) % 3;
     drawStatic();
   }
-  if (now - lastUpdate >= UPDATE_MS) {
-    lastUpdate = now;
-    fakeDataStep();
+  if (now - lastLive >= LIVE_MS) {
+    lastLive = now;
     drawLive();
   }
 }
