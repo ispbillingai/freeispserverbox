@@ -197,7 +197,15 @@ void connectWiFi() {
   tft.print("WiFi: connecting...");
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  if (strlen(WIFI_PASS) == 0) {
+    logInfo("WIFI", "password empty -> joining as OPEN network");
+    WiFi.begin(WIFI_SSID);
+  } else {
+    // default core refuses WPA1-only APs; allow them (router should still
+    // be upgraded to WPA2 PSK + AES in its security profile)
+    WiFi.setMinSecurity(WIFI_AUTH_WPA_PSK);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+  }
   esp_wifi_set_ps(WIFI_PS_NONE);   // CRITICAL: stops ESP32 dozing off MikroTik APs
 
   uint32_t t0 = millis();
@@ -389,7 +397,8 @@ void loop() {
     lastWifiTry = now;
     logInfo("WIFI", "link down, reconnecting...");
     WiFi.disconnect();
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    if (strlen(WIFI_PASS) == 0) WiFi.begin(WIFI_SSID);
+    else                        WiFi.begin(WIFI_SSID, WIFI_PASS);
   }
 
   if (now - lastPoll >= POLL_MS) {

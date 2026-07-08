@@ -233,18 +233,25 @@ void pollRouter() {
   }
 
   HTTPClient http;
-  String url = String("http://") + MT_HOST + "/rest/interface/ethernet/print";
+  // simple documented GET; proplist trims the reply for ArduinoJson
+  String url = String("http://") + MT_HOST +
+               "/rest/interface/ethernet?.proplist=name,rx-bytes,tx-bytes,running";
+  http.setConnectTimeout(3000);
+  http.setTimeout(8000);            // router gets 8s to answer
   http.begin(url);
   http.setAuthorization(MT_USER, MT_PASS);
-  http.addHeader("Content-Type", "application/json");
-  // .proplist keeps the reply small enough for ArduinoJson
-  int code = http.POST("{\".proplist\":[\"name\",\"rx-bytes\",\"tx-bytes\",\"running\"]}");
+  uint32_t t0 = millis();
+  int code = http.GET();
+  uint32_t took = millis() - t0;
 
   if (code != 200) {
     routerOk = false;
     pollFails++;
     lastErr = httpExplain(code);
-    logErr("PORTS", "poll failed: " + lastErr);
+    // show whatever the router DID send — a hotspot login page shows up here
+    String peek = (code > 0) ? http.getString().substring(0, 120) : "";
+    logErr("PORTS", "poll failed after " + String(took) + "ms: " + lastErr +
+                    (peek.length() ? ("  reply starts: " + peek) : ""));
     http.end();
     return;
   }
