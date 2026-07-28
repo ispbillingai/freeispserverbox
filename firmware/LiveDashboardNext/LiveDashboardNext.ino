@@ -36,6 +36,8 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <esp_wifi.h>
+#include <Wire.h>
+#include <math.h>
 #include "secrets.h"
 
 #define TFT_CS   5
@@ -109,6 +111,35 @@ const uint32_t SIREN_MAX_MS = 180000;  // siren gives up after 3 min (battery +
                                        // server alert STAY on until it closes.
                                        // 0 = never stop sounding.
 
+// ================================================================
+//  MOTION CONFIG — the MPU-6050 "torn off the wall" sensor.
+//  Same rule as the alarm: leave 0 until it is actually wired, or
+//  the box will read nonsense from an absent sensor.
+// ================================================================
+#define MOTION_WIRED 0
+
+#define PIN_SDA   21          // MPU-6050 SDA -> GPIO 21
+#define PIN_SCL   22          // MPU-6050 SCL -> GPIO 22
+#define MPU_ADDR  0x68        // 0x68 normally; 0x69 if you tie AD0 to 3V3
+
+// A thief ripping the box off the wall gets NO grace period — the plan
+// says instant siren, and that is what these do.
+//
+// JOLT = a sudden knock. At rest the sensor reads 1.0g (just gravity);
+// anything this far off 1.0g is a real impact. Lower = twitchier.
+const float MOTION_JOLT_G = 0.35f;
+
+// TILT = the box is no longer hanging the way it was. Measured against a
+// baseline it learns at boot. Must last MOTION_TILT_MS so that a passing
+// knock or someone leaning on it does not set it off — only a box that
+// is actually now at a new angle counts.
+const uint8_t  MOTION_TILT_DEG = 25;
+const uint32_t MOTION_TILT_MS  = 1500;
+
+const uint32_t MOTION_MS       = 50;    // how often to read the sensor
+const uint32_t MOTION_SETTLE_MS = 2000; // ignore everything this long after
+                                        // boot/learn, while it stops swinging
+
 // ---- what the alarm reports ----
 #define ALARM_BEAT_ON_CHANGE 1    // 1 = push an instant heartbeat to the server
                                   //     the moment the door opens/closes
@@ -169,6 +200,17 @@ bool       beepOn        = false;
 uint32_t   openCount     = 0;
 uint16_t   buzzHz        = TONE_SIREN_A_HZ;  // pitch the next buzz() will use
 bool       sirenAlt      = false;            // flips the two siren notes
+String     alarmReason   = "";               // "DOOR" / "MOTION" - why it rang
+
+// ---- motion state (MPU-6050) ----
+bool     mpuOk       = false;   // did the sensor answer at boot
+bool     motionAlarm = false;   // motion is what raised the alarm
+float    baseX = 0, baseY = 0, baseZ = 1;   // the "hanging quietly" direction
+float    lastG = 1.0f;          // last magnitude, for the screen
+float    lastTiltDeg = 0;
+uint32_t motionReadyAt = 0;     // ignore readings until this time
+uint32_t tiltSince     = 0;     // when the tilt first went over the limit
+uint32_t lastMotionAt  = 0;     // last time it saw real movement
 
 const char* alarmStateName() {
   switch (alarmState) {
@@ -377,17 +419,38 @@ void drawAlarmBanner() {
   tft.fillScreen(C_BAD);
   tft.setTextSize(3);
   tft.setTextColor(ST77XX_WHITE, C_BAD);
-  tft.setCursor(18, 40);
+  tft.setCursor(18, 34);
   tft.print("ALARM");
   tft.setTextSize(1);
-  tft.setCursor(28, 80);
-  tft.print("DOOR IS OPEN");
+  tft.setCursor(28, 74);
+  tft.print(alarmReason == "MOTION" ? "BOX IS BEING MOVED" : "DOOR IS OPEN");
 }
 
 void alarmBeat() {
 #if ALARM_BEAT_ON_CHANGE
   sendHeartbeat();
 #endif
+}
+
+// is the alarm currently raised? (used to decide who owns the screen)
+bool alarmRaised() {
+  return alarmArmed && alarmState != AS_SECURE;
+}
+
+// ONE place that starts the siren, whatever set it off. Motion skips the
+// grace period on purpose — the plan says a box being torn off the wall
+// does not get 15 polite seconds.
+void startSiren(const char* reason) {
+  alarmReason = reason;
+  alarmState  = AS_SIREN;
+  openedAt    = millis();
+  beepAt      = millis();
+  nextSirenNote();
+  buzz(true);
+  digitalWrite(PIN_LED_R, HIGH);
+  digitalWrite(PIN_LED_G, LOW);
+  if (!screenOn) setScreen(true);      // alarm overrides screen-off
+  drawAlarmBanner();
 }
 
 void onDoorChange(bool open) {
@@ -406,6 +469,7 @@ void onDoorChange(bool open) {
       buzz(false);
       logInfo("ALARM", "door OPEN but alarm is DISARMED - staying quiet");
     } else if (GRACE_MS > 0) {          // chirp first, siren after the grace
+      alarmReason = "DOOR";
       alarmState = AS_GRACE;
       buzzHz = TONE_CHIRP_HZ;
       buzz(true);
@@ -414,21 +478,136 @@ void onDoorChange(bool open) {
       logErr("ALARM", "door OPEN (count=" + String(openCount) + ") - " +
                       String(GRACE_MS / 1000) + "s grace, then siren");
     } else {                            // no grace configured = straight to it
-      alarmState = AS_SIREN;
-      nextSirenNote();
-      buzz(true);
-      if (!screenOn) setScreen(true);
-      drawAlarmBanner();
+      startSiren("DOOR");
       logErr("ALARM", "door OPEN (count=" + String(openCount) + ") - siren ON");
     }
   } else {
-    alarmState = AS_SECURE;
+    alarmState  = AS_SECURE;
+    alarmReason = "";
+    motionAlarm = false;
     buzz(false);
     drawStatic();
     logOK("ALARM", "door CLOSED - siren OFF, box secure");
   }
   // 2) THEN tell the server (best effort, carried by an instant heartbeat)
   alarmBeat();
+}
+
+// ---- MOTION: the MPU-6050, talked to directly over I2C ----
+// Deliberately NO library: all we need is "which way is down and how hard
+// is it being shaken", which is 6 bytes out of one register. Nothing for
+// him to install, nothing to go out of date.
+
+bool mpuWrite(uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(reg);
+  Wire.write(val);
+  return Wire.endTransmission() == 0;
+}
+
+// reads the 3 acceleration axes, in g (1.0 = gravity)
+bool mpuReadAccel(float& x, float& y, float& z) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B);                       // ACCEL_XOUT_H
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)6) != 6) return false;
+  int16_t rx = (Wire.read() << 8) | Wire.read();
+  int16_t ry = (Wire.read() << 8) | Wire.read();
+  int16_t rz = (Wire.read() << 8) | Wire.read();
+  x = rx / 16384.0f;                      // +-2g range = 16384 counts per g
+  y = ry / 16384.0f;
+  z = rz / 16384.0f;
+  return true;
+}
+
+// remember which way the box is hanging RIGHT NOW as "normal"
+void motionLearn(const char* why) {
+  float x, y, z;
+  if (!mpuReadAccel(x, y, z)) { logErr("MOTION", "learn failed - no sensor"); return; }
+  float m = sqrtf(x * x + y * y + z * z);
+  if (m < 0.1f) { logErr("MOTION", "learn failed - sensor reads zero"); return; }
+  baseX = x / m; baseY = y / m; baseZ = z / m;   // direction only
+  tiltSince = 0;
+  motionReadyAt = millis() + MOTION_SETTLE_MS;
+  logOK("MOTION", String("baseline learned (") + why + ") - this is now 'not moved'");
+}
+
+void motionBegin() {
+  Wire.begin(PIN_SDA, PIN_SCL);
+  Wire.setClock(400000);
+
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x75);                       // WHO_AM_I
+  if (Wire.endTransmission(false) != 0 ||
+      Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)1) != 1) {
+    logErr("MOTION", "no MPU-6050 at 0x" + String(MPU_ADDR, HEX) +
+                     " - check SDA 21 / SCL 22 / VCC / GND (AD0 high = 0x69)");
+    mpuOk = false;
+    return;
+  }
+  uint8_t who = Wire.read();
+  mpuWrite(0x6B, 0x00);                   // wake it up (clears sleep bit)
+  delay(100);
+  mpuWrite(0x1C, 0x00);                   // accel range +-2g, most sensitive
+
+  float x, y, z;
+  mpuOk = mpuReadAccel(x, y, z);
+  if (!mpuOk) { logErr("MOTION", "sensor found but will not read"); return; }
+
+  logOK("MOTION", "MPU-6050 alive (WHO_AM_I 0x" + String(who, HEX) + "), reading " +
+                  String(x, 2) + "/" + String(y, 2) + "/" + String(z, 2) + " g");
+  motionLearn("boot");
+}
+
+// the actual watchdog: a hard knock, or a sustained change of angle
+void pollMotion() {
+  if (!mpuOk) return;
+  static uint32_t lastRead = 0;
+  uint32_t now = millis();
+  if (now - lastRead < MOTION_MS) return;
+  lastRead = now;
+
+  float x, y, z;
+  if (!mpuReadAccel(x, y, z)) return;
+
+  float m = sqrtf(x * x + y * y + z * z);
+  lastG = m;
+  if (fabsf(m - 1.0f) > 0.08f) lastMotionAt = now;   // anything but resting
+
+  if (now < motionReadyAt) return;        // still settling after boot/learn
+
+  // angle between where it hangs now and the learned baseline
+  float dot = (m > 0.1f) ? (x * baseX + y * baseY + z * baseZ) / m : 1.0f;
+  if (dot >  1.0f) dot =  1.0f;
+  if (dot < -1.0f) dot = -1.0f;
+  lastTiltDeg = acosf(dot) * 57.2957795f;
+
+  if (!alarmArmed) return;                // disarmed = don't cry about it
+  if (alarmState == AS_SIREN) return;     // already screaming
+
+  // 1) JOLT - a real impact. Instant, no grace.
+  if (fabsf(m - 1.0f) > MOTION_JOLT_G) {
+    motionAlarm = true;
+    startSiren("MOTION");
+    logErr("MOTION", "IMPACT " + String(m, 2) + "g - siren NOW (no grace)");
+    alarmBeat();
+    return;
+  }
+
+  // 2) TILT - it is hanging at a new angle, and stayed there
+  if (lastTiltDeg > MOTION_TILT_DEG) {
+    if (tiltSince == 0) tiltSince = now;
+    else if (now - tiltSince > MOTION_TILT_MS) {
+      motionAlarm = true;
+      startSiren("MOTION");
+      logErr("MOTION", "MOVED " + String((int)lastTiltDeg) +
+                       " deg off baseline - siren NOW (no grace)");
+      alarmBeat();
+      tiltSince = 0;
+    }
+  } else {
+    tiltSince = 0;                        // back where it belongs
+  }
 }
 
 void pollDoor() {
@@ -442,9 +621,11 @@ void pollDoor() {
   }
 }
 
-// drives the sound: chirp during grace, siren after it, then give up
+// drives the sound: chirp during grace, siren after it, then give up.
+// NOTE: keyed off the alarm STATE, not the door — a motion alarm has to
+// sound with the door still shut.
 void pollBuzzer() {
-  if (!doorOpen) return;
+  if (alarmState == AS_SECURE) return;
   uint32_t now = millis();
 
   switch (alarmState) {
@@ -514,8 +695,23 @@ void silenceSiren() {
   }
 }
 
+// a MOTION alarm has no "door closed" to reset it, so it needs an explicit
+// all-clear. Refuses while the door is still open - that is the door's job.
+void clearAlarm() {
+  if (doorOpen) { logErr("CMD", "cannot clear - the door is still OPEN"); return; }
+  alarmState  = AS_SECURE;
+  alarmReason = "";
+  motionAlarm = false;
+  buzz(false);
+  digitalWrite(PIN_LED_R, LOW);
+  digitalWrite(PIN_LED_G, HIGH);
+  drawStatic();
+  logOK("CMD", "alarm cleared - box secure again");
+  alarmBeat();
+}
+
 // run a command no matter where it came from (router note or server)
-//   screen=on|off     alarm=arm|disarm     siren=off     siren=test
+//   screen=on|off   alarm=arm|disarm|clear   siren=off|test   motion=learn
 void runCommand(const String& cmdRaw) {
   String cmd = cmdRaw; cmd.toLowerCase(); cmd.trim();
   if (cmd.length() == 0) return;
@@ -523,6 +719,8 @@ void runCommand(const String& cmdRaw) {
   else if (cmd.indexOf("screen=on")    >= 0) setScreen(true);
   else if (cmd.indexOf("alarm=disarm") >= 0) setArmed(false);
   else if (cmd.indexOf("alarm=arm")    >= 0) setArmed(true);
+  else if (cmd.indexOf("alarm=clear")  >= 0) clearAlarm();
+  else if (cmd.indexOf("motion=learn") >= 0) motionLearn("command");
   else if (cmd.indexOf("siren=off")    >= 0) silenceSiren();
   else if (cmd.indexOf("siren=test")   >= 0) {
     logOK("CMD", "siren test - two notes");
@@ -547,6 +745,9 @@ void sendHeartbeat() {
   d["opens"]   = openCount;
   d["armed"]   = alarmArmed;
   d["alarm"]   = alarmStateName();
+  d["why"]     = alarmReason;
+  d["motion"]  = motionAlarm;
+  d["tilt"]    = (int)lastTiltDeg;
   d["uptime"]  = millis() / 1000;
   d["hotspot"] = usersOnline;
   d["pppoe"]   = pppoeOnline;
@@ -733,7 +934,8 @@ void drawStatic() {
       titleBar("SECURITY");
       label(10, 26, "DOOR");
       label(88, 26, "ALARM");
-      label(10, 62, "TIMES OPENED");
+      label(10, 62, "OPENED");
+      label(72, 62, "TILT");
       label(10, 98, "SIREN");
       break;
   }
@@ -831,7 +1033,9 @@ void drawLive() {
     case 4:
       value(10, 38, 2, doorOpen ? C_BAD : C_GOOD, doorOpen ? "OPEN" : "CLOSED", 76);
       value(88, 40, 1, alarmArmed ? C_GOOD : C_WARN, alarmArmed ? "ARMED" : "OFF", 66);
-      value(10, 74, 2, C_VALUE, String(openCount), 60);
+      value(10, 74, 2, C_VALUE, String(openCount), 56);
+      value(72, 76, 1, mpuOk ? (lastTiltDeg > MOTION_TILT_DEG ? C_BAD : C_VALUE) : C_LABEL,
+            mpuOk ? (String((int)lastTiltDeg) + "deg") : "no sensor", 82);
       value(10, 110, 1,
             alarmState == AS_SIREN ? C_BAD : (alarmState == AS_GRACE ? C_WARN : C_LABEL),
             alarmState == AS_SIREN  ? "SOUNDING" :
@@ -870,6 +1074,15 @@ void setup() {
   int raw = digitalRead(PIN_REED);
   Serial.printf("[BOOT] reed raw = %d  (%s)\n", raw,
                 raw == REED_CLOSED_LEVEL ? "door CLOSED" : "door OPEN");
+#endif
+
+#if MOTION_WIRED
+  motionBegin();          // finds the sensor, wakes it, learns "not moved"
+#else
+  Serial.println("[BOOT] MOTION_WIRED=0 - no motion sensing");
+#endif
+
+#if ALARM_WIRED
   Serial.printf("[BOOT] alarm %s, grace %lus, siren max %lus\n",
                 alarmArmed ? "ARMED" : "DISARMED",
                 (unsigned long)(GRACE_MS / 1000),
@@ -881,6 +1094,7 @@ void setup() {
   alarmState = (doorOpen && alarmArmed)
                  ? (GRACE_MS > 0 ? AS_GRACE : AS_SIREN)
                  : (doorOpen ? AS_SILENT : AS_SECURE);
+  if (doorOpen) alarmReason = "DOOR";
   digitalWrite(PIN_LED_R, doorOpen ? HIGH : LOW);
   digitalWrite(PIN_LED_G, doorOpen ? LOW : HIGH);
 #else
@@ -897,8 +1111,8 @@ void setup() {
   fetchPorts();
   fetchUsers();
   fetchSystem();
-  if (doorOpen && alarmArmed) { drawAlarmBanner(); }
-  else                        { drawStatic(); }
+  if (alarmRaised()) { drawAlarmBanner(); }
+  else               { drawStatic(); }
 }
 
 void loop() {
@@ -908,6 +1122,9 @@ void loop() {
   // alarm checks run EVERY pass — never blocked by network calls
   pollDoor();
   pollBuzzer();
+#endif
+#if MOTION_WIRED
+  pollMotion();
 #endif
 
   static uint32_t lastWifiTry = 0;
@@ -926,9 +1143,9 @@ void loop() {
   if (now - lastBeat  >= HEART_MS) { lastBeat  = now; sendHeartbeat(); }
 
   if (!screenOn) return;           // data keeps flowing, drawing paused
-  // the red banner owns the screen only while the alarm is actually raised;
-  // if you disarmed it, the dashboard keeps running with the door open
-  if (doorOpen && alarmArmed) return;
+  // the red banner owns the screen only while the alarm is actually raised
+  // (door OR motion); if you disarmed it, the dashboard keeps running
+  if (alarmRaised()) return;
 
   if (now - lastPage >= PAGE_MS) {
     lastPage = now;
