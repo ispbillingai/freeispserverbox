@@ -40,18 +40,22 @@ if (isset($_GET['view'])) {
           table{border-collapse:collapse}td,th{border:1px solid #444;padding:6px 12px}
           .ok{color:#4f4}.dead{color:#f55}</style></head><body>
           <h2>FreeISP box fleet</h2><table>
-          <tr><th>box</th><th>status</th><th>last seen</th><th>hotspot</th>
-          <th>pppoe</th><th>router</th><th>box IP</th><th>rssi</th><th>fw</th></tr>";
+          <tr><th>box</th><th>status</th><th>last seen</th><th>door</th><th>opens</th>
+          <th>hotspot</th><th>pppoe</th><th>router</th><th>box IP</th><th>rssi</th><th>fw</th></tr>";
     foreach (glob("$dir/hb_*.json") as $f) {
         $d = json_decode(file_get_contents($f), true);
         if (!$d) continue;
         $age = time() - ($d['ts'] ?? 0);
         $alive = $age < 120;
-        printf("<tr><td>%s</td><td class='%s'>%s</td><td>%ds ago</td><td>%s</td>
+        $door = $d['door'] ?? '-';
+        printf("<tr><td>%s</td><td class='%s'>%s</td><td>%ds ago</td>
+                <td class='%s'>%s</td><td>%s</td><td>%s</td>
                 <td>%s</td><td class='%s'>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
             htmlspecialchars($d['box'] ?? '?'),
             $alive ? 'ok' : 'dead', $alive ? 'ALIVE' : 'DEAD/OFFLINE',
             $age,
+            $door === 'OPEN' ? 'dead' : 'ok', htmlspecialchars($door),
+            $d['opens'] ?? '-',
             $d['hotspot'] ?? '-', $d['pppoe'] ?? '-',
             ($d['router'] ?? false) ? 'ok' : 'dead',
             ($d['router'] ?? false) ? 'UP' : 'DOWN',
