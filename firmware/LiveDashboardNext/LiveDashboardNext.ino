@@ -1,14 +1,25 @@
 /*
-  LiveDashboard v2 — the FULL live FreeISP dashboard, all real data.
+  LiveDashboardNext — the WORKING BENCH copy. This is where new features
+  are added. firmware/LiveDashboard/LiveDashboard.ino is the proven v2 and
+  is NEVER edited; it only gets replaced once THIS file passes on the bench.
 
   Everything comes straight from the MikroTik the ESP32 is connected
-  to (its WiFi gateway, MT_HOST "auto"). No new wiring.
+  to (its WiFi gateway, MT_HOST "auto").
 
   Pages (auto-rotate 5s, values repaint live):
-    Page 1  HOME    — USERS ONLINE (hotspot active), router UP, uptime
-    Page 2  PORTS   — ether1..5 real up/down + live Mbps
-    Page 3  TRAFFIC — scrolling DL/UL graph of ether1 (WAN)
-    Page 4  SYSTEM  — router CPU + memory bars, board, RouterOS, box IP
+    Page 1  HOME     — hotspot + pppoe users online, router UP, uptime
+    Page 2  PORTS    — ether1..5 real up/down + live Mbps
+    Page 3  TRAFFIC  — scrolling DL/UL graph of ether1 (WAN)
+    Page 4  SYSTEM   — router CPU + memory bars, board, RouterOS, box IP
+    Page 5  SECURITY — door state, armed state, times opened, siren
+
+  On top of v2 this adds:
+    - HEARTBEAT to your server (SRV_URL in secrets.h; "" = feature off)
+    - DOOR ALARM: reed switch -> LEDs + buzzer + red screen, all LOCAL
+      first, server second. OFF until you set ALARM_WIRED 1 below.
+    - REMOTE COMMANDS from either the router note or the server:
+        screen=on | screen=off | alarm=arm | alarm=disarm
+        siren=off (shut it up, stay alarmed) | siren=test
 
   Needs: secrets.h next to this file, ArduinoJson library.
   Board = "ESP32 Dev Module", COM6, hold BOOT while uploading.
@@ -34,11 +45,14 @@
                       // GPIO 33 for a fully-dark screen-off (else faint glow)
 
 // ================================================================
-//  ALARM SWITCH — leave 0 until the alarm parts are wired!
+//  ALARM CONFIG — every alarm setting lives in this one block.
+//  Change behaviour HERE, not down in the code.
+// ================================================================
+
+//  MASTER SWITCH — leave 0 until the alarm parts are wired!
 //  0 = dashboard only, exactly like the version that already works.
 //  1 = alarm active (needs the GPIO32 jumper/reed wired, else the
 //      box thinks the door sensor was cut and boots into ALARM).
-// ================================================================
 #define ALARM_WIRED 0
 
 // ---- alarm hardware (wire one at a time, reboot = self-test) ----
@@ -47,6 +61,37 @@
 #define PIN_BUZZ  27  // small kit buzzer (+) -> 27, (-) -> GND
 #define PIN_REED  32  // reed one leg -> 32, other -> GND (or a plain jumper:
                       // wire in = door CLOSED, pulled out = OPEN)
+
+// ---- sensor wiring style ----
+// Reed to GND + internal pullup, so a CLOSED door pulls the pin LOW.
+// If you fit a normally-CLOSED reed (opens when the magnet is near),
+// flip this to HIGH and everything else still works.
+#define REED_CLOSED_LEVEL  LOW
+
+// Kit buzzers sound when the pin goes HIGH. Some buzzer *modules*
+// (3-pin, with a transistor) sound on LOW — set this to 0 for those.
+#define BUZZER_ACTIVE_HIGH 1
+
+// ---- how the alarm behaves ----
+#define ALARM_ARMED_AT_BOOT 1     // 1 = live the moment it powers up
+                                  // 0 = boots quiet, arm it with a command
+
+const uint32_t DEBOUNCE_MS  = 60;      // reed settle time, ignore contact bounce
+const uint32_t GRACE_MS     = 15000;   // polite chirping first, THEN the siren.
+                                       // Gives you 15s to close it / disarm.
+                                       // Set to 0 for an instant siren.
+const uint32_t CHIRP_ON_MS  = 40;      // grace chirp: short tick...
+const uint32_t CHIRP_GAP_MS = 1200;    // ...once every this long
+const uint32_t BEEP_MS      = 300;     // full siren beep-beep rhythm
+const uint32_t SIREN_MAX_MS = 180000;  // siren gives up after 3 min (battery +
+                                       // neighbours). Red LED + red screen +
+                                       // server alert STAY on until it closes.
+                                       // 0 = never stop sounding.
+
+// ---- what the alarm reports ----
+#define ALARM_BEAT_ON_CHANGE 1    // 1 = push an instant heartbeat to the server
+                                  //     the moment the door opens/closes
+// ================================================================
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
@@ -71,9 +116,6 @@ const uint32_t LIVE_MS   = 500;    // screen repaint
 
 const uint8_t NUM_PAGES = 5;
 
-const uint32_t DEBOUNCE_MS = 60;   // reed settle time
-const uint32_t BEEP_MS     = 300;  // siren beep rhythm
-
 // ---- state ----
 uint8_t  page = 0;
 uint32_t lastPage = 0, lastPoll = 0, lastUsers = 0, lastSys = 0, lastLive = 0, lastCmd = 0, lastBeat = 0;
@@ -81,12 +123,31 @@ bool     heartbeat = false;
 bool     screenOn  = true;
 
 // ---- door / alarm state ----
-bool     doorOpen      = false;
-int      lastReedRaw   = -1;
-uint32_t reedChangedAt = 0;
-uint32_t beepAt        = 0;
-bool     beepOn        = false;
-uint32_t openCount     = 0;
+// SECURE  = door shut, all quiet
+// GRACE   = door just opened, polite chirp, siren is coming
+// SIREN   = full beep-beep-beep
+// SILENT  = door still open but the sound stopped (timed out, or you
+//           sent siren=off). Screen + LED + server stay alarmed.
+enum AlarmState { AS_SECURE, AS_GRACE, AS_SIREN, AS_SILENT };
+
+bool       doorOpen      = false;
+bool       alarmArmed    = ALARM_ARMED_AT_BOOT;
+AlarmState alarmState    = AS_SECURE;
+int        lastReedRaw   = -1;
+uint32_t   reedChangedAt = 0;
+uint32_t   openedAt      = 0;   // when this opening started
+uint32_t   beepAt        = 0;
+bool       beepOn        = false;
+uint32_t   openCount     = 0;
+
+const char* alarmStateName() {
+  switch (alarmState) {
+    case AS_GRACE:  return "GRACE";
+    case AS_SIREN:  return "SIREN";
+    case AS_SILENT: return "SILENT";
+    default:        return "SECURE";
+  }
+}
 
 // ---- router data ----
 const int NPORTS = 5;
@@ -245,18 +306,26 @@ void setScreen(bool on) {
 }
 
 // REMOTE COMMANDS via the router's system note — set from WinBox terminal:
-//   /system note set note="screen=off"      (or screen=on)
+//   /system note set note="screen=off"      (or screen=on, alarm=disarm,
+//                                            alarm=arm, siren=off, siren=test)
 // The box reads it every 3s and obeys. No server needed.
 void fetchCommand() {
   JsonDocument doc;
   if (!restGet("CMD", "/rest/system/note", doc)) return;
   String note = (const char*)(doc["note"] | "");
-  note.toLowerCase();
-  if      (note.indexOf("screen=off") >= 0) setScreen(false);
-  else if (note.indexOf("screen=on")  >= 0) setScreen(true);
+  // only treat the note as a command if it looks like one ("thing=value"),
+  // so a normal note left on the router doesn't spam the log
+  if (note.indexOf('=') >= 0) runCommand(note);   // same list as the server
 }
 
 // ---- door alarm (GOLDEN RULE: fires locally FIRST, server second) ----
+
+// one place that knows which way round the buzzer is wired
+void buzz(bool on) {
+  beepOn = on;
+  digitalWrite(PIN_BUZZ, (on == (BUZZER_ACTIVE_HIGH != 0)) ? HIGH : LOW);
+}
+
 void drawAlarmBanner() {
   tft.fillScreen(C_BAD);
   tft.setTextSize(3);
@@ -268,54 +337,140 @@ void drawAlarmBanner() {
   tft.print("DOOR IS OPEN");
 }
 
+void alarmBeat() {
+#if ALARM_BEAT_ON_CHANGE
+  sendHeartbeat();
+#endif
+}
+
 void onDoorChange(bool open) {
   doorOpen = open;
   // 1) LOCAL response, instant, works with no WiFi at all
   digitalWrite(PIN_LED_R, open ? HIGH : LOW);
   digitalWrite(PIN_LED_G, open ? LOW : HIGH);
+
   if (open) {
     openCount++;
-    beepOn = true;  beepAt = millis();
-    digitalWrite(PIN_BUZZ, HIGH);
-    if (!screenOn) setScreen(true);     // alarm overrides screen-off
-    drawAlarmBanner();
-    logErr("ALARM", "door OPEN (count=" + String(openCount) + ") - siren ON");
+    openedAt = millis();
+    beepAt   = millis();
+
+    if (!alarmArmed) {                  // disarmed = you opened it on purpose
+      alarmState = AS_SILENT;
+      buzz(false);
+      logInfo("ALARM", "door OPEN but alarm is DISARMED - staying quiet");
+    } else if (GRACE_MS > 0) {          // chirp first, siren after the grace
+      alarmState = AS_GRACE;
+      buzz(true);
+      if (!screenOn) setScreen(true);   // alarm overrides screen-off
+      drawAlarmBanner();
+      logErr("ALARM", "door OPEN (count=" + String(openCount) + ") - " +
+                      String(GRACE_MS / 1000) + "s grace, then siren");
+    } else {                            // no grace configured = straight to it
+      alarmState = AS_SIREN;
+      buzz(true);
+      if (!screenOn) setScreen(true);
+      drawAlarmBanner();
+      logErr("ALARM", "door OPEN (count=" + String(openCount) + ") - siren ON");
+    }
   } else {
-    beepOn = false;
-    digitalWrite(PIN_BUZZ, LOW);
+    alarmState = AS_SECURE;
+    buzz(false);
     drawStatic();
     logOK("ALARM", "door CLOSED - siren OFF, box secure");
   }
   // 2) THEN tell the server (best effort, carried by an instant heartbeat)
-  sendHeartbeat();
+  alarmBeat();
 }
 
 void pollDoor() {
-  int raw = digitalRead(PIN_REED);        // LOW = closed, HIGH = open
+  int raw = digitalRead(PIN_REED);
   if (raw != lastReedRaw) {
     lastReedRaw = raw;
     reedChangedAt = millis();
   } else if ((millis() - reedChangedAt) > DEBOUNCE_MS) {
-    bool open = (raw == HIGH);
+    bool open = (raw != REED_CLOSED_LEVEL);
     if (open != doorOpen) onDoorChange(open);
   }
 }
 
+// drives the sound: chirp during grace, siren after it, then give up
 void pollBuzzer() {
   if (!doorOpen) return;
-  if (millis() - beepAt >= BEEP_MS) {
-    beepAt = millis();
-    beepOn = !beepOn;
-    digitalWrite(PIN_BUZZ, beepOn ? HIGH : LOW);
+  uint32_t now = millis();
+
+  switch (alarmState) {
+    case AS_GRACE:
+      if (now - openedAt >= GRACE_MS) {   // grace is over - escalate
+        alarmState = AS_SIREN;
+        beepAt = now;
+        buzz(true);
+        logErr("ALARM", "grace expired - FULL SIREN");
+        break;
+      }
+      // slow polite tick: short on, long off
+      if (beepOn  && now - beepAt >= CHIRP_ON_MS)  { beepAt = now; buzz(false); }
+      if (!beepOn && now - beepAt >= CHIRP_GAP_MS) { beepAt = now; buzz(true);  }
+      break;
+
+    case AS_SIREN:
+      if (SIREN_MAX_MS > 0 && now - openedAt >= SIREN_MAX_MS) {
+        alarmState = AS_SILENT;           // stop the noise, stay alarmed
+        buzz(false);
+        logErr("ALARM", "siren timed out after " + String(SIREN_MAX_MS / 1000) +
+                        "s - still OPEN, screen + server stay red");
+        break;
+      }
+      if (now - beepAt >= BEEP_MS) { beepAt = now; buzz(!beepOn); }
+      break;
+
+    case AS_SILENT:
+    default:
+      break;                              // deliberately quiet
+  }
+}
+
+void setArmed(bool on) {
+  if (on == alarmArmed) return;
+  alarmArmed = on;
+  logOK("CMD", on ? "alarm ARMED" : "alarm DISARMED");
+  if (!on && doorOpen) {                  // disarming shuts a running siren up
+    alarmState = AS_SILENT;
+    buzz(false);
+    drawStatic();
+  } else if (on && doorOpen) {            // arming onto an open door = alarm now
+    alarmState = AS_SIREN;
+    openedAt = millis();
+    beepAt   = millis();
+    buzz(true);
+    if (!screenOn) setScreen(true);
+    drawAlarmBanner();
+  }
+  alarmBeat();
+}
+
+// shut the siren up but leave the alarm raised (door still logged OPEN)
+void silenceSiren() {
+  if (alarmState == AS_GRACE || alarmState == AS_SIREN) {
+    alarmState = AS_SILENT;
+    buzz(false);
+    logOK("CMD", "siren silenced (door still OPEN)");
   }
 }
 
 // run a command no matter where it came from (router note or server)
+//   screen=on|off     alarm=arm|disarm     siren=off     siren=test
 void runCommand(const String& cmdRaw) {
   String cmd = cmdRaw; cmd.toLowerCase(); cmd.trim();
   if (cmd.length() == 0) return;
-  if      (cmd.indexOf("screen=off") >= 0) setScreen(false);
-  else if (cmd.indexOf("screen=on")  >= 0) setScreen(true);
+  if      (cmd.indexOf("screen=off")   >= 0) setScreen(false);
+  else if (cmd.indexOf("screen=on")    >= 0) setScreen(true);
+  else if (cmd.indexOf("alarm=disarm") >= 0) setArmed(false);
+  else if (cmd.indexOf("alarm=arm")    >= 0) setArmed(true);
+  else if (cmd.indexOf("siren=off")    >= 0) silenceSiren();
+  else if (cmd.indexOf("siren=test")   >= 0) {
+    logOK("CMD", "siren test - one chirp");
+    buzz(true); delay(200); buzz(false);
+  }
   else logErr("CMD", "unknown command: " + cmd);
 }
 
@@ -331,6 +486,8 @@ void sendHeartbeat() {
   d["fw"]      = "live-3.0";
   d["door"]    = doorOpen ? "OPEN" : "CLOSED";
   d["opens"]   = openCount;
+  d["armed"]   = alarmArmed;
+  d["alarm"]   = alarmStateName();
   d["uptime"]  = millis() / 1000;
   d["hotspot"] = usersOnline;
   d["pppoe"]   = pppoeOnline;
@@ -516,6 +673,7 @@ void drawStatic() {
     case 4:
       titleBar("SECURITY");
       label(10, 26, "DOOR");
+      label(88, 26, "ALARM");
       label(10, 62, "TIMES OPENED");
       label(10, 98, "SIREN");
       break;
@@ -612,9 +770,14 @@ void drawLive() {
       break;
     }
     case 4:
-      value(10, 38, 2, doorOpen ? C_BAD : C_GOOD, doorOpen ? "OPEN" : "CLOSED", 90);
+      value(10, 38, 2, doorOpen ? C_BAD : C_GOOD, doorOpen ? "OPEN" : "CLOSED", 76);
+      value(88, 40, 1, alarmArmed ? C_GOOD : C_WARN, alarmArmed ? "ARMED" : "OFF", 66);
       value(10, 74, 2, C_VALUE, String(openCount), 60);
-      value(10, 110, 1, doorOpen ? C_BAD : C_LABEL, doorOpen ? "SOUNDING" : "quiet", 70);
+      value(10, 110, 1,
+            alarmState == AS_SIREN ? C_BAD : (alarmState == AS_GRACE ? C_WARN : C_LABEL),
+            alarmState == AS_SIREN  ? "SOUNDING" :
+            alarmState == AS_GRACE  ? "grace..."  :
+            alarmState == AS_SILENT ? "silenced"  : "quiet", 80);
       break;
   }
 }
@@ -623,8 +786,8 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.println("==========================================");
-  Serial.println(" LiveDashboard v2 - full live dashboard");
-  Serial.println(" users + ports + traffic + system, REST");
+  Serial.println(" LiveDashboardNext - dashboard + alarm");
+  Serial.println(" users + ports + traffic + system + door");
   Serial.println("==========================================");
 
   pinMode(TFT_BLK, OUTPUT);
@@ -637,19 +800,28 @@ void setup() {
   pinMode(PIN_LED_G, OUTPUT);
   pinMode(PIN_BUZZ,  OUTPUT);
   pinMode(PIN_REED,  INPUT_PULLUP);
+  buzz(false);                       // make sure it starts quiet
   digitalWrite(PIN_LED_R, HIGH);
   digitalWrite(PIN_LED_G, HIGH);
-  digitalWrite(PIN_BUZZ, HIGH);  delay(120);  digitalWrite(PIN_BUZZ, LOW);
+  buzz(true);  delay(120);  buzz(false);
   delay(600);
   digitalWrite(PIN_LED_R, LOW);
   digitalWrite(PIN_LED_G, LOW);
 
   int raw = digitalRead(PIN_REED);
   Serial.printf("[BOOT] reed raw = %d  (%s)\n", raw,
-                raw == LOW ? "LOW = door CLOSED" : "HIGH = door OPEN");
-  doorOpen = (raw == HIGH);
+                raw == REED_CLOSED_LEVEL ? "door CLOSED" : "door OPEN");
+  Serial.printf("[BOOT] alarm %s, grace %lus, siren max %lus\n",
+                alarmArmed ? "ARMED" : "DISARMED",
+                (unsigned long)(GRACE_MS / 1000),
+                (unsigned long)(SIREN_MAX_MS / 1000));
+  doorOpen = (raw != REED_CLOSED_LEVEL);
   lastReedRaw = raw;
   reedChangedAt = millis();
+  openedAt = millis();
+  alarmState = (doorOpen && alarmArmed)
+                 ? (GRACE_MS > 0 ? AS_GRACE : AS_SIREN)
+                 : (doorOpen ? AS_SILENT : AS_SECURE);
   digitalWrite(PIN_LED_R, doorOpen ? HIGH : LOW);
   digitalWrite(PIN_LED_G, doorOpen ? LOW : HIGH);
 #else
@@ -666,8 +838,8 @@ void setup() {
   fetchPorts();
   fetchUsers();
   fetchSystem();
-  if (doorOpen) { drawAlarmBanner(); }
-  else          { drawStatic(); }
+  if (doorOpen && alarmArmed) { drawAlarmBanner(); }
+  else                        { drawStatic(); }
 }
 
 void loop() {
@@ -695,7 +867,9 @@ void loop() {
   if (now - lastBeat  >= HEART_MS) { lastBeat  = now; sendHeartbeat(); }
 
   if (!screenOn) return;           // data keeps flowing, drawing paused
-  if (doorOpen)  return;           // ALARM banner owns the screen while open
+  // the red banner owns the screen only while the alarm is actually raised;
+  // if you disarmed it, the dashboard keeps running with the door open
+  if (doorOpen && alarmArmed) return;
 
   if (now - lastPage >= PAGE_MS) {
     lastPage = now;
