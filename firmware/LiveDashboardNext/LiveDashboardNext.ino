@@ -1,4 +1,4 @@
-﻿/*
+/*
   LiveDashboard v2 — the FULL live FreeISP dashboard, all real data.
 
   Everything comes straight from the MikroTik the ESP32 is connected
@@ -22,6 +22,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <esp_wifi.h>
 #include "secrets.h"
@@ -31,6 +32,21 @@
 #define TFT_RST  4
 #define TFT_BLK  33   // OPTIONAL: move the screen's BLK wire from 3V3 to
                       // GPIO 33 for a fully-dark screen-off (else faint glow)
+
+// ================================================================
+//  ALARM SWITCH — leave 0 until the alarm parts are wired!
+//  0 = dashboard only, exactly like the version that already works.
+//  1 = alarm active (needs the GPIO32 jumper/reed wired, else the
+//      box thinks the door sensor was cut and boots into ALARM).
+// ================================================================
+#define ALARM_WIRED 0
+
+// ---- alarm hardware (wire one at a time, reboot = self-test) ----
+#define PIN_LED_R 25  // red LED long leg -> 25, short -> 220R -> GND
+#define PIN_LED_G 26  // green LED long leg -> 26, short -> 220R -> GND
+#define PIN_BUZZ  27  // small kit buzzer (+) -> 27, (-) -> GND
+#define PIN_REED  32  // reed one leg -> 32, other -> GND (or a plain jumper:
+                      // wire in = door CLOSED, pulled out = OPEN)
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
@@ -50,15 +66,27 @@ const uint32_t POLL_MS   = 2000;   // ethernet counters (drives the graph)
 const uint32_t USERS_MS  = 5000;   // hotspot active users
 const uint32_t SYS_MS    = 10000;  // cpu/memory/uptime
 const uint32_t CMD_MS    = 3000;   // remote-command check (router system note)
+const uint32_t HEART_MS  = 20000;  // heartbeat to Francis's server
 const uint32_t LIVE_MS   = 500;    // screen repaint
 
-const uint8_t NUM_PAGES = 4;
+const uint8_t NUM_PAGES = 5;
+
+const uint32_t DEBOUNCE_MS = 60;   // reed settle time
+const uint32_t BEEP_MS     = 300;  // siren beep rhythm
 
 // ---- state ----
 uint8_t  page = 0;
-uint32_t lastPage = 0, lastPoll = 0, lastUsers = 0, lastSys = 0, lastLive = 0, lastCmd = 0;
+uint32_t lastPage = 0, lastPoll = 0, lastUsers = 0, lastSys = 0, lastLive = 0, lastCmd = 0, lastBeat = 0;
 bool     heartbeat = false;
 bool     screenOn  = true;
+
+// ---- door / alarm state ----
+bool     doorOpen      = false;
+int      lastReedRaw   = -1;
+uint32_t reedChangedAt = 0;
+uint32_t beepAt        = 0;
+bool     beepOn        = false;
+uint32_t openCount     = 0;
 
 // ---- router data ----
 const int NPORTS = 5;
@@ -228,6 +256,120 @@ void fetchCommand() {
   else if (note.indexOf("screen=on")  >= 0) setScreen(true);
 }
 
+// ---- door alarm (GOLDEN RULE: fires locally FIRST, server second) ----
+void drawAlarmBanner() {
+  tft.fillScreen(C_BAD);
+  tft.setTextSize(3);
+  tft.setTextColor(ST77XX_WHITE, C_BAD);
+  tft.setCursor(18, 40);
+  tft.print("ALARM");
+  tft.setTextSize(1);
+  tft.setCursor(28, 80);
+  tft.print("DOOR IS OPEN");
+}
+
+void onDoorChange(bool open) {
+  doorOpen = open;
+  // 1) LOCAL response, instant, works with no WiFi at all
+  digitalWrite(PIN_LED_R, open ? HIGH : LOW);
+  digitalWrite(PIN_LED_G, open ? LOW : HIGH);
+  if (open) {
+    openCount++;
+    beepOn = true;  beepAt = millis();
+    digitalWrite(PIN_BUZZ, HIGH);
+    if (!screenOn) setScreen(true);     // alarm overrides screen-off
+    drawAlarmBanner();
+    logErr("ALARM", "door OPEN (count=" + String(openCount) + ") - siren ON");
+  } else {
+    beepOn = false;
+    digitalWrite(PIN_BUZZ, LOW);
+    drawStatic();
+    logOK("ALARM", "door CLOSED - siren OFF, box secure");
+  }
+  // 2) THEN tell the server (best effort, carried by an instant heartbeat)
+  sendHeartbeat();
+}
+
+void pollDoor() {
+  int raw = digitalRead(PIN_REED);        // LOW = closed, HIGH = open
+  if (raw != lastReedRaw) {
+    lastReedRaw = raw;
+    reedChangedAt = millis();
+  } else if ((millis() - reedChangedAt) > DEBOUNCE_MS) {
+    bool open = (raw == HIGH);
+    if (open != doorOpen) onDoorChange(open);
+  }
+}
+
+void pollBuzzer() {
+  if (!doorOpen) return;
+  if (millis() - beepAt >= BEEP_MS) {
+    beepAt = millis();
+    beepOn = !beepOn;
+    digitalWrite(PIN_BUZZ, beepOn ? HIGH : LOW);
+  }
+}
+
+// run a command no matter where it came from (router note or server)
+void runCommand(const String& cmdRaw) {
+  String cmd = cmdRaw; cmd.toLowerCase(); cmd.trim();
+  if (cmd.length() == 0) return;
+  if      (cmd.indexOf("screen=off") >= 0) setScreen(false);
+  else if (cmd.indexOf("screen=on")  >= 0) setScreen(true);
+  else logErr("CMD", "unknown command: " + cmd);
+}
+
+// HEARTBEAT: report to Francis's server + collect any queued command.
+// Works with http and https (setInsecure for now, tighten at ship).
+void sendHeartbeat() {
+  if (strlen(SRV_URL) == 0) return;              // feature off until URL set
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  JsonDocument d;
+  d["key"]     = SRV_KEY;
+  d["box"]     = BOX_ID;
+  d["fw"]      = "live-3.0";
+  d["door"]    = doorOpen ? "OPEN" : "CLOSED";
+  d["opens"]   = openCount;
+  d["uptime"]  = millis() / 1000;
+  d["hotspot"] = usersOnline;
+  d["pppoe"]   = pppoeOnline;
+  d["router"]  = routerOk;
+  d["ip"]      = WiFi.localIP().toString();
+  d["rssi"]    = WiFi.RSSI();
+  String body;
+  serializeJson(d, body);
+
+  HTTPClient http;
+  WiFiClientSecure tls;
+  bool isHttps = String(SRV_URL).startsWith("https");
+  if (isHttps) { tls.setInsecure(); http.begin(tls, SRV_URL); }
+  else         { http.begin(SRV_URL); }
+  http.setConnectTimeout(4000);
+  http.setTimeout(8000);
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST(body);
+
+  if (code != 200) {
+    logErr("BEAT", "heartbeat failed: " + httpExplain(code));
+    http.end();
+    return;
+  }
+  String resp = http.getString();
+  http.end();
+
+  JsonDocument r;
+  if (deserializeJson(r, resp) == DeserializationError::Ok) {
+    String cmd = (const char*)(r["cmd"] | "");
+    if (cmd.length()) {
+      logOK("BEAT", "server sent command: " + cmd);
+      runCommand(cmd);
+    } else {
+      logOK("BEAT", "heartbeat delivered");
+    }
+  }
+}
+
 void fetchSystem() {
   JsonDocument doc;
   if (!restGet("SYS",
@@ -371,6 +513,12 @@ void drawStatic() {
       label(10, 84, "ROUTER");
       label(10, 108, "BOX IP");
       break;
+    case 4:
+      titleBar("SECURITY");
+      label(10, 26, "DOOR");
+      label(10, 62, "TIMES OPENED");
+      label(10, 98, "SIREN");
+      break;
   }
 }
 
@@ -463,6 +611,11 @@ void drawLive() {
               : "no wifi", 104);
       break;
     }
+    case 4:
+      value(10, 38, 2, doorOpen ? C_BAD : C_GOOD, doorOpen ? "OPEN" : "CLOSED", 90);
+      value(10, 74, 2, C_VALUE, String(openCount), 60);
+      value(10, 110, 1, doorOpen ? C_BAD : C_LABEL, doorOpen ? "SOUNDING" : "quiet", 70);
+      break;
   }
 }
 
@@ -477,6 +630,32 @@ void setup() {
   pinMode(TFT_BLK, OUTPUT);
   digitalWrite(TFT_BLK, HIGH);
 
+#if ALARM_WIRED
+  // alarm hardware + POWER-ON SELF TEST: both LEDs light, buzzer chirps
+  // once — so after wiring each part, a reboot instantly proves it works
+  pinMode(PIN_LED_R, OUTPUT);
+  pinMode(PIN_LED_G, OUTPUT);
+  pinMode(PIN_BUZZ,  OUTPUT);
+  pinMode(PIN_REED,  INPUT_PULLUP);
+  digitalWrite(PIN_LED_R, HIGH);
+  digitalWrite(PIN_LED_G, HIGH);
+  digitalWrite(PIN_BUZZ, HIGH);  delay(120);  digitalWrite(PIN_BUZZ, LOW);
+  delay(600);
+  digitalWrite(PIN_LED_R, LOW);
+  digitalWrite(PIN_LED_G, LOW);
+
+  int raw = digitalRead(PIN_REED);
+  Serial.printf("[BOOT] reed raw = %d  (%s)\n", raw,
+                raw == LOW ? "LOW = door CLOSED" : "HIGH = door OPEN");
+  doorOpen = (raw == HIGH);
+  lastReedRaw = raw;
+  reedChangedAt = millis();
+  digitalWrite(PIN_LED_R, doorOpen ? HIGH : LOW);
+  digitalWrite(PIN_LED_G, doorOpen ? LOW : HIGH);
+#else
+  Serial.println("[BOOT] ALARM_WIRED=0 - dashboard only, alarm parts ignored");
+#endif
+
   tft.initR(SCREEN_TAB);
   tft.setRotation(SCREEN_ROT);
   titleBar("BOOT");
@@ -487,11 +666,18 @@ void setup() {
   fetchPorts();
   fetchUsers();
   fetchSystem();
-  drawStatic();
+  if (doorOpen) { drawAlarmBanner(); }
+  else          { drawStatic(); }
 }
 
 void loop() {
   uint32_t now = millis();
+
+#if ALARM_WIRED
+  // alarm checks run EVERY pass — never blocked by network calls
+  pollDoor();
+  pollBuzzer();
+#endif
 
   static uint32_t lastWifiTry = 0;
   if (WiFi.status() != WL_CONNECTED && now - lastWifiTry > 15000) {
@@ -505,9 +691,11 @@ void loop() {
   if (now - lastPoll  >= POLL_MS)  { lastPoll  = now; fetchPorts();   }
   if (now - lastUsers >= USERS_MS) { lastUsers = now; fetchUsers();   }
   if (now - lastSys   >= SYS_MS)   { lastSys   = now; fetchSystem();  }
-  if (now - lastCmd   >= CMD_MS)   { lastCmd   = now; fetchCommand(); }
+  if (now - lastCmd   >= CMD_MS)   { lastCmd   = now; fetchCommand();  }
+  if (now - lastBeat  >= HEART_MS) { lastBeat  = now; sendHeartbeat(); }
 
   if (!screenOn) return;           // data keeps flowing, drawing paused
+  if (doorOpen)  return;           // ALARM banner owns the screen while open
 
   if (now - lastPage >= PAGE_MS) {
     lastPage = now;
