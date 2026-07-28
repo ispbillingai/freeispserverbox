@@ -29,6 +29,8 @@
 #define TFT_CS   5
 #define TFT_DC   2
 #define TFT_RST  4
+#define TFT_BLK  33   // OPTIONAL: move the screen's BLK wire from 3V3 to
+                      // GPIO 33 for a fully-dark screen-off (else faint glow)
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
@@ -47,14 +49,16 @@ const uint32_t PAGE_MS   = 5000;   // page rotate
 const uint32_t POLL_MS   = 2000;   // ethernet counters (drives the graph)
 const uint32_t USERS_MS  = 5000;   // hotspot active users
 const uint32_t SYS_MS    = 10000;  // cpu/memory/uptime
+const uint32_t CMD_MS    = 3000;   // remote-command check (router system note)
 const uint32_t LIVE_MS   = 500;    // screen repaint
 
 const uint8_t NUM_PAGES = 4;
 
 // ---- state ----
 uint8_t  page = 0;
-uint32_t lastPage = 0, lastPoll = 0, lastUsers = 0, lastSys = 0, lastLive = 0;
+uint32_t lastPage = 0, lastPoll = 0, lastUsers = 0, lastSys = 0, lastLive = 0, lastCmd = 0;
 bool     heartbeat = false;
+bool     screenOn  = true;
 
 // ---- router data ----
 const int NPORTS = 5;
@@ -199,6 +203,29 @@ void fetchUsers() {
     if (n != pppoeOnline) logOK("USERS", String(n) + " pppoe users online");
     pppoeOnline = n;
   }
+}
+
+// screen power: pixels off via panel command + backlight off if on TFT_BLK
+void setScreen(bool on) {
+  if (on == screenOn) return;
+  screenOn = on;
+  tft.enableDisplay(on);
+  tft.enableSleep(!on);
+  digitalWrite(TFT_BLK, on ? HIGH : LOW);
+  if (on) drawStatic();            // repaint fresh when waking
+  logOK("CMD", on ? "screen ON" : "screen OFF");
+}
+
+// REMOTE COMMANDS via the router's system note — set from WinBox terminal:
+//   /system note set note="screen=off"      (or screen=on)
+// The box reads it every 3s and obeys. No server needed.
+void fetchCommand() {
+  JsonDocument doc;
+  if (!restGet("CMD", "/rest/system/note", doc)) return;
+  String note = (const char*)(doc["note"] | "");
+  note.toLowerCase();
+  if      (note.indexOf("screen=off") >= 0) setScreen(false);
+  else if (note.indexOf("screen=on")  >= 0) setScreen(true);
 }
 
 void fetchSystem() {
@@ -447,6 +474,9 @@ void setup() {
   Serial.println(" users + ports + traffic + system, REST");
   Serial.println("==========================================");
 
+  pinMode(TFT_BLK, OUTPUT);
+  digitalWrite(TFT_BLK, HIGH);
+
   tft.initR(SCREEN_TAB);
   tft.setRotation(SCREEN_ROT);
   titleBar("BOOT");
@@ -472,9 +502,12 @@ void loop() {
     else                        WiFi.begin(WIFI_SSID, WIFI_PASS);
   }
 
-  if (now - lastPoll  >= POLL_MS)  { lastPoll  = now; fetchPorts();  }
-  if (now - lastUsers >= USERS_MS) { lastUsers = now; fetchUsers();  }
-  if (now - lastSys   >= SYS_MS)   { lastSys   = now; fetchSystem(); }
+  if (now - lastPoll  >= POLL_MS)  { lastPoll  = now; fetchPorts();   }
+  if (now - lastUsers >= USERS_MS) { lastUsers = now; fetchUsers();   }
+  if (now - lastSys   >= SYS_MS)   { lastSys   = now; fetchSystem();  }
+  if (now - lastCmd   >= CMD_MS)   { lastCmd   = now; fetchCommand(); }
+
+  if (!screenOn) return;           // data keeps flowing, drawing paused
 
   if (now - lastPage >= PAGE_MS) {
     lastPage = now;

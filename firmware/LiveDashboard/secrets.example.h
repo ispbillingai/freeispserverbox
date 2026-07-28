@@ -17,3 +17,8 @@
 #define MT_USER  "espbox"                // the read-only user you created
 #define MT_PASS  "READ_ONLY_PASSWORD"
 
+
+// ---- your server (heartbeat + remote commands, optional) ----
+#define SRV_URL  ""                   // e.g. "https://yourserver.com/box.php"; "" = off
+#define SRV_KEY  "CHANGE_ME"          // must MATCH $KEY inside box.php
+#define BOX_ID   "box1"               // unique name per deployed box

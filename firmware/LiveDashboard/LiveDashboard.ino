@@ -22,6 +22,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <esp_wifi.h>
 #include "secrets.h"
@@ -50,13 +51,14 @@ const uint32_t POLL_MS   = 2000;   // ethernet counters (drives the graph)
 const uint32_t USERS_MS  = 5000;   // hotspot active users
 const uint32_t SYS_MS    = 10000;  // cpu/memory/uptime
 const uint32_t CMD_MS    = 3000;   // remote-command check (router system note)
+const uint32_t HEART_MS  = 20000;  // heartbeat to Francis's server
 const uint32_t LIVE_MS   = 500;    // screen repaint
 
 const uint8_t NUM_PAGES = 4;
 
 // ---- state ----
 uint8_t  page = 0;
-uint32_t lastPage = 0, lastPoll = 0, lastUsers = 0, lastSys = 0, lastLive = 0, lastCmd = 0;
+uint32_t lastPage = 0, lastPoll = 0, lastUsers = 0, lastSys = 0, lastLive = 0, lastCmd = 0, lastBeat = 0;
 bool     heartbeat = false;
 bool     screenOn  = true;
 
@@ -226,6 +228,64 @@ void fetchCommand() {
   note.toLowerCase();
   if      (note.indexOf("screen=off") >= 0) setScreen(false);
   else if (note.indexOf("screen=on")  >= 0) setScreen(true);
+}
+
+// run a command no matter where it came from (router note or server)
+void runCommand(const String& cmdRaw) {
+  String cmd = cmdRaw; cmd.toLowerCase(); cmd.trim();
+  if (cmd.length() == 0) return;
+  if      (cmd.indexOf("screen=off") >= 0) setScreen(false);
+  else if (cmd.indexOf("screen=on")  >= 0) setScreen(true);
+  else logErr("CMD", "unknown command: " + cmd);
+}
+
+// HEARTBEAT: report to Francis's server + collect any queued command.
+// Works with http and https (setInsecure for now, tighten at ship).
+void sendHeartbeat() {
+  if (strlen(SRV_URL) == 0) return;              // feature off until URL set
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  JsonDocument d;
+  d["key"]     = SRV_KEY;
+  d["box"]     = BOX_ID;
+  d["fw"]      = "live-2.2";
+  d["uptime"]  = millis() / 1000;
+  d["hotspot"] = usersOnline;
+  d["pppoe"]   = pppoeOnline;
+  d["router"]  = routerOk;
+  d["ip"]      = WiFi.localIP().toString();
+  d["rssi"]    = WiFi.RSSI();
+  String body;
+  serializeJson(d, body);
+
+  HTTPClient http;
+  WiFiClientSecure tls;
+  bool isHttps = String(SRV_URL).startsWith("https");
+  if (isHttps) { tls.setInsecure(); http.begin(tls, SRV_URL); }
+  else         { http.begin(SRV_URL); }
+  http.setConnectTimeout(4000);
+  http.setTimeout(8000);
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST(body);
+
+  if (code != 200) {
+    logErr("BEAT", "heartbeat failed: " + httpExplain(code));
+    http.end();
+    return;
+  }
+  String resp = http.getString();
+  http.end();
+
+  JsonDocument r;
+  if (deserializeJson(r, resp) == DeserializationError::Ok) {
+    String cmd = (const char*)(r["cmd"] | "");
+    if (cmd.length()) {
+      logOK("BEAT", "server sent command: " + cmd);
+      runCommand(cmd);
+    } else {
+      logOK("BEAT", "heartbeat delivered");
+    }
+  }
 }
 
 void fetchSystem() {
@@ -505,7 +565,8 @@ void loop() {
   if (now - lastPoll  >= POLL_MS)  { lastPoll  = now; fetchPorts();   }
   if (now - lastUsers >= USERS_MS) { lastUsers = now; fetchUsers();   }
   if (now - lastSys   >= SYS_MS)   { lastSys   = now; fetchSystem();  }
-  if (now - lastCmd   >= CMD_MS)   { lastCmd   = now; fetchCommand(); }
+  if (now - lastCmd   >= CMD_MS)   { lastCmd   = now; fetchCommand();  }
+  if (now - lastBeat  >= HEART_MS) { lastBeat  = now; sendHeartbeat(); }
 
   if (!screenOn) return;           // data keeps flowing, drawing paused
 
