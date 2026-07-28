@@ -68,9 +68,25 @@
 // flip this to HIGH and everything else still works.
 #define REED_CLOSED_LEVEL  LOW
 
-// Kit buzzers sound when the pin goes HIGH. Some buzzer *modules*
-// (3-pin, with a transistor) sound on LOW — set this to 0 for those.
+// PASSIVE buzzer = no oscillator inside, so a steady HIGH just makes it
+// click once. It only sings if you feed it a frequency. That is what the
+// blue 3-pin module on the bench turned out to be (BuzzTest: only test C
+// made a sound). 1 = drive it with tone(), 0 = drive it with a level.
+// ⚠️ SET THIS BACK TO 0 when the 12V horn goes on a RELAY — a relay is a
+//    level device, you cannot feed it a tone.
+#define BUZZER_PASSIVE 1
+
+// Only used when BUZZER_PASSIVE is 0. Kit buzzers sound when the pin goes
+// HIGH; some 3-pin modules (and most relay boards) sound/switch on LOW.
 #define BUZZER_ACTIVE_HIGH 1
+
+// Only used when BUZZER_PASSIVE is 1 — what it actually sounds like.
+// A passive buzzer lets us pick the pitch, so the gentle grace chirp and
+// the real siren sound different. The siren alternates two tones, which
+// is what makes it sound like an alarm instead of a beeping microwave.
+const uint16_t TONE_CHIRP_HZ   = 2500;   // polite tick during the grace
+const uint16_t TONE_SIREN_A_HZ = 2000;   // siren, low note
+const uint16_t TONE_SIREN_B_HZ = 3100;   // siren, high note
 
 // ---- how the alarm behaves ----
 #define ALARM_ARMED_AT_BOOT 1     // 1 = live the moment it powers up
@@ -91,6 +107,13 @@ const uint32_t SIREN_MAX_MS = 180000;  // siren gives up after 3 min (battery +
 // ---- what the alarm reports ----
 #define ALARM_BEAT_ON_CHANGE 1    // 1 = push an instant heartbeat to the server
                                   //     the moment the door opens/closes
+
+// ---- PLANNED, not built yet: RFID card = 1 hour of quiet ----
+// Tapping a known card on the RC522 pad kills ALL sound for an hour, so a
+// technician can work in the box without the siren going. The door state,
+// the open count and the server report all keep running - only the noise
+// stops, and it comes back by itself after the hour. Needs the RC522 wired.
+//   const uint32_t CARD_QUIET_MS = 3600000;   // 1 hour
 // ================================================================
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
@@ -139,6 +162,8 @@ uint32_t   openedAt      = 0;   // when this opening started
 uint32_t   beepAt        = 0;
 bool       beepOn        = false;
 uint32_t   openCount     = 0;
+uint16_t   buzzHz        = TONE_SIREN_A_HZ;  // pitch the next buzz() will use
+bool       sirenAlt      = false;            // flips the two siren notes
 
 const char* alarmStateName() {
   switch (alarmState) {
@@ -320,10 +345,27 @@ void fetchCommand() {
 
 // ---- door alarm (GOLDEN RULE: fires locally FIRST, server second) ----
 
-// one place that knows which way round the buzzer is wired
+// the siren's two notes, alternating, so it wails instead of just beeping
+void nextSirenNote() {
+  sirenAlt = !sirenAlt;
+  buzzHz = sirenAlt ? TONE_SIREN_A_HZ : TONE_SIREN_B_HZ;
+}
+
+// one place that knows HOW this buzzer makes noise. Everything else in
+// the alarm just says buzz(true) / buzz(false) and never worries about it.
 void buzz(bool on) {
   beepOn = on;
+#if BUZZER_PASSIVE
+  if (on) {
+    tone(PIN_BUZZ, buzzHz);            // a passive buzzer needs a frequency
+  } else {
+    noTone(PIN_BUZZ);
+    pinMode(PIN_BUZZ, OUTPUT);         // noTone releases the pin - hold it low
+    digitalWrite(PIN_BUZZ, LOW);
+  }
+#else
   digitalWrite(PIN_BUZZ, (on == (BUZZER_ACTIVE_HIGH != 0)) ? HIGH : LOW);
+#endif
 }
 
 void drawAlarmBanner() {
@@ -360,6 +402,7 @@ void onDoorChange(bool open) {
       logInfo("ALARM", "door OPEN but alarm is DISARMED - staying quiet");
     } else if (GRACE_MS > 0) {          // chirp first, siren after the grace
       alarmState = AS_GRACE;
+      buzzHz = TONE_CHIRP_HZ;
       buzz(true);
       if (!screenOn) setScreen(true);   // alarm overrides screen-off
       drawAlarmBanner();
@@ -367,6 +410,7 @@ void onDoorChange(bool open) {
                       String(GRACE_MS / 1000) + "s grace, then siren");
     } else {                            // no grace configured = straight to it
       alarmState = AS_SIREN;
+      nextSirenNote();
       buzz(true);
       if (!screenOn) setScreen(true);
       drawAlarmBanner();
@@ -403,13 +447,16 @@ void pollBuzzer() {
       if (now - openedAt >= GRACE_MS) {   // grace is over - escalate
         alarmState = AS_SIREN;
         beepAt = now;
+        nextSirenNote();
         buzz(true);
         logErr("ALARM", "grace expired - FULL SIREN");
         break;
       }
       // slow polite tick: short on, long off
       if (beepOn  && now - beepAt >= CHIRP_ON_MS)  { beepAt = now; buzz(false); }
-      if (!beepOn && now - beepAt >= CHIRP_GAP_MS) { beepAt = now; buzz(true);  }
+      if (!beepOn && now - beepAt >= CHIRP_GAP_MS) {
+        beepAt = now; buzzHz = TONE_CHIRP_HZ; buzz(true);
+      }
       break;
 
     case AS_SIREN:
@@ -420,7 +467,11 @@ void pollBuzzer() {
                         "s - still OPEN, screen + server stay red");
         break;
       }
-      if (now - beepAt >= BEEP_MS) { beepAt = now; buzz(!beepOn); }
+      if (now - beepAt >= BEEP_MS) {
+        beepAt = now;
+        if (!beepOn) nextSirenNote();     // each new beep = the other note
+        buzz(!beepOn);
+      }
       break;
 
     case AS_SILENT:
@@ -441,6 +492,7 @@ void setArmed(bool on) {
     alarmState = AS_SIREN;
     openedAt = millis();
     beepAt   = millis();
+    nextSirenNote();
     buzz(true);
     if (!screenOn) setScreen(true);
     drawAlarmBanner();
@@ -468,8 +520,10 @@ void runCommand(const String& cmdRaw) {
   else if (cmd.indexOf("alarm=arm")    >= 0) setArmed(true);
   else if (cmd.indexOf("siren=off")    >= 0) silenceSiren();
   else if (cmd.indexOf("siren=test")   >= 0) {
-    logOK("CMD", "siren test - one chirp");
-    buzz(true); delay(200); buzz(false);
+    logOK("CMD", "siren test - two notes");
+    buzzHz = TONE_SIREN_A_HZ; buzz(true); delay(250);
+    buzzHz = TONE_SIREN_B_HZ; buzz(true); delay(250);
+    buzz(false);
   }
   else logErr("CMD", "unknown command: " + cmd);
 }
@@ -803,7 +857,7 @@ void setup() {
   buzz(false);                       // make sure it starts quiet
   digitalWrite(PIN_LED_R, HIGH);
   digitalWrite(PIN_LED_G, HIGH);
-  buzz(true);  delay(120);  buzz(false);
+  buzzHz = TONE_SIREN_A_HZ;  buzz(true);  delay(120);  buzz(false);
   delay(600);
   digitalWrite(PIN_LED_R, LOW);
   digitalWrite(PIN_LED_G, LOW);
