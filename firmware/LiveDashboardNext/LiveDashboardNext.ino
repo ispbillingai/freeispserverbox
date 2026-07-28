@@ -84,9 +84,14 @@
 // A passive buzzer lets us pick the pitch, so the gentle grace chirp and
 // the real siren sound different. The siren alternates two tones, which
 // is what makes it sound like an alarm instead of a beeping microwave.
-const uint16_t TONE_CHIRP_HZ   = 2500;   // polite tick during the grace
+// 4250Hz measured LOUDEST on the bench buzzer (SirenTest sweep) — that is
+// its resonant peak, so the siren's high note sits right on it. 2000Hz is
+// the deliberately quieter low note; the jump between the two is what makes
+// it a wail. The grace chirp uses the quiet note on purpose — a warning
+// should not be as violent as the alarm.
+const uint16_t TONE_CHIRP_HZ   = 2000;   // polite tick during the grace
 const uint16_t TONE_SIREN_A_HZ = 2000;   // siren, low note
-const uint16_t TONE_SIREN_B_HZ = 3100;   // siren, high note
+const uint16_t TONE_SIREN_B_HZ = 4250;   // siren, high note = loudest
 
 // ---- how the alarm behaves ----
 #define ALARM_ARMED_AT_BOOT 1     // 1 = live the moment it powers up

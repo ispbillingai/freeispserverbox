@@ -36,10 +36,11 @@
 
 #define PIN_BUZZ 27
 
-// PART 2 presets — I will set these to your real peak once you tell me
-// which frequency in PART 1 was loudest.
+// PART 2 presets — SET FROM THE BENCH: the PART 1 sweep found 4250Hz to
+// be this buzzer's loudest note (its resonant peak), so that is the high
+// note. These now match the real alarm in LiveDashboardNext.
 uint16_t WAIL_LO = 2000;
-uint16_t WAIL_HI = 3100;
+uint16_t WAIL_HI = 4250;
 
 // PART 1 sweep range
 const uint16_t SWEEP_FROM = 1000;
