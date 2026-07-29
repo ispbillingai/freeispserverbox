@@ -183,8 +183,22 @@ const uint32_t MOTION_SETTLE_MS = 2000; // ignore everything this long after
 // Tapping a known card on the RC522 pad kills ALL sound for an hour, so a
 // technician can work in the box without the siren going. The door state,
 // the open count and the server report all keep running - only the noise
-// stops, and it comes back by itself after the hour. Needs the RC522 wired.
+// stops, and it comes back by itself after the hour.
 //   const uint32_t CARD_QUIET_MS = 3600000;   // 1 hour
+//
+// ⚠️ THE QUIET PERIOD MUST COVER **MOTION** TOO, NOT JUST THE DOOR.
+// Someone who taps a card is about to HANDLE the box - open it, move it,
+// pull cables. If the card only quiets the reed and leaves the MPU live,
+// the siren fires the moment they lean on it and the card looks broken.
+// So while the quiet period runs, pollMotion() must not raise an alarm
+// either - and it should re-learn the tilt baseline when the quiet ENDS,
+// because the box may legitimately be sitting at a new angle by then.
+// (alarmArmed already suppresses both; the card quiet must behave the same.)
+//
+// Proven on the bench in firmware/CardDisarm/CardDisarm.ino, which also
+// settled how cards are stored: NOT in the firmware, but paired into the
+// ESP32's NVS flash - each box learns the 2 cards it ships with, so one
+// binary flashes every box. Port that here along with the quiet period.
 // ================================================================
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
