@@ -153,6 +153,14 @@ void setup() {
     Serial.println("   SDA 16, RST 17, and that the header is SOLDERED.");
   } else {
     Serial.printf("OK RC522 alive, version 0x%02X\n", v);
+    // Clone RC522s often come up with the receiver gain turned right down,
+    // so the chip talks to us perfectly over SPI but its radio field is too
+    // weak to wake a card. Wind it up to maximum and kick the antenna.
+    rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+    rfid.PCD_AntennaOff();
+    delay(20);
+    rfid.PCD_AntennaOn();
+    Serial.println("   antenna gain set to MAX");
   }
 
   lastRaw = stableRaw = digitalRead(PIN_REED);
@@ -215,6 +223,24 @@ void loop() {
     swapAt = now;
     sirenAlt = !sirenAlt;
     tone(PIN_BUZZ, sirenAlt ? TONE_A_HZ : TONE_B_HZ);
+  }
+
+  // ---------- reader watchdog ----------
+  // Prove it is actually polling, and re-assert the field. Some clones let
+  // the antenna drift off after a while and then silently see nothing.
+  static uint32_t lastPoke = 0;
+  if (now - lastPoke >= 3000) {
+    lastPoke = now;
+    byte v = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+    byte tx = rfid.PCD_ReadRegister(MFRC522::TxControlReg);
+    bool fieldOn = (tx & 0x03) != 0;      // bits 0-1 = the two antenna drivers
+    Serial.printf("   [reader] ver 0x%02X, RF field %s - hold the card FLAT"
+                  " on the board, touching it\n",
+                  v, fieldOn ? "ON" : "OFF (!)");
+    if (!fieldOn) {
+      rfid.PCD_AntennaOn();               // put it back on
+      Serial.println("   [reader] field was off - turned back on");
+    }
   }
 
   // ---------- the card reader ----------
