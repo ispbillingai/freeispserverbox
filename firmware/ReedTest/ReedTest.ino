@@ -59,7 +59,11 @@ const uint32_t SWAP_MS   = 300;     // how fast the two notes alternate
 const uint16_t TONE_A_HZ = 2000;
 const uint16_t TONE_B_HZ = 4250;    // this buzzer's loudest note
 
-int      closedLevel = -1;      // -1 = not calibrated yet
+// Pre-set for a normally-open reed (the bare glass kind): magnet near
+// closes the contacts, which the internal pull-up shows as LOW. That is
+// the FreeISP case - lid on = magnet near = LOW = closed. No calibration
+// needed. Press 'c' only if you ever fit a reed that works the other way.
+int      closedLevel = LOW;
 int      lastRaw     = -1;
 int      stableRaw   = -1;
 uint32_t changedAt   = 0;
@@ -120,9 +124,10 @@ void setup() {
   Serial.printf ("  reed on GPIO %d, buzzer on GPIO %d\n", PIN_REED, PIN_BUZZ);
   Serial.println("==========================================");
   Serial.println();
-  Serial.println("Move the magnet near/away and watch the pin flip.");
-  Serial.println("Then hold it where the SHUT DOOR would hold it");
-  Serial.println("and type 'c' + Enter to calibrate.");
+  Serial.println("Assuming: magnet NEAR (lid ON)  = pin LOW  = CLOSED");
+  Serial.println("          magnet GONE (lid OFF) = pin HIGH = OPEN -> RINGS");
+  Serial.println("Take the magnet away and it should ring straight away.");
+  Serial.println("('c' + Enter re-calibrates, only needed for an odd reed)");
   Serial.println();
 
   pinMode(PIN_BUZZ, OUTPUT);
@@ -131,7 +136,11 @@ void setup() {
 
   lastRaw = stableRaw = digitalRead(PIN_REED);
   changedAt = millis();
-  Serial.printf("start: pin reads %s\n", stableRaw == LOW ? "LOW" : "HIGH");
+  doorOpen = (stableRaw != closedLevel);
+  Serial.printf("start: pin reads %s -> lid is %s\n",
+                stableRaw == LOW ? "LOW" : "HIGH",
+                doorOpen ? "OFF (ringing)" : "ON (quiet)");
+  if (doorOpen) ringOn();          // boots straight into the alarm if open
 }
 
 void loop() {
@@ -160,23 +169,15 @@ void loop() {
 
     Serial.printf("[%6lus] pin -> %s\n", now / 1000, raw == LOW ? "LOW " : "HIGH");
 
-    if (closedLevel < 0) {
-      // still exploring - just chirp so he knows it registered
-      chirp(TONE_A_HZ, 60);
-      if (seenLow && seenHigh)
-        Serial.println("         good - it moves both ways. Hold the magnet"
-                       " as if the door were SHUT, then type 'c'.");
-    } else {
-      bool nowOpen = (raw != closedLevel);
-      if (nowOpen != doorOpen) {
-        doorOpen = nowOpen;
-        if (doorOpen) {
-          ringOn();                       // instant, no grace
-          Serial.println("   !! DOOR OPEN - RINGING (will not stop until shut)");
-        } else {
-          quiet();
-          Serial.println("   OK DOOR CLOSED - quiet, box secure");
-        }
+    bool nowOpen = (raw != closedLevel);
+    if (nowOpen != doorOpen) {
+      doorOpen = nowOpen;
+      if (doorOpen) {
+        ringOn();                       // instant, no grace
+        Serial.println("   !! LID OFF - RINGING (will not stop until it is back)");
+      } else {
+        quiet();
+        Serial.println("   OK LID ON - quiet, box secure");
       }
     }
   }
