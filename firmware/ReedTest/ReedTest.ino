@@ -33,24 +33,31 @@
   3. Hold the magnet where it will sit when the DOOR IS SHUT, then type
      'c' + Enter. That is the calibration - it now knows which way round
      your sensor is, and prints the line for the real firmware.
-  4. After that it behaves like the real door alarm: take the magnet away
-     and you get a short grace chirp, then the wail.
+  4. After that: take the magnet away and it rings IMMEDIATELY and
+     CONTINUOUSLY - no grace, no gaps - until the magnet comes back.
 
-  NOTE: the grace here is 3s so you are not stood waiting on the bench.
-  The real firmware uses 15s (GRACE_MS in LiveDashboardNext).
+  THE SOUND: the two notes alternate with NO silence between them, so it
+  is one unbroken wail rather than beep-beep-beep. Want a single flat
+  tone instead? Set SOLID_TONE to 1 below.
+
+  NOTE: the real firmware still gives you a 15s grace chirp before it
+  screams (GRACE_MS in LiveDashboardNext), so you can open the box
+  yourself without waking the street. This bench sketch is deliberately
+  instant so you do not have to wait around to hear it.
 */
 
 #define PIN_REED  32
 #define PIN_BUZZ  27
 
-const uint32_t DEBOUNCE_MS  = 60;
-const uint32_t TEST_GRACE_MS = 3000;    // real firmware uses 15000
-const uint32_t BEEP_MS      = 300;
-const uint16_t TONE_A_HZ    = 2000;
-const uint16_t TONE_B_HZ    = 4250;
-const uint16_t TONE_CHIRP   = 2000;
-const uint32_t CHIRP_ON_MS  = 40;
-const uint32_t CHIRP_GAP_MS = 1200;
+const uint32_t DEBOUNCE_MS = 60;
+
+// 0 = alternating two-note wail (louder to the ear, harder to ignore)
+// 1 = one flat unbroken tone at TONE_B_HZ
+#define SOLID_TONE 0
+
+const uint32_t SWAP_MS   = 300;     // how fast the two notes alternate
+const uint16_t TONE_A_HZ = 2000;
+const uint16_t TONE_B_HZ = 4250;    // this buzzer's loudest note
 
 int      closedLevel = -1;      // -1 = not calibrated yet
 int      lastRaw     = -1;
@@ -59,15 +66,24 @@ uint32_t changedAt   = 0;
 bool     doorOpen    = false;
 bool     seenLow = false, seenHigh = false;
 
-uint32_t openedAt = 0, beepAt = 0;
-bool     beepOn = false, sirenAlt = false;
-bool     wailing = false;
+uint32_t swapAt = 0;
+bool     sirenAlt = false;
 
 void quiet() {
   noTone(PIN_BUZZ);
   pinMode(PIN_BUZZ, OUTPUT);
   digitalWrite(PIN_BUZZ, LOW);
-  beepOn = false;
+}
+
+// start ringing NOW and never stop until quiet() is called
+void ringOn() {
+#if SOLID_TONE
+  tone(PIN_BUZZ, TONE_B_HZ);        // one flat unbroken note
+#else
+  sirenAlt = !sirenAlt;
+  tone(PIN_BUZZ, sirenAlt ? TONE_A_HZ : TONE_B_HZ);
+#endif
+  swapAt = millis();
 }
 
 void chirp(uint16_t hz, uint16_t ms) {
@@ -127,7 +143,6 @@ void loop() {
     if (c == 'c' || c == 'C') {
       closedLevel = stableRaw;
       doorOpen = false;
-      wailing = false;
       quiet();
       showCalibration();
       chirp(TONE_B_HZ, 120);
@@ -156,10 +171,9 @@ void loop() {
       if (nowOpen != doorOpen) {
         doorOpen = nowOpen;
         if (doorOpen) {
-          openedAt = now; beepAt = now; wailing = false;
-          Serial.println("   !! DOOR OPEN - grace chirp, then the wail");
+          ringOn();                       // instant, no grace
+          Serial.println("   !! DOOR OPEN - RINGING (will not stop until shut)");
         } else {
-          wailing = false;
           quiet();
           Serial.println("   OK DOOR CLOSED - quiet, box secure");
         }
@@ -169,28 +183,13 @@ void loop() {
 
   if (closedLevel < 0 || !doorOpen) return;
 
-  // ---- grace, then wail: same shape as the real alarm ----
-  if (!wailing && now - openedAt >= TEST_GRACE_MS) {
-    wailing = true;
-    beepAt = now;
-    Serial.println("   !! GRACE OVER - FULL SIREN");
+  // ---- keep it ringing. The sound NEVER stops while the door is open:
+  // we only swap which note is playing, we never go silent between them.
+#if !SOLID_TONE
+  if (now - swapAt >= SWAP_MS) {
+    swapAt = now;
+    sirenAlt = !sirenAlt;
+    tone(PIN_BUZZ, sirenAlt ? TONE_A_HZ : TONE_B_HZ);
   }
-
-  if (!wailing) {                      // polite tick
-    if (beepOn  && now - beepAt >= CHIRP_ON_MS)  { beepAt = now; quiet(); }
-    if (!beepOn && now - beepAt >= CHIRP_GAP_MS) {
-      beepAt = now; tone(PIN_BUZZ, TONE_CHIRP); beepOn = true;
-    }
-  } else {                             // two-note wail
-    if (now - beepAt >= BEEP_MS) {
-      beepAt = now;
-      beepOn = !beepOn;
-      if (beepOn) {
-        sirenAlt = !sirenAlt;
-        tone(PIN_BUZZ, sirenAlt ? TONE_A_HZ : TONE_B_HZ);
-      } else {
-        noTone(PIN_BUZZ);
-      }
-    }
-  }
+#endif
 }
