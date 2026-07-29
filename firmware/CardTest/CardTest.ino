@@ -20,9 +20,17 @@
       SCK    ->   GPIO 18   (same wire the screen uses - they share)
       MOSI   ->   GPIO 23   (shared with the screen too)
       MISO   ->   GPIO 19   (the screen does not use this one)
-      SDA    ->   GPIO 13   (this is really "chip select")
-      RST    ->   GPIO 14
+      SDA    ->   GPIO 16   (this is really "chip select")
+      RST    ->   GPIO 17
       IRQ    ->   leave empty
+
+  Why 16 and 17: GPIO 13/14 work fine electrically, but they sit next to
+  GPIO 12 - and GPIO 12 held HIGH at boot tells the ESP32 its flash runs
+  at 1.8V, which stops the flash answering and gives an endless
+  "invalid header: 0xffffffff" boot loop. One jumper in the wrong row is
+  all it takes. 16 and 17 are nowhere near it, so that mistake cannot
+  happen. (16/17 are free on WROOM-32 boards like this one. They are NOT
+  free on WROVER boards, where PSRAM uses them.)
 
   The RC522 shares the SPI bus with the TFT. That is normal and fine -
   each device has its own SDA/CS line so only one listens at a time.
@@ -45,8 +53,8 @@
 #include <SPI.h>
 #include <MFRC522.h>
 
-#define PIN_SS    13
-#define PIN_RST   14
+#define PIN_SS    16
+#define PIN_RST   17
 #define PIN_BUZZ  27      // optional, comment out the chirps if not wired
 
 MFRC522 rfid(PIN_SS, PIN_RST);
@@ -98,7 +106,7 @@ void setup() {
     Serial.println("   That means no reply, not a dead chip. Check:");
     Serial.println("   - 3.3V, NOT 5V (5V destroys this board)");
     Serial.println("   - MISO on GPIO 19, MOSI on 23, SCK on 18");
-    Serial.println("   - SDA on 13, RST on 14");
+    Serial.println("   - SDA on 16, RST on 17");
     Serial.println("   - header pins actually SOLDERED, not pushed in");
     Serial.println();
   } else {
