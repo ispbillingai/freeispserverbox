@@ -60,9 +60,10 @@ const uint16_t TONE_A_HZ = 2000;
 const uint16_t TONE_B_HZ = 4250;   // this buzzer's loudest note
 #define REED_CLOSED_LEVEL LOW      // magnet near = LOW = lid ON
 
-// Your cards go here once we know them. Format exactly as CardTest prints.
+// Your cards. Format exactly as the tap log prints them.
+// Add every card/keyfob you want to work, then set ACCEPT_ANY_CARD to 0.
 const char* ALLOWED[] = {
-  // "A4 3F 19 7C",
+  "67 91 8F 63",        // first card read on the bench, 2026-07-29
 };
 const int ALLOWED_COUNT = sizeof(ALLOWED) / sizeof(ALLOWED[0]);
 
@@ -228,18 +229,16 @@ void loop() {
   // ---------- reader watchdog ----------
   // Prove it is actually polling, and re-assert the field. Some clones let
   // the antenna drift off after a while and then silently see nothing.
+  // Now that reading is proven, this only SPEAKS UP when something is
+  // wrong - a chatty log hides the lines that matter.
   static uint32_t lastPoke = 0;
-  if (now - lastPoke >= 3000) {
+  if (now - lastPoke >= 5000) {
     lastPoke = now;
-    byte v = rfid.PCD_ReadRegister(MFRC522::VersionReg);
     byte tx = rfid.PCD_ReadRegister(MFRC522::TxControlReg);
-    bool fieldOn = (tx & 0x03) != 0;      // bits 0-1 = the two antenna drivers
-    Serial.printf("   [reader] ver 0x%02X, RF field %s - hold the card FLAT"
-                  " on the board, touching it\n",
-                  v, fieldOn ? "ON" : "OFF (!)");
-    if (!fieldOn) {
-      rfid.PCD_AntennaOn();               // put it back on
-      Serial.println("   [reader] field was off - turned back on");
+    if ((tx & 0x03) == 0) {               // bits 0-1 = the two antenna drivers
+      rfid.PCD_AntennaOn();
+      rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+      Serial.println("   [reader] RF field had dropped - turned back on");
     }
   }
 
