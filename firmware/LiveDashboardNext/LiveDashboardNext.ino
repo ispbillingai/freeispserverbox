@@ -132,6 +132,19 @@ const uint32_t SIREN_MAX_MS = 180000;  // siren gives up after 3 min (battery +
 //      power cut silently re-arms a box the customer switched off), and
 //   2. the dashboard shows DISARMED loudly - a customer who forgets they
 //      turned it off will swear the alarm is broken.
+//
+// FOR THE FINAL BUILD - SHOW THE DISARMED STATE, DO NOT HIDE IT:
+// whenever something disarms or silences the box (a card tap, an account
+// switch, a remote siren=off), that must be VISIBLE, not silent:
+//   - the SECURITY page shows DISARMED / QUIET with the time LEFT counting
+//     down ("QUIET 47:12"), so anyone looking knows it is off and for how
+//     much longer - a box that looks armed but is not is the worst state
+//   - keep a COUNT of how many times it has been disarmed, next to the
+//     existing "times opened" count, so a box being silenced repeatedly is
+//     obvious at a glance
+//   - both go in the heartbeat too, so the account shows the same thing
+//     and the history is on the server, not only on a screen nobody is
+//     standing in front of
 
 // ================================================================
 //  MOTION CONFIG — the MPU-6050 "torn off the wall" sensor.
