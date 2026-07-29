@@ -121,6 +121,17 @@ const uint32_t SIREN_MAX_MS = 180000;  // siren gives up after 3 min (battery +
 // the server (or the router note) silences ANY alarm, motion included. The
 // only limit is timing - server commands ride the heartbeat, so it lands
 // within HEART_MS (20s). Shorten that if 20s is too long to wait.
+//
+// FOR THE FINAL BUILD: a customer must be able to turn the alarms OFF
+// COMPLETELY from their ACCOUNT on the dashboard - not just silence one
+// event. Some sites do not want an alarm at all. alarm=disarm already does
+// exactly this and survives as a state, so the work is on the server side:
+// an on/off switch per box in the account that sends disarm/arm and shows
+// the current state. Two things it MUST get right:
+//   1. the box remembers "disarmed" across a reboot (store it in NVS, or a
+//      power cut silently re-arms a box the customer switched off), and
+//   2. the dashboard shows DISARMED loudly - a customer who forgets they
+//      turned it off will swear the alarm is broken.
 
 // ================================================================
 //  MOTION CONFIG — the MPU-6050 "torn off the wall" sensor.
