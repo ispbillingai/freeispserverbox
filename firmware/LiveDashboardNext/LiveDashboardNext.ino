@@ -111,6 +111,17 @@ const uint32_t SIREN_MAX_MS = 180000;  // siren gives up after 3 min (battery +
                                        // server alert STAY on until it closes.
                                        // 0 = never stop sounding.
 
+// FOR THE FINAL BUILD (decided, not yet split out): a MOTION alarm should
+// sound for 2 MINUTES CONTINUOUSLY - its own timer, separate from the door
+// siren above. Someone tearing the box off the wall earns a longer, harder
+// alarm than a lid being opened. Add MOTION_SIREN_MS = 120000 and have
+// pollBuzzer use it when alarmReason == "MOTION".
+//
+// ...and it must be stoppable ONLINE, which already works: siren=off from
+// the server (or the router note) silences ANY alarm, motion included. The
+// only limit is timing - server commands ride the heartbeat, so it lands
+// within HEART_MS (20s). Shorten that if 20s is too long to wait.
+
 // ================================================================
 //  MOTION CONFIG — the MPU-6050 "torn off the wall" sensor.
 //  Same rule as the alarm: leave 0 until it is actually wired, or
