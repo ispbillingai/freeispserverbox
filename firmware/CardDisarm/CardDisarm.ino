@@ -66,7 +66,8 @@ const uint16_t TONE_B_HZ = 4250;   // this buzzer's loudest note
 // Your cards. Format exactly as the tap log prints them.
 // Add every card/keyfob you want to work, then set ACCEPT_ANY_CARD to 0.
 const char* ALLOWED[] = {
-  "67 91 8F 63",        // first card read on the bench, 2026-07-29
+  "67 91 8F 63",        // blue KEYFOB   (kit), added 2026-07-29
+  "F3 97 01 3A",        // white CARD    (kit), added 2026-07-29
 };
 const int ALLOWED_COUNT = sizeof(ALLOWED) / sizeof(ALLOWED[0]);
 
