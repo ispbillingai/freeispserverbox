@@ -51,7 +51,10 @@
 #define PIN_BUZZ  27
 
 // ---- behaviour ----
-#define ACCEPT_ANY_CARD 1          // 1 = bench, any card. 0 = list only.
+// 0 = ONLY the cards in ALLOWED[] below can silence the alarm. This is the
+//     real behaviour, and it is on now that we know your card's number.
+// 1 = bench mode, any card works (used before we knew any UIDs).
+#define ACCEPT_ANY_CARD 0
 
 const uint32_t QUIET_MS = 30000;   // BENCH: 30s. REAL BOX: 3600000 = 1 hour
 const uint32_t DEBOUNCE_MS = 60;
@@ -244,7 +247,26 @@ void loop() {
 
   // ---------- the card reader ----------
   if (!rfid.PICC_IsNewCardPresent()) return;
-  if (!rfid.PICC_ReadCardSerial())   return;
+
+  // A card the reader can start talking to but cannot finish reading (a
+  // different card family, or one snatched away mid-read) leaves the RC522
+  // stuck in the middle of a conversation. If we just gave up here it would
+  // then ignore EVERY card - including the right one - until a reboot.
+  // So: always close the conversation, and re-initialise if it keeps failing.
+  static uint8_t failCount = 0;
+  if (!rfid.PICC_ReadCardSerial()) {
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    if (++failCount >= 3) {
+      failCount = 0;
+      rfid.PCD_Init();                          // full reset of the reader
+      rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+      rfid.PCD_AntennaOn();
+      Serial.println("   [reader] a card confused it - reader reset, ready again");
+    }
+    return;
+  }
+  failCount = 0;
 
   String uid = uidToString(&rfid.uid);
   if (uid == lastUid && now - lastCardAt < 1500) {   // card left sitting on it
