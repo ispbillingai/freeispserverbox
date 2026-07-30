@@ -192,7 +192,12 @@ the words:
 ## Before ordering — your part
 
 1. Print `fitcheck_1to1.pdf` at **100% scale** (no "fit to page").
-2. Measure the printed outline: **exactly 100 × 100 mm** or the print scaled.
+2. Measure the printed outline: **exactly 115 × 115 mm** or the print scaled.
+   (Rev G grew from 100 mm — Francis's call, so the 38-pin devkit's body
+   overhang has room and nothing is cramped.)
+3. Confirm the devkit: 19 pins per side drop into the 19 printed holes, row
+   spacing 25.4 mm, and its body fits inside the printed "ESP32 BODY" box
+   including the USB/Type-C end.
 3. Sit every real module on the paper. Every pin lands on a hole, every
    module name matches the silk beside it.
 4. **ESP32 row spacing**: the two socket rows are 25.4 mm apart. Verify

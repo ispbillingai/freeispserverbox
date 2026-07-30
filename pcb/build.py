@@ -24,7 +24,10 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "freeisp_brain.ki
 
 # board origin on the page: design (0,0) maps here
 OX, OY = 60.0, 40.0
-BW = BH = 100.0
+# 115mm: Francis's call ("11.5 so everything fits well and is not cramped")
+# after the 38-pin devkit's body overhang showed up on the paper test.
+# Leaves PCBWay's 100mm cheap tier (~$5 -> ~$15-25 for 5) -- accepted.
+BW = BH = 115.0
 
 RING = 9.0           # ground ring inset from the board edge
 W_GND = 2.0          # perimeter ring, out in open copper
@@ -159,15 +162,15 @@ PARTS = {
     # between the ESP32 rows -- that channel is a dead end (a pin row cannot
     # be crossed), so every trace to it had to come the long way round and
     # curl past U4's own unused pins. Six nets ended up knotted in there.
-    "J4":  (LIB_HEADER, hdr(8), 82, 12, 0, "TFT",
+    "J4":  (LIB_HEADER, hdr(8), 97, 12, 0, "TFT",
             {1: "GND", 2: "+5V_SYS", 3: "SCK", 4: "MOSI", 5: "TFT_RST",
              6: "TFT_DC", 7: "TFT_CS", 8: "TFT_BLK"}),
     # RC522: SDA SCK MOSI MISO IRQ GND RST 3.3V  (IRQ unused but present)
-    "J5":  (LIB_HEADER, hdr(8), 82, 36, 0, "RC522",
+    "J5":  (LIB_HEADER, hdr(8), 97, 36, 0, "RC522",
             {1: "RC_SS", 2: "SCK", 3: "MOSI", 4: "MISO",
              6: "GND", 7: "RC_RST", 8: "+3V3"}),
     # GY-521: VCC GND SCL SDA XDA XCL AD0 INT  (last four unused but present)
-    "U4":  (LIB_HEADER, hdr(8), 82, 60, 0, "MPU-6050",
+    "U4":  (LIB_HEADER, hdr(8), 97, 60, 0, "MPU-6050",
             {1: "+3V3", 2: "GND", 3: "SCL", 4: "SDA"}),
 
     # --- passives ---
@@ -191,27 +194,27 @@ PARTS = {
     # --- field terminals, bottom row (J12 sense header DELETED, review C1/m5:
     # both sense sources are on-board nets; a field pin invited 12V into a
     # 3.3V-max input-only GPIO) ---
-    "J7":  (LIB_TERM, FP_TERM2, 13, 86, 0, "REED", {1: "REED_F", 2: "GND"}),
-    "J8":  (LIB_TERM, FP_TERM2, 36, 86, 0, "LED R", {1: "GND", 2: "LED_R_A"}),
-    "J9":  (LIB_TERM, FP_TERM2, 48, 86, 0, "LED G", {1: "GND", 2: "LED_G_A"}),
+    "J7":  (LIB_TERM, FP_TERM2, 13, 101, 0, "REED", {1: "REED_F", 2: "GND"}),
+    "J8":  (LIB_TERM, FP_TERM2, 36, 101, 0, "LED R", {1: "GND", 2: "LED_R_A"}),
+    "J9":  (LIB_TERM, FP_TERM2, 48, 101, 0, "LED G", {1: "GND", 2: "LED_G_A"}),
     # buzzer + relay live on 5V_SYS: the alarm must sound with the mains cut
-    "J10": (LIB_HEADER, hdr(3), 58, 86, 90, "BUZZER",
+    "J10": (LIB_HEADER, hdr(3), 58, 101, 90, "BUZZER",
             {1: "+5V_SYS", 2: "GND", 3: "BUZZ"}),
     # R7 in the drive line stops the relay board's opto back-feeding GPIO13
-    "K1":  (LIB_HEADER, hdr(3), 68, 86, 90, "HORN RLY",
+    "K1":  (LIB_HEADER, hdr(3), 68, 101, 90, "HORN RLY",
             {1: "HORN_DRV", 2: "GND", 3: "+5V_SYS"}),
     # Horn loop (review C2 -- the old HORN_RET pad connected to NOTHING):
     # J11 5V -> relay COM, relay NO -> horn +, horn - -> J11 HORN- -> GND.
     # Francis's horn is 3-5V, NOT 12V -- so it feeds from 5V_SYS: it keeps
     # sounding on battery after a mains cut, and can never see 12V.
-    "J11": (LIB_TERM, FP_TERM2, 78, 86, 0, "HORN",
+    "J11": (LIB_TERM, FP_TERM2, 78, 101, 0, "HORN",
             {1: "+5V_SYS", 2: "GND"}),
 
     # --- mechanical ---
     "H1":  (LIB_HOLE, FP_HOLE, 4.5, 4.5, 0, "M3", {}),
-    "H2":  (LIB_HOLE, FP_HOLE, 95.5, 4.5, 0, "M3", {}),
-    "H3":  (LIB_HOLE, FP_HOLE, 4.5, 95.5, 0, "M3", {}),
-    "H4":  (LIB_HOLE, FP_HOLE, 95.5, 95.5, 0, "M3", {}),
+    "H2":  (LIB_HOLE, FP_HOLE, 110.5, 4.5, 0, "M3", {}),
+    "H3":  (LIB_HOLE, FP_HOLE, 4.5, 110.5, 0, "M3", {}),
+    "H4":  (LIB_HOLE, FP_HOLE, 110.5, 110.5, 0, "M3", {}),
 }
 
 
@@ -252,7 +255,7 @@ def place(ref, spec):
 
     # a few reference texts land on neighbours at their library default spot;
     # these overrides are in FOOTPRINT-LOCAL coords (they rotate with the part)
-    ref_at = {"D1": (6.35, 3.6), "D2": (6.35, 3.6), "J13": (0.0, 9.0),
+    ref_at = {"D1": (6.35, 3.6), "D2": (7.2, 4.9), "J13": (0.0, 9.0),
               "J11": (-3.5, -6.6), "R3": (3.81, 2.4)}.get(ref)
 
     # reference + value text
@@ -362,6 +365,17 @@ def edge(x1, y1, x2, y2):
     ]
 
 
+def sline(x1, y1, x2, y2):
+    return [
+        "gr_line",
+        ["start", f"{OX + x1:.4f}", f"{OY + y1:.4f}"],
+        ["end", f"{OX + x2:.4f}", f"{OY + y2:.4f}"],
+        ["stroke", ["width", "0.15"], ["type", "default"]],
+        ["layer", sexp.q("F.SilkS")],
+        ["uuid", uid()],
+    ]
+
+
 def text(s, x, y, size=1.5, rot=0):
     thick = min(0.25, size * 0.18)
     return [
@@ -396,28 +410,28 @@ PIN_SILK = [
     ("GND", 60.6, 28, 0), ("CLK", 60.6, 73.72, 0),
     ("ANTENNA SIDE", 44.7, 30.5, 0), ("USB SIDE", 46.5, 69.4, 0),
     # J4 TFT (right of pads; names = blue ST7735S silkscreen)
-    ("GND", 85.6, 12, 0), ("VDD", 85.6, 14.54, 0), ("SCL", 85.6, 17.08, 0),
-    ("SDA", 85.6, 19.62, 0), ("RST", 85.6, 22.16, 0), ("DC", 85.5, 24.70, 0),
-    ("CS", 85.5, 27.24, 0), ("BLK", 85.6, 29.78, 0),
+    ("GND", 100.6, 12, 0), ("VDD", 100.6, 14.54, 0), ("SCL", 100.6, 17.08, 0),
+    ("SDA", 100.6, 19.62, 0), ("RST", 100.6, 22.16, 0), ("DC", 100.5, 24.70, 0),
+    ("CS", 100.5, 27.24, 0), ("BLK", 100.6, 29.78, 0),
     # J5 RC522
-    ("SDA", 85.6, 36, 0), ("SCK", 85.6, 38.54, 0), ("MOSI", 85.9, 41.08, 0),
-    ("MISO", 85.9, 43.62, 0), ("IRQ", 85.6, 46.16, 0), ("GND", 85.6, 48.70, 0),
-    ("RST", 85.6, 51.24, 0), ("3.3V", 85.9, 53.78, 0),
+    ("SDA", 100.6, 36, 0), ("SCK", 100.6, 38.54, 0), ("MOSI", 100.9, 41.08, 0),
+    ("MISO", 100.9, 43.62, 0), ("IRQ", 100.6, 46.16, 0), ("GND", 100.6, 48.70, 0),
+    ("RST", 100.6, 51.24, 0), ("3.3V", 100.9, 53.78, 0),
     # U4 GY-521 MPU-6050
-    ("VCC", 85.6, 60, 0), ("GND", 85.6, 62.54, 0), ("SCL", 85.6, 65.08, 0),
-    ("SDA", 85.6, 67.62, 0), ("XDA", 85.6, 70.16, 0), ("XCL", 85.6, 72.70, 0),
-    ("AD0", 85.6, 75.24, 0), ("INT", 85.6, 77.78, 0),
+    ("VCC", 100.6, 60, 0), ("GND", 100.6, 62.54, 0), ("SCL", 100.6, 65.08, 0),
+    ("SDA", 100.6, 67.62, 0), ("XDA", 100.6, 70.16, 0), ("XCL", 100.6, 72.70, 0),
+    ("AD0", 100.6, 75.24, 0), ("INT", 100.6, 77.78, 0),
     # bottom row terminals: body silk climbs to y=81.15 (measured from the
     # footprint), so labels sit at 80.3
-    ("REED", 13, 80.3, 0), ("GND", 18.08, 80.3, 0),
-    ("GND", 36, 80.3, 0), ("LED+", 41.08, 80.3, 0),
-    ("GND", 48, 80.3, 0), ("LED+", 53.08, 80.3, 0),
-    ("+5V", 78, 80.3, 0), ("HORN-", 83.08, 80.3, 0),
+    ("REED", 13, 95.3, 0), ("GND", 18.08, 95.3, 0),
+    ("GND", 36, 95.3, 0), ("LED+", 41.08, 95.3, 0),
+    ("GND", 48, 95.3, 0), ("LED+", 53.08, 95.3, 0),
+    ("+5V", 78, 95.3, 0), ("HORN-", 83.08, 95.3, 0),
     # function headings for the ref-hidden bottom headers
-    ("BUZZ", 60.54, 88.4, 0), ("RELAY", 70.54, 88.4, 0),
+    ("BUZZ", 60.54, 103.4, 0), ("RELAY", 70.54, 103.4, 0),
     # bottom headers, vertical labels (2.54 pitch is too tight for horizontal)
-    ("5V", 58, 82.8, 90), ("GND", 60.54, 82.4, 90), ("SIG", 63.08, 82.6, 90),
-    ("IN", 68, 82.8, 90), ("GND", 70.54, 82.4, 90), ("VCC", 73.08, 82.6, 90),
+    ("5V", 58, 97.8, 90), ("GND", 60.54, 97.4, 90), ("SIG", 63.08, 97.6, 90),
+    ("IN", 68, 97.8, 90), ("GND", 70.54, 97.4, 90), ("VCC", 73.08, 97.6, 90),
 ]
 
 
@@ -653,9 +667,9 @@ def build():
     for x in (19.08, 38.08, 48.24, 63.08, 73.24):
         base(x, 15, x, a, "GND", W_STUB)
     for x in (18.08, 36, 48, 60.54, 70.54, 83.08):
-        base(x, 86, x, b, "GND", W_STUB)
+        base(x, 101, x, b, "GND", W_STUB)
     for y in (12, 48.70, 62.54):        # J4 pin1, J5 pin6, U4 pin2
-        base(82, y, b, y, "GND", W_STUB)
+        base(97, y, b, y, "GND", W_STUB)
     for y in (29.08, 39.24):            # J13 boost IN-/OUT- to the left ring
         base(14, y, a, y, "GND", W_STUB)
     # (the old J1->buck 12V hop is gone: the feed now goes through D3)
@@ -692,13 +706,24 @@ def build():
     # ---- silkscreen ----
     # Kept clear of the part silk: the ring gap at the bottom is the only
     # open strip wide enough for text.
-    pcb.append(text("FREEISP BRAIN  REV F  -  38-PIN DEVKITC", 50, 94, 1.8))
+    pcb.append(text("FREEISP BRAIN  REV G - 115MM - 38-PIN DEVKITC", 57.5, 109, 1.8))
     # The two set-points ARE the diode-OR priority mechanism: buck 0.4V above
     # boost means D1 always wins on mains and D2 is cleanly reverse-biased.
     # Printed on the board so the values cannot get lost in a document.
-    pcb.append(text("FUSE 12V INLINE - SET BUCK 5.4V - BOOST 5.0V", 50, 6.5, 1.1))
+    pcb.append(text("FUSE 12V INLINE - SET BUCK 5.4V - BOOST 5.0V", 57.5, 6.5, 1.1))
     for s, lx, ly, rot in PIN_SILK:
         pcb.append(text(s, lx, ly, 0.8, rot))
+
+    # ---- devkit BODY outline: the board is bigger than its pins. Overhangs
+    # are estimates off the paper-test photo (antenna ~7mm, USB end ~12mm
+    # incl. the Type-C) -- VERIFY on the printed sheet. Nothing taller than
+    # the 8.5mm socket seat may live inside this rectangle.
+    bx0, bx1 = 30.5, 58.9
+    by0, by1 = 28 - 6.0, 73.72 + 12.0
+    for s in [(bx0, by0, bx1, by0), (bx1, by0, bx1, by1),
+              (bx1, by1, bx0, by1), (bx0, by1, bx0, by0)]:
+        pcb.append(sline(*s))
+    pcb.append(text("ESP32 BODY - LOW PARTS ONLY", 44.7, 84.2, 0.8))
 
     with open(OUT, "w", encoding="utf-8") as fh:
         fh.write(sexp.dumps(pcb) + "\n")
