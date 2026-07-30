@@ -8,3 +8,9 @@ build/
 # Windows noise
 Thumbs.db
 desktop.ini
+
+# KiCad / PCB generator artifacts
+__pycache__/
+pcb/drc.json
+*.kicad_prl
+*-backups/
