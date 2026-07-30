@@ -171,9 +171,11 @@ PARTS = {
     "K1":  (LIB_HEADER, hdr(3), 68, 86, 90, "HORN RLY",
             {1: "HORN_DRV", 2: "GND", 3: "+5V_SYS"}),
     # Horn loop (review C2 -- the old HORN_RET pad connected to NOTHING):
-    # J11 +12V -> relay COM, relay NO -> horn +, horn - -> J11 HORN- -> GND.
+    # J11 5V -> relay COM, relay NO -> horn +, horn - -> J11 HORN- -> GND.
+    # Francis's horn is 3-5V, NOT 12V -- so it feeds from 5V_SYS: it keeps
+    # sounding on battery after a mains cut, and can never see 12V.
     "J11": (LIB_TERM, FP_TERM2, 78, 86, 0, "HORN",
-            {1: "+12V", 2: "GND"}),
+            {1: "+5V_SYS", 2: "GND"}),
 
     # --- mechanical ---
     "H1":  (LIB_HOLE, FP_HOLE, 4.5, 4.5, 0, "M3", {}),
@@ -379,7 +381,7 @@ PIN_SILK = [
     ("REED", 13, 80.3, 0), ("GND", 18.08, 80.3, 0),
     ("GND", 36, 80.3, 0), ("LED+", 41.08, 80.3, 0),
     ("GND", 48, 80.3, 0), ("LED+", 53.08, 80.3, 0),
-    ("+12V", 78, 80.3, 0), ("HORN-", 83.08, 80.3, 0),
+    ("+5V", 78, 80.3, 0), ("HORN-", 83.08, 80.3, 0),
     # function headings for the ref-hidden bottom headers
     ("BUZZ", 60.54, 88.4, 0), ("RELAY", 70.54, 88.4, 0),
     # bottom headers, vertical labels (2.54 pitch is too tight for horizontal)

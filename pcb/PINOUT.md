@@ -81,11 +81,11 @@ STOP — it is not the assumed 30-pin layout.
 ```
  mains 12V ──[INLINE FUSE]── J1 ── D3 ──+12V──┬── U1 BUCK ──5.4V──┬── D1 ─┐
                                               │                   │       │
-                                              ├── J11-1 (horn)    │       ├── 5V_SYS
-                                              └── R5/R6 → GPIO34  │       │   ESP32 VIN,
-                                                     U2 CHARGER ──┘       │   TFT, buzzer,
-                                                         │                │   horn relay,
-                                                      battery ── J13 BOOST ── D2 ─┘  C1 470µ
+                                              └── R5/R6 → GPIO34  │       ├── 5V_SYS
+                                                     U2 CHARGER ──┘       │   ESP32 VIN,
+                                                         │                │   TFT, buzzer,
+                                                      battery ── J13 BOOST ── D2 ─┘  relay,
+                                                                          HORN (J11), C1 470µ
 ```
 
 | Ref | Terminal | Pin order (left → right / top → bottom) | Wire to |
@@ -131,21 +131,33 @@ two modules' plugs.
 | J8 | red LED | GND · LED+ | LED long leg to LED+ (220R is on the board) |
 | J9 | green LED | GND · LED+ | same |
 | J10 | BUZZ header | 5V · GND · SIG | passive buzzer module |
-| K1 | RELAY header | IN · GND · VCC | horn relay board |
-| J11 | horn power | +12V · HORN− | see the horn loop below |
+| K1 | RELAY header | IN · GND · VCC | horn relay board's 3 control pins |
+| J11 | horn power | +5V · HORN− | see the horn loop below |
 
-**The horn loop (four wires, all of them):**
+**The PCB does not switch the horn.** K1 only feeds the relay module's
+control pins; the switching happens in that module's own COM/NO screw
+terminals. All four wires:
 
 ```
-J11 "+12V"  ──►  relay COM
+J11 "+5V"   ──►  relay COM
 relay NO    ──►  horn +
 horn −      ──►  J11 "HORN−"   (returns to ground through the board)
 K1 IN·GND·VCC ─► relay board's own 3 pins
 ```
 
-J11 "+12V" is ALWAYS live — it only becomes an alarm because the relay sits
+**J11 feeds from 5V_SYS, not 12 V** — the horn is a 3–5 V type, and 5V_SYS
+is the diode-OR rail, so the horn keeps sounding on battery after a mains
+cut and can never be fed 12 V by mistake. ⚠️ If a future build uses a true
+12 V horn, that is a board change (J11 back to the 12 V rail) AND a battery
+problem (12 V dies with the mains) — do not just wire it and hope.
+
+J11 "+5V" is ALWAYS live — it only becomes an alarm because the relay sits
 between it and the horn. Wire the horn straight across J11 and it will be
 either permanently on or permanently silent, depending on which way you did it.
+
+**Boost module sizing:** on battery the boost carries the ESP32's WiFi
+bursts, the TFT, the relay coil AND the sounding horn — buy a **≥2 A**
+step-up module, not a tiny 1 A one.
 
 ---
 
