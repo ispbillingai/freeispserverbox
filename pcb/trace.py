@@ -40,16 +40,18 @@ EXPECTED = {
     "+5V_BAT": {"J13.3", "D2.2"},                      # boost out -> D2 anode
     "+5V_SYS": {"D1.1", "D2.1", "C1.1",                # diode-OR rail
                 "U3A.19",                              # ESP32 5V/VIN
+                "J14.2",                               # expansion header
                 "J4.2",                                # TFT VDD
                 "J10.1",                               # buzzer 5V
                 "K1.3",                                # relay VCC
                 "J11.1"},                              # horn feed (3-5V horn)
-    "+3V3": {"U3A.1", "J5.8", "U4.1"},                 # ESP32 3V3 -> RC522 + MPU
+    "+3V3": {"U3A.1", "J5.8", "U4.1", "J14.1"},                 # ESP32 3V3 -> RC522 + MPU
     "GND": {"J1.2", "U1.2", "U1.4", "U2.2", "U2.4",
             "J13.2", "J13.4", "U3A.14", "U3B.1", "U3B.7",
             "J4.1", "J5.6", "U4.2", "J7.2", "J8.1",
             "J9.1", "J10.2", "K1.2", "J11.2",
-            "R4.1", "R6.1", "C1.2", "C2.2", "C3.2"},
+            "R4.1", "R6.1", "C1.2", "C2.2", "C3.2",
+            "J14.3", "J14.4", "J14.10"},
 
     # ---- sensing (firmware: GPIO34 mains, GPIO35 battery) ----
     "SENSE_MAINS": {"R5.2", "R6.2", "C3.1", "U3A.5"},
@@ -83,12 +85,17 @@ EXPECTED = {
     # ---- I2C (firmware SDA21 SCL22) ----
     "SDA": {"U3B.6", "U4.4"},
     "SCL": {"U3B.3", "U4.3"},
+
+    # ---- J14 expansion: the spares kept reachable for a future idea ----
+    "EXP_EN":  {"U3A.2", "J14.9"},
+    "EXP_D36": {"U3A.3", "J14.5"},
+    "EXP_D39": {"U3A.4", "J14.6"},
+    "EXP_D14": {"U3A.12", "J14.7"},
+    "EXP_D12": {"U3A.13", "J14.8"},
 }
 
 # Pads that must connect to NOTHING (empty net) -- a wire here is a fault.
 EXPECT_NC = {
-    "U3A.2", "U3A.3", "U3A.4",            # EN, VP, VN
-    "U3A.12", "U3A.13",                   # D14, D12(strap!)
     "U3A.16", "U3A.17", "U3A.18",         # SD2 SD3 CMD = GPIO9/10/11 FLASH
     "U3B.4", "U3B.5",                     # TX0, RX0
     "U3B.14", "U3B.16",                   # D0(strap), D15(strap)

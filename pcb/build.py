@@ -76,6 +76,8 @@ NETS = [
     "SENSE_BATT", "SENSE_MAINS", "REED", "REED_F", "LED_R", "LED_R_A", "LED_G",
     "LED_G_A", "BUZZ", "HORN_IN", "HORN_DRV", "MOSI", "MISO", "SCK", "TFT_CS",
     "TFT_DC", "TFT_RST", "TFT_BLK", "RC_SS", "RC_RST", "SDA", "SCL",
+    # brought out to the expansion header for whatever comes later
+    "EXP_D36", "EXP_D39", "EXP_D14", "EXP_D12", "EXP_EN",
 ]
 NET_ID = {name: i for i, name in enumerate(NETS)}
 
@@ -102,6 +104,12 @@ U3A_NETS = {
     14: "GND",
     15: "HORN_IN",      # GPIO13
     19: "+5V_SYS",      # 5V/VIN, bottom-left -- eats from whichever diode wins
+    # --- spares brought out to J14, so a later idea needs no new board ---
+    2: "EXP_EN",        # reset: a button to GND reboots the box
+    3: "EXP_D36",       # VP  - input ONLY, ADC1, no internal pull-up
+    4: "EXP_D39",       # VN  - input ONLY, ADC1, no internal pull-up
+    12: "EXP_D14",      # a full GPIO with an internal pull-up: best for buttons
+    13: "EXP_D12",      # strapping pin - must be LOW at boot
 }
 U3B_NETS = {
     1: "GND",
@@ -209,6 +217,17 @@ PARTS = {
     # sounding on battery after a mains cut, and can never see 12V.
     "J11": (LIB_TERM, FP_TERM2, 78, 101, 0, "HORN",
             {1: "+5V_SYS", 2: "GND"}),
+
+    # --- EXPANSION: every spare pin plus power and ground, so a button,
+    # sensor or anything else can be added later without a new board.
+    # TX0/RX0 are deliberately NOT here - they are the USB serial port.
+    "J14": (LIB_HEADER, "PinHeader_2x05_P2.54mm_Vertical", 30, 40, 0,
+            "EXPANSION",
+            {1: "+3V3",    2: "+5V_SYS",
+             3: "GND",     4: "GND",
+             5: "EXP_D36", 6: "EXP_D39",
+             7: "EXP_D14", 8: "EXP_D12",
+             9: "EXP_EN", 10: "GND"}),
 
     # --- mechanical ---
     "H1":  (LIB_HOLE, FP_HOLE, 4.5, 4.5, 0, "M3", {}),
@@ -440,6 +459,13 @@ PIN_SILK = [
     ("+5V", 78, 95.3, 0), ("HORN-", 83.08, 95.3, 0),
     # function headings for the ref-hidden bottom headers
     ("BUZZ", 60.54, 103.4, 0), ("RELAY", 70.54, 103.4, 0),
+    # J14 expansion: odd pins label to the left, even pins to the right
+    ("3V3", 26.4, 40, 0), ("5V", 36.0, 40, 0),
+    ("GND", 26.4, 42.54, 0), ("GND", 36.4, 42.54, 0),
+    ("D36", 26.4, 45.08, 0), ("D39", 36.4, 45.08, 0),
+    ("D14", 26.4, 47.62, 0), ("D12", 36.4, 47.62, 0),
+    ("EN", 26.2, 50.16, 0), ("GND", 36.4, 50.16, 0),
+    ("EXPANSION", 31.3, 36.6, 0),
     # bottom headers, vertical labels (2.54 pitch is too tight for horizontal)
     ("5V", 58, 97.8, 90), ("GND", 60.54, 97.4, 90), ("SIG", 63.08, 97.6, 90),
     ("IN", 68, 97.8, 90), ("GND", 70.54, 97.4, 90), ("VCC", 73.08, 97.6, 90),
@@ -695,7 +721,7 @@ def build():
     best = None
     for strategy in ("power", "short", "long"):
         pri = frozenset()
-        for attempt in range(4):
+        for attempt in range(7):
             trial = [dict(t) for t in base_tracks]
             vias, failed = auto_route(trial, strategy, pri)
             score = len(failed) * 1000 + len(vias)

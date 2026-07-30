@@ -172,6 +172,33 @@ step-up module, not a tiny 1 A one.
 
 ---
 
+## J14 EXPANSION — the spare pins, kept reachable
+
+A 2x5 header beside the ESP32 brings out every spare pin plus power and
+ground, so a button, a sensor or anything else can be added later **without
+a new board**. Odd pins are the left column, even pins the right.
+
+| Pin | Name | What it is |
+|---|---|---|
+| 1 | 3V3 | 3.3 V, from the ESP32's own regulator |
+| 2 | 5V | 5V_SYS — survives a mains cut |
+| 3, 4, 10 | GND | ground |
+| 5 | D36 | **input ONLY**, ADC1. No internal pull-up |
+| 6 | D39 | **input ONLY**, ADC1. No internal pull-up |
+| 7 | D14 | full GPIO with an internal pull-up — **best pin for a button** |
+| 8 | D12 | works, but it is a strapping pin: must be LOW at boot |
+| 9 | EN | reset. A button from here to GND reboots the box |
+
+**For a button, use pin 7 (D14) to pin 3 (GND)** and enable
+`INPUT_PULLUP` — no resistor needed. D36 and D39 have no internal pull-up,
+so a button on those needs an external 10k to 3V3.
+
+**Do not hold D12 high at boot**, and if you wire a button to EN remember it
+is a hardware reset, not something firmware can read.
+
+TX0 and RX0 are deliberately NOT on this header — they are the USB serial
+port, and loading them breaks programming and the serial monitor.
+
 ## Match your modules by PRINTED NAME, never by pin position
 
 The board's labels are correct for the common versions of each module, but
