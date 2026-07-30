@@ -376,12 +376,23 @@ def sline(x1, y1, x2, y2):
     ]
 
 
-def text(s, x, y, size=1.5, rot=0):
+def uline(x1, y1, x2, y2, w=0.2, layer="User.Drawings"):
+    return [
+        "gr_line",
+        ["start", f"{OX + x1:.4f}", f"{OY + y1:.4f}"],
+        ["end", f"{OX + x2:.4f}", f"{OY + y2:.4f}"],
+        ["stroke", ["width", f"{w}"], ["type", "default"]],
+        ["layer", sexp.q(layer)],
+        ["uuid", uid()],
+    ]
+
+
+def text(s, x, y, size=1.5, rot=0, layer="F.SilkS"):
     thick = min(0.25, size * 0.18)
     return [
         "gr_text", sexp.q(s),
         ["at", f"{OX + x:.4f}", f"{OY + y:.4f}"] + ([f"{rot}"] if rot else []),
-        ["layer", sexp.q("F.SilkS")],
+        ["layer", sexp.q(layer)],
         ["uuid", uid()],
         ["effects", ["font", ["size", f"{size}", f"{size}"], ["thickness", f"{thick:.2f}"]]],
     ]
@@ -628,6 +639,7 @@ def build():
          ["13", sexp.q("F.Paste"), "user"],
          ["15", sexp.q("B.Paste"), "user"],
          ["17", sexp.q("Dwgs.User"), "user", sexp.q("User.Drawings")],
+         ["45", sexp.q("User.1"), "user"],
          ["19", sexp.q("Cmts.User"), "user", sexp.q("User.Comments")],
          ["21", sexp.q("Eco1.User"), "user", sexp.q("User.Eco1")],
          ["23", sexp.q("Eco2.User"), "user", sexp.q("User.Eco2")],
@@ -727,6 +739,32 @@ def build():
     pcb.append(text("FUSE 12V INLINE - SET BUCK 5.4V - BOOST 5.0V", 57.5, 6.5, 1.1))
     for s, lx, ly, rot in PIN_SILK:
         pcb.append(text(s, lx, ly, 0.8, rot))
+
+    # ---- PRINT CALIBRATION, on User.Drawings so it is never fabricated ----
+    # A scaled print puts the first few pins in their holes and then drifts:
+    # 1% over the 45.72mm pin row is 0.46mm, which misses by pin 19.
+    U = "Dwgs.User"
+    RY = 124.0
+    pcb.append(uline(7.5, RY, 107.5, RY, 0.35, U))
+    for i in range(11):
+        x = 7.5 + i * 10
+        h = 3.2 if i % 5 == 0 else 1.8
+        pcb.append(uline(x, RY, x, RY - h, 0.3, U))
+        if i % 5 == 0:
+            pcb.append(text(f"{i * 10}", x, RY - h - 2.4, 2.2, 0, U))
+    pcb.append(text("100.00 mm  -  MEASURE THIS LINE FIRST", 57.5, RY + 5.0, 2.6, 0, U))
+    pcb.append(text("not exactly 100 mm? the printer scaled the page - reprint at "
+                    "100% / Actual Size, scaling OFF", 57.5, RY + 9.4, 1.9, 0, U))
+
+    # the two dimensions the ESP32 actually depends on
+    pcb.append(uline(26, 34, 26, 79.72, 0.3, U))
+    for yy in (34, 79.72):
+        pcb.append(uline(24.6, yy, 27.4, yy, 0.3, U))
+    pcb.append(text("45.72 mm  pin 1 to pin 19", 23.4, 56.9, 2.0, 90, U))
+    pcb.append(uline(44, 24.5, 69.4, 24.5, 0.3, U))
+    for xx in (44, 69.4):
+        pcb.append(uline(xx, 23.1, xx, 25.9, 0.3, U))
+    pcb.append(text("25.40 mm  row to row", 56.7, 22.2, 2.0, 0, U))
 
     # ---- devkit BODY outline: the board is bigger than its pins. Overhangs
     # are estimates off the paper-test photo (antenna ~7mm, USB end ~12mm
