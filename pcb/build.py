@@ -104,7 +104,8 @@ PARTS = {
     # Mains cut: boost 5V takes over through D2. No code, no switching.
     # Charger IN+ stays on the BUCK rail on purpose -- feeding it from
     # 5V_SYS would let the battery charge itself through the boost.
-    "J13": (LIB_TERM, FP_TERM4, 14, 24, 0, "BOOST  IN+ IN- OUT+ OUT-",
+    # vertical down the left edge (rot 270 runs the pads downward)
+    "J13": (LIB_TERM, FP_TERM4, 14, 24, 270, "BOOST  IN+ IN- OUT+ OUT-",
             {1: "VBAT", 2: "GND", 3: "+5V_BAT", 4: "GND"}),
     "D1":  (LIB_DIODE, FP_DIODE, 38, 25, 0, "1N5822",
             {1: "+5V_SYS", 2: "+5V"}),        # pad 1 = cathode (band)
@@ -196,14 +197,22 @@ def place(ref, spec):
     fp.insert(idx, ["at", f"{OX + dx:.4f}", f"{OY + dy:.4f}"] + ([f"{rot:.0f}"] if rot else []))
     fp.insert(idx + 1, ["uuid", uid()])
 
+    # a few reference texts land on neighbours at their library default spot;
+    # these overrides are in FOOTPRINT-LOCAL coords (they rotate with the part)
+    ref_at = {"D1": (6.35, 3.6), "D2": (6.35, 3.6), "J13": (0.0, 9.0)}.get(ref)
+
     # reference + value text
     for prop in sexp.find_all(fp, "property"):
         pname = sexp.unq(prop[1])
         if pname == "Reference":
             prop[2] = sexp.q(ref)
-            # mounting-hole labels sit in the corners and run off the edge
-            if lib == LIB_HOLE:
+            # mounting-hole refs run off the edge; the bottom 2.54 mm headers
+            # have no room -- their function headings are drawn instead
+            if lib == LIB_HOLE or ref in ("J10", "J12", "K1"):
                 prop.append(["hide", "yes"])
+            if ref_at is not None:
+                pat = sexp.find(prop, "at")
+                pat[1], pat[2] = f"{ref_at[0]:.2f}", f"{ref_at[1]:.2f}"
         elif pname == "Value":
             prop[2] = sexp.q(value)
         if sexp.find(prop, "uuid") is None:
@@ -299,14 +308,62 @@ def edge(x1, y1, x2, y2):
     ]
 
 
-def text(s, x, y, size=1.5):
+def text(s, x, y, size=1.5, rot=0):
+    thick = min(0.25, size * 0.18)
     return [
         "gr_text", sexp.q(s),
-        ["at", f"{OX + x:.4f}", f"{OY + y:.4f}"],
+        ["at", f"{OX + x:.4f}", f"{OY + y:.4f}"] + ([f"{rot}"] if rot else []),
         ["layer", sexp.q("F.SilkS")],
         ["uuid", uid()],
-        ["effects", ["font", ["size", f"{size}", f"{size}"], ["thickness", "0.25"]]],
+        ["effects", ["font", ["size", f"{size}", f"{size}"], ["thickness", f"{thick:.2f}"]]],
     ]
+
+
+# Every connector pin named on the silkscreen, using the NAME PRINTED ON THE
+# MODULE it wires to -- so Francis confirms board-against-part, not
+# board-against-my-notes. (label, x, y, rot)
+PIN_SILK = [
+    # J1 12V in (below pads)
+    ("GND", 14, 19.6, 0), ("+12V", 19.08, 19.6, 0),
+    # U1 buck terminal (below pads)
+    ("IN+", 33, 20.9, 0), ("IN-", 38.08, 20.9, 0),
+    ("OUT+", 43.16, 20.9, 0), ("OUT-", 48.24, 20.9, 0),
+    # U2 charger terminal (below pads)
+    ("IN+", 58, 20.9, 0), ("IN-", 63.08, 20.9, 0),
+    ("B+", 68.16, 20.9, 0), ("B-", 73.24, 20.9, 0),
+    # J13 boost terminal, vertical: labels right of each pad, clear of the
+    # body silk (which reaches x=18.85 after the 270 rotation)
+    ("IN+", 20.4, 24, 0), ("IN-", 20.4, 29.08, 0),
+    ("OUT+", 20.8, 34.16, 0), ("OUT-", 20.8, 39.24, 0),
+    # ESP32 orientation -- match these four corners to the devkit silkscreen
+    ("EN", 27.3, 30, 0), ("VIN", 27.1, 65.56, 0),
+    ("D23", 60.3, 30, 0), ("3V3", 60.3, 65.56, 0),
+    ("ANTENNA SIDE", 43.7, 32.5, 0), ("USB SIDE", 43.7, 63.0, 0),
+    # J4 TFT (right of pads; names = blue ST7735S silkscreen)
+    ("GND", 85.6, 12, 0), ("VDD", 85.6, 14.54, 0), ("SCL", 85.6, 17.08, 0),
+    ("SDA", 85.6, 19.62, 0), ("RST", 85.6, 22.16, 0), ("DC", 85.5, 24.70, 0),
+    ("CS", 85.5, 27.24, 0), ("BLK", 85.6, 29.78, 0),
+    # J5 RC522
+    ("SDA", 85.6, 36, 0), ("SCK", 85.6, 38.54, 0), ("MOSI", 85.9, 41.08, 0),
+    ("MISO", 85.9, 43.62, 0), ("IRQ", 85.6, 46.16, 0), ("GND", 85.6, 48.70, 0),
+    ("RST", 85.6, 51.24, 0), ("3.3V", 85.9, 53.78, 0),
+    # U4 GY-521 MPU-6050
+    ("VCC", 85.6, 60, 0), ("GND", 85.6, 62.54, 0), ("SCL", 85.6, 65.08, 0),
+    ("SDA", 85.6, 67.62, 0), ("XDA", 85.6, 70.16, 0), ("XCL", 85.6, 72.70, 0),
+    ("AD0", 85.6, 75.24, 0), ("INT", 85.6, 77.78, 0),
+    # bottom row terminals: body silk climbs to y=81.15 (measured from the
+    # footprint), so labels sit at 80.3
+    ("REED", 13, 80.3, 0), ("GND", 18.08, 80.3, 0),
+    ("GND", 36, 80.3, 0), ("LED+", 41.08, 80.3, 0),
+    ("GND", 48, 80.3, 0), ("LED+", 53.08, 80.3, 0),
+    ("+12V", 78, 80.3, 0), ("HORN", 83.08, 80.3, 0),
+    # function headings for the ref-hidden bottom headers
+    ("SENSE", 26.54, 88.4, 0), ("BUZZ", 60.54, 88.4, 0), ("RELAY", 70.54, 88.4, 0),
+    # bottom headers, vertical labels (2.54 pitch is too tight for horizontal)
+    ("MAINS", 24, 81.6, 90), ("GND", 26.54, 82.4, 90), ("VBAT", 29.08, 81.9, 90),
+    ("5V", 58, 82.8, 90), ("GND", 60.54, 82.4, 90), ("SIG", 63.08, 82.6, 90),
+    ("IN", 68, 82.8, 90), ("GND", 70.54, 82.4, 90), ("VCC", 73.08, 82.6, 90),
+]
 
 
 # Routed power is kept modest: these rails carry a relay coil and a buzzer,
@@ -544,6 +601,8 @@ def build():
         base(x, 86, x, b, "GND", W_STUB)
     for y in (12, 48.70, 62.54):        # J4 pin1, J5 pin6, U4 pin2
         base(82, y, b, y, "GND", W_STUB)
+    for y in (29.08, 39.24):            # J13 boost IN-/OUT- to the left ring
+        base(14, y, a, y, "GND", W_STUB)
 
     # 12 V from the input terminal across to the buck
     base(19.08, 15, 33, 15, "+12V", W_STUB)
@@ -581,7 +640,9 @@ def build():
     # Kept clear of the part silk: the ring gap at the bottom is the only
     # open strip wide enough for text.
     pcb.append(text("FREEISP BRAIN  REV D  -  2 LAYER", 50, 94, 1.8))
-    pcb.append(text("FUSE THE 12V FEED INLINE", 50, 11.5, 1.1))
+    pcb.append(text("FUSE THE 12V FEED INLINE", 50, 6.5, 1.1))
+    for s, lx, ly, rot in PIN_SILK:
+        pcb.append(text(s, lx, ly, 0.8, rot))
 
     with open(OUT, "w", encoding="utf-8") as fh:
         fh.write(sexp.dumps(pcb) + "\n")
