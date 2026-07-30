@@ -19,10 +19,12 @@ BOARD = "freeisp_brain.kicad_pcb"
 # ---------------------------------------------------------------------------
 # EXPECTED: net -> set of "REF.pad" -- derived from intent, not from build.py
 #
-# U3A = ESP32 left row  (1..15 = EN VP VN D34 D35 D32 D33 D25 D26 D27 D14
-#                        D12 D13 GND VIN)
-# U3B = ESP32 right row (1..15 = D23 D22 TX0 RX0 D21 D19 D18 D5 D17 D16
-#                        D4 D2 D15 GND 3V3)
+# 38-PIN DevKitC (Francis counted 19 pins per side, 2026-07-30):
+# U3A = left row  (1..19 = 3V3 EN VP VN D34 D35 D32 D33 D25 D26 D27 D14
+#                  D12 GND D13 SD2 SD3 CMD 5V)
+# U3B = right row (1..19 = GND D23 D22 TX0 RX0 D21 GND D19 D18 D5 D17 D16
+#                  D4 D0 D2 D15 SD1 SD0 CLK)
+# SD0-SD3/CMD/CLK = the flash pins GPIO6-11: holes exist, MUST stay empty.
 # J4 TFT module order:   1 GND, 2 VDD, 3 SCL(=SCK), 4 SDA(=MOSI), 5 RST,
 #                        6 DC, 7 CS, 8 BLK
 # J5 RC522 module order: 1 SDA(=SS), 2 SCK, 3 MOSI, 4 MISO, 5 IRQ(n/c),
@@ -37,57 +39,60 @@ EXPECTED = {
     "VBAT": {"U2.3", "J13.1", "R3.1"},                 # charger OUT+ : boost in + sense
     "+5V_BAT": {"J13.3", "D2.2"},                      # boost out -> D2 anode
     "+5V_SYS": {"D1.1", "D2.1", "C1.1",                # diode-OR rail
-                "U3A.15",                              # ESP32 VIN
+                "U3A.19",                              # ESP32 5V/VIN
                 "J4.2",                                # TFT VDD
                 "J10.1",                               # buzzer 5V
                 "K1.3",                                # relay VCC
                 "J11.1"},                              # horn feed (3-5V horn)
-    "+3V3": {"U3B.15", "J5.8", "U4.1"},                # ESP32 3V3 -> RC522 + MPU
+    "+3V3": {"U3A.1", "J5.8", "U4.1"},                 # ESP32 3V3 -> RC522 + MPU
     "GND": {"J1.2", "U1.2", "U1.4", "U2.2", "U2.4",
-            "J13.2", "J13.4", "U3A.14", "U3B.14",
+            "J13.2", "J13.4", "U3A.14", "U3B.1", "U3B.7",
             "J4.1", "J5.6", "U4.2", "J7.2", "J8.1",
             "J9.1", "J10.2", "K1.2", "J11.2",
             "R4.1", "R6.1", "C1.2", "C2.2", "C3.2"},
 
     # ---- sensing (firmware: GPIO34 mains, GPIO35 battery) ----
-    "SENSE_MAINS": {"R5.2", "R6.2", "C3.1", "U3A.4"},
-    "SENSE_BATT": {"R3.2", "R4.2", "C2.1", "U3A.5"},
+    "SENSE_MAINS": {"R5.2", "R6.2", "C3.1", "U3A.5"},
+    "SENSE_BATT": {"R3.2", "R4.2", "C2.1", "U3A.6"},
 
     # ---- door (firmware PIN_REED 32) ----
     "REED_F": {"J7.1", "R8.1"},
-    "REED": {"R8.2", "U3A.6"},
+    "REED": {"R8.2", "U3A.7"},
 
     # ---- indicators / sound (firmware 25/26/27, horn 13) ----
-    "LED_R": {"U3A.8", "R1.1"},
+    "LED_R": {"U3A.9", "R1.1"},
     "LED_R_A": {"R1.2", "J8.2"},
-    "LED_G": {"U3A.9", "R2.1"},
+    "LED_G": {"U3A.10", "R2.1"},
     "LED_G_A": {"R2.2", "J9.2"},
-    "BUZZ": {"U3A.10", "J10.3"},
-    "HORN_IN": {"U3A.13", "R7.1"},
+    "BUZZ": {"U3A.11", "J10.3"},
+    "HORN_IN": {"U3A.15", "R7.1"},
     "HORN_DRV": {"R7.2", "K1.1"},
 
     # ---- SPI bus (firmware SCK18 MOSI23 MISO19, TFT CS5 DC2 RST4 BLK33,
     #      RC522 SS16 RST17) ----
-    "SCK": {"U3B.7", "J4.3", "J5.2"},
-    "MOSI": {"U3B.1", "J4.4", "J5.3"},
-    "MISO": {"U3B.6", "J5.4"},
-    "TFT_CS": {"U3B.8", "J4.7"},
-    "TFT_DC": {"U3B.12", "J4.6"},
-    "TFT_RST": {"U3B.11", "J4.5"},
-    "TFT_BLK": {"U3A.7", "J4.8"},
-    "RC_SS": {"U3B.10", "J5.1"},
-    "RC_RST": {"U3B.9", "J5.7"},
+    "SCK": {"U3B.9", "J4.3", "J5.2"},
+    "MOSI": {"U3B.2", "J4.4", "J5.3"},
+    "MISO": {"U3B.8", "J5.4"},
+    "TFT_CS": {"U3B.10", "J4.7"},
+    "TFT_DC": {"U3B.15", "J4.6"},
+    "TFT_RST": {"U3B.13", "J4.5"},
+    "TFT_BLK": {"U3A.8", "J4.8"},
+    "RC_SS": {"U3B.12", "J5.1"},
+    "RC_RST": {"U3B.11", "J5.7"},
 
     # ---- I2C (firmware SDA21 SCL22) ----
-    "SDA": {"U3B.5", "U4.4"},
-    "SCL": {"U3B.2", "U4.3"},
+    "SDA": {"U3B.6", "U4.4"},
+    "SCL": {"U3B.3", "U4.3"},
 }
 
 # Pads that must connect to NOTHING (empty net) -- a wire here is a fault.
 EXPECT_NC = {
-    "U3A.1", "U3A.2", "U3A.3",            # EN, VP, VN
-    "U3A.11", "U3A.12",                   # D14, D12(strap!)
-    "U3B.3", "U3B.4", "U3B.13",           # TX0, RX0, D15
+    "U3A.2", "U3A.3", "U3A.4",            # EN, VP, VN
+    "U3A.12", "U3A.13",                   # D14, D12(strap!)
+    "U3A.16", "U3A.17", "U3A.18",         # SD2 SD3 CMD = GPIO9/10/11 FLASH
+    "U3B.4", "U3B.5",                     # TX0, RX0
+    "U3B.14", "U3B.16",                   # D0(strap), D15(strap)
+    "U3B.17", "U3B.18", "U3B.19",         # SD1 SD0 CLK = GPIO8/7/6 FLASH
     "J5.5",                               # RC522 IRQ
     "U4.5", "U4.6", "U4.7", "U4.8",       # MPU XDA XCL AD0 INT
 }

@@ -26,53 +26,64 @@ Verified three ways (rev E):
 
 ---
 
-## U3 — ESP32 socket (30-pin DevKit V1)
+## U3 — ESP32 socket (**38-pin DevKitC — Francis counted 19 per side**)
 
 Drop the ESP32 in with the **antenna toward ANTENNA SIDE** (top) and the
 **USB toward USB SIDE** (bottom). Corner names on the silk must match the
-devkit's own silk: **EN** top-left, **VIN** bottom-left, **D23** top-right,
-**3V3** bottom-right. If your board shows anything else at those corners,
-STOP — it is not the assumed 30-pin layout.
+devkit's own silk: **3V3** top-left, **5V** bottom-left, **GND** top-right,
+**CLK** bottom-right. The pin order was confirmed against the photo of the
+real board on the rev-D paper test.
+
+⚠️ **Row spacing is assumed 25.4 mm** (DevKitC standard) — verify with the
+vernier on the new paper print before ordering.
 
 ### U3A — left row (top → bottom)
 
 | # | Devkit pin | Wired to |
 |---|---|---|
-| 1 | EN | — |
-| 2 | VP / D36 | — |
-| 3 | VN / D39 | — |
-| 4 | D34 | 12 V divider (R5/R6 middle) — on-board only, no field wire |
-| 5 | D35 | battery divider (R3/R4 middle) |
-| 6 | D32 | REED terminal via R8 1k |
-| 7 | D33 | TFT BLK (backlight) |
-| 8 | D25 | red LED via R1 220R |
-| 9 | D26 | green LED via R2 220R |
-| 10 | D27 | buzzer SIG |
-| 11 | D14 | — |
-| 12 | D12 | — (never use: boot strap) |
-| 13 | D13 | horn relay IN |
+| 1 | 3V3 | **3V3 rail** → RC522 + MPU only |
+| 2 | EN | — |
+| 3 | VP / D36 | — |
+| 4 | VN / D39 | — |
+| 5 | D34 | 12 V divider (R5/R6 middle) — on-board only, no field wire |
+| 6 | D35 | battery divider (R3/R4 middle) |
+| 7 | D32 | REED terminal via R8 1k |
+| 8 | D33 | TFT BLK (backlight) |
+| 9 | D25 | red LED via R1 220R |
+| 10 | D26 | green LED via R2 220R |
+| 11 | D27 | buzzer SIG |
+| 12 | D14 | — |
+| 13 | D12 | — (never use: boot strap) |
 | 14 | GND | ground |
-| 15 | VIN | **5V_SYS** (after the diodes) |
+| 15 | D13 | horn relay drive via R7 1k |
+| 16 | SD2 / GPIO9 | — **FLASH PIN, never connect** |
+| 17 | SD3 / GPIO10 | — **FLASH PIN, never connect** |
+| 18 | CMD / GPIO11 | — **FLASH PIN, never connect** |
+| 19 | 5V | **5V_SYS** (after the diodes) |
 
 ### U3B — right row (top → bottom)
 
 | # | Devkit pin | Wired to |
 |---|---|---|
-| 1 | D23 | SPI MOSI → TFT SDA + RC522 MOSI |
-| 2 | D22 | I²C SCL → MPU SCL |
-| 3 | TX0 | — (keep free: USB serial) |
-| 4 | RX0 | — (keep free: USB serial) |
-| 5 | D21 | I²C SDA → MPU SDA |
-| 6 | D19 | SPI MISO → RC522 MISO |
-| 7 | D18 | SPI SCK → TFT SCL + RC522 SCK |
-| 8 | D5 | TFT CS |
-| 9 | TX2 / D17 | RC522 RST |
-| 10 | RX2 / D16 | RC522 SDA (chip select) |
-| 11 | D4 | TFT RST |
-| 12 | D2 | TFT DC |
-| 13 | D15 | — |
-| 14 | GND | ground |
-| 15 | 3V3 | **3V3 rail** → RC522 + MPU only |
+| 1 | GND | ground |
+| 2 | D23 | SPI MOSI → TFT SDA + RC522 MOSI |
+| 3 | D22 | I²C SCL → MPU SCL |
+| 4 | TX0 | — (keep free: USB serial) |
+| 5 | RX0 | — (keep free: USB serial) |
+| 6 | D21 | I²C SDA → MPU SDA |
+| 7 | GND | ground |
+| 8 | D19 | SPI MISO → RC522 MISO |
+| 9 | D18 | SPI SCK → TFT SCL + RC522 SCK |
+| 10 | D5 | TFT CS |
+| 11 | D17 | RC522 RST |
+| 12 | D16 | RC522 SDA (chip select) |
+| 13 | D4 | TFT RST |
+| 14 | D0 | — (boot strap) |
+| 15 | D2 | TFT DC |
+| 16 | D15 | — (boot strap) |
+| 17 | SD1 / GPIO8 | — **FLASH PIN, never connect** |
+| 18 | SD0 / GPIO7 | — **FLASH PIN, never connect** |
+| 19 | CLK / GPIO6 | — **FLASH PIN, never connect** |
 
 ---
 

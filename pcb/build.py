@@ -53,7 +53,7 @@ LIB_DIODE = "Diode_THT"
 LIB_CAP = "Capacitor_THT"
 LIB_HOLE = "MountingHole"
 
-FP_SOCKET15 = "PinSocket_1x15_P2.54mm_Vertical"
+FP_SOCKET19 = "PinSocket_1x19_P2.54mm_Vertical"
 FP_TERM2 = "PhoenixContact_MCV_1,5_2-G-5.08_1x02_P5.08mm_Vertical"
 FP_TERM4 = "PhoenixContact_MCV_1,5_4-G-5.08_1x04_P5.08mm_Vertical"
 FP_RES = "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
@@ -79,16 +79,40 @@ NET_ID = {name: i for i, name in enumerate(NETS)}
 # ---------------------------------------------------------------- parts
 # ref: (lib, footprint, x, y, rot, value, {pad_number: net})
 #
-# ESP32 rows use the standard 30-pin DevKit V1 order. U3A is the EN/VP side,
-# U3B is the D23/3V3 side. Confirm against the silkscreen of the real board.
+# ESP32 rows: 38-PIN DevKitC order (Francis counted 19 pins per side,
+# 2026-07-30 -- NOT the 30-pin V1 the first draft assumed). Antenna up:
+#   U3A (left):  3V3 EN VP VN 34 35 32 33 25 26 27 14 12 GND 13 SD2 SD3 CMD 5V
+#   U3B (right): GND 23 22 TX0 RX0 21 GND 19 18 5 17 16 4 0 2 15 SD1 SD0 CLK
+# SD0-SD3/CMD/CLK are the FLASH pins (GPIO6-11) -- they exist as holes and
+# must stay unconnected forever. Row spacing DEFAULTS to 25.4mm (DevKitC
+# standard) -- Francis verifies with the vernier + paper test before order.
+ESP_ROW = 25.4
 U3A_NETS = {
-    4: "SENSE_MAINS", 5: "SENSE_BATT", 6: "REED", 7: "TFT_BLK",
-    8: "LED_R", 9: "LED_G", 10: "BUZZ", 13: "HORN_IN", 14: "GND",
-    15: "+5V_SYS",   # VIN eats from whichever diode is alive
+    1: "+3V3",       # 3V3 is top-LEFT on the 38-pin board
+    5: "SENSE_MAINS",   # GPIO34
+    6: "SENSE_BATT",    # GPIO35
+    7: "REED",          # GPIO32
+    8: "TFT_BLK",       # GPIO33
+    9: "LED_R",         # GPIO25
+    10: "LED_G",        # GPIO26
+    11: "BUZZ",         # GPIO27
+    14: "GND",
+    15: "HORN_IN",      # GPIO13
+    19: "+5V_SYS",      # 5V/VIN, bottom-left -- eats from whichever diode wins
 }
 U3B_NETS = {
-    1: "MOSI", 2: "SCL", 5: "SDA", 6: "MISO", 7: "SCK", 8: "TFT_CS",
-    9: "RC_RST", 10: "RC_SS", 11: "TFT_RST", 12: "TFT_DC", 14: "GND", 15: "+3V3",
+    1: "GND",
+    2: "MOSI",          # GPIO23
+    3: "SCL",           # GPIO22
+    6: "SDA",           # GPIO21
+    7: "GND",
+    8: "MISO",          # GPIO19
+    9: "SCK",           # GPIO18
+    10: "TFT_CS",       # GPIO5
+    11: "RC_RST",       # GPIO17
+    12: "RC_SS",        # GPIO16
+    13: "TFT_RST",      # GPIO4
+    15: "TFT_DC",       # GPIO2
 }
 
 PARTS = {
@@ -118,14 +142,15 @@ PARTS = {
     # vertical down the left edge (rot 270 runs the pads downward)
     "J13": (LIB_TERM, FP_TERM4, 14, 24, 270, "BOOST  IN+ IN- OUT+ OUT-",
             {1: "VBAT", 2: "GND", 3: "+5V_BAT", 4: "GND"}),
-    "D1":  (LIB_DIODE, FP_DIODE, 38, 25, 0, "1N5822",
-            {1: "+5V_SYS", 2: "+5V"}),        # pad 1 = cathode (band)
-    "D2":  (LIB_DIODE, FP_DIODE, 56, 25, 0, "1N5822",
-            {1: "+5V_SYS", 2: "+5V_BAT"}),
+    "D1":  (LIB_DIODE, FP_DIODE, 38, 25.5, 0, "1N5822",
+            {1: "+5V_SYS", 2: "+5V"}),        # pad 1 = cathode (band LEFT)
+    # vertical, right of U3B -- the 19-pin socket ate its old horizontal spot
+    "D2":  (LIB_DIODE, FP_DIODE, 64, 33, 270, "1N5822",
+            {1: "+5V_SYS", 2: "+5V_BAT"}),    # cathode/band UP
 
-    # --- the brain ---
-    "U3A": (LIB_SOCKET, FP_SOCKET15, 32, 32, 0, "ESP32 L", U3A_NETS),
-    "U3B": (LIB_SOCKET, FP_SOCKET15, 57.4, 32, 0, "ESP32 R", U3B_NETS),
+    # --- the brain: 38-pin DevKitC in two 19-pin sockets ---
+    "U3A": (LIB_SOCKET, FP_SOCKET19, 32, 28, 0, "ESP32 L", U3A_NETS),
+    "U3B": (LIB_SOCKET, FP_SOCKET19, 32 + ESP_ROW, 28, 0, "ESP32 R", U3B_NETS),
 
     # --- peripherals. Pin ORDER is the module's own silkscreen order, and
     # every physical pin gets a hole even where we do not use the signal.
@@ -152,15 +177,16 @@ PARTS = {
     "R6":  (LIB_RES, FP_RES, 16, 63.5, 0, "27k", {1: "GND", 2: "SENSE_MAINS"}),
     "R3":  (LIB_RES, FP_RES, 16, 72, 0, "100k", {1: "VBAT", 2: "SENSE_BATT"}),
     "R4":  (LIB_RES, FP_RES, 16, 78, 0, "100k", {1: "GND", 2: "SENSE_BATT"}),
-    "R2":  (LIB_RES, FP_RES, 33, 72, 0, "220R", {1: "LED_G", 2: "LED_G_A"}),
-    "R1":  (LIB_RES, FP_RES, 33, 78, 0, "220R", {1: "LED_R", 2: "LED_R_A"}),
+    # x=36: clear of the 19-pin socket's courtyard, which now reaches y75.5
+    "R2":  (LIB_RES, FP_RES, 36, 72, 0, "220R", {1: "LED_G", 2: "LED_G_A"}),
+    "R1":  (LIB_RES, FP_RES, 36, 78, 0, "220R", {1: "LED_R", 2: "LED_R_A"}),
     "R8":  (LIB_RES, FP_RES, 35.5, 62, 0, "1k", {1: "REED_F", 2: "REED"}),
     "R7":  (LIB_RES, FP_RES, 64, 79, 0, "1k", {1: "HORN_IN", 2: "HORN_DRV"}),
     # ADC smoothing (100n at each divider node) + bulk on the diode-OR rail.
     # Discs sit in the channel under the ESP32 -- LOW parts only there.
     "C2":  (LIB_CAP, FP_CAP_D, 36, 52, 270, "100n", {1: "SENSE_BATT", 2: "GND"}),
     "C3":  (LIB_CAP, FP_CAP_D, 42, 52, 270, "100n", {1: "SENSE_MAINS", 2: "GND"}),
-    "C1":  (LIB_CAP, FP_CAP_EL, 66, 33, 270, "470u", {1: "+5V_SYS", 2: "GND"}),
+    "C1":  (LIB_CAP, FP_CAP_EL, 75.5, 30, 270, "470u", {1: "+5V_SYS", 2: "GND"}),
 
     # --- field terminals, bottom row (J12 sense header DELETED, review C1/m5:
     # both sense sources are on-board nets; a field pin invited 12V into a
@@ -363,11 +389,12 @@ PIN_SILK = [
     # body silk (which reaches x=18.85 after the 270 rotation)
     ("IN+", 20.4, 24, 0), ("IN-", 20.4, 29.08, 0),
     ("OUT+", 20.8, 34.16, 0), ("OUT-", 20.8, 39.24, 0),
-    # ESP32 orientation -- match these four corners to the devkit silkscreen
-    # (sockets anchor at (32,32) and (57.4,32); labels hug the pin rows)
-    ("EN", 29.2, 32, 0), ("VIN", 29.0, 67.56, 0),
-    ("D23", 60.6, 32, 0), ("3V3", 60.6, 67.56, 0),
-    ("ANTENNA SIDE", 44.7, 34.5, 0), ("USB SIDE", 44.7, 65.0, 0),
+    # ESP32 orientation -- match these four corners to the devkit silkscreen.
+    # 38-pin DevKitC: 3V3 top-left, 5V bottom-left, GND top-right, CLK
+    # bottom-right (sockets anchor at (32,28); 19 pins end at y=73.72)
+    ("3V3", 29.2, 28, 0), ("5V", 29.4, 73.72, 0),
+    ("GND", 60.6, 28, 0), ("CLK", 60.6, 73.72, 0),
+    ("ANTENNA SIDE", 44.7, 30.5, 0), ("USB SIDE", 46.5, 69.4, 0),
     # J4 TFT (right of pads; names = blue ST7735S silkscreen)
     ("GND", 85.6, 12, 0), ("VDD", 85.6, 14.54, 0), ("SCL", 85.6, 17.08, 0),
     ("SDA", 85.6, 19.62, 0), ("RST", 85.6, 22.16, 0), ("DC", 85.5, 24.70, 0),
@@ -665,7 +692,7 @@ def build():
     # ---- silkscreen ----
     # Kept clear of the part silk: the ring gap at the bottom is the only
     # open strip wide enough for text.
-    pcb.append(text("FREEISP BRAIN  REV E  -  2 LAYER", 50, 94, 1.8))
+    pcb.append(text("FREEISP BRAIN  REV F  -  38-PIN DEVKITC", 50, 94, 1.8))
     # The two set-points ARE the diode-OR priority mechanism: buck 0.4V above
     # boost means D1 always wins on mains and D2 is cleanly reverse-biased.
     # Printed on the board so the values cannot get lost in a document.
