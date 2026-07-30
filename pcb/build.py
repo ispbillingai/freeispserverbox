@@ -49,12 +49,14 @@ LIB_SOCKET = "Connector_PinSocket_2.54mm"
 LIB_HEADER = "Connector_PinHeader_2.54mm"
 LIB_TERM = "Connector_Phoenix_MC_HighVoltage"
 LIB_RES = "Resistor_THT"
+LIB_DIODE = "Diode_THT"
 LIB_HOLE = "MountingHole"
 
 FP_SOCKET15 = "PinSocket_1x15_P2.54mm_Vertical"
 FP_TERM2 = "PhoenixContact_MCV_1,5_2-G-5.08_1x02_P5.08mm_Vertical"
 FP_TERM4 = "PhoenixContact_MCV_1,5_4-G-5.08_1x04_P5.08mm_Vertical"
 FP_RES = "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+FP_DIODE = "D_DO-201AD_P12.70mm_Horizontal"
 FP_HOLE = "MountingHole_3.2mm_M3"
 
 
@@ -64,7 +66,7 @@ def hdr(n):
 
 # ---------------------------------------------------------------- nets
 NETS = [
-    "", "GND", "+5V", "+3V3", "+12V", "VBAT", "SENSE_BATT",
+    "", "GND", "+5V", "+5V_BAT", "+5V_SYS", "+3V3", "+12V", "VBAT", "SENSE_BATT",
     "SENSE_MAINS", "REED", "LED_R", "LED_R_A", "LED_G", "LED_G_A", "BUZZ",
     "HORN_IN", "HORN_RET", "MOSI", "MISO", "SCK", "TFT_CS", "TFT_DC",
     "TFT_RST", "TFT_BLK", "RC_SS", "RC_RST", "SDA", "SCL",
@@ -78,7 +80,8 @@ NET_ID = {name: i for i, name in enumerate(NETS)}
 # U3B is the D23/3V3 side. Confirm against the silkscreen of the real board.
 U3A_NETS = {
     4: "SENSE_MAINS", 5: "SENSE_BATT", 6: "REED", 7: "TFT_BLK",
-    8: "LED_R", 9: "LED_G", 10: "BUZZ", 13: "HORN_IN", 14: "GND", 15: "+5V",
+    8: "LED_R", 9: "LED_G", 10: "BUZZ", 13: "HORN_IN", 14: "GND",
+    15: "+5V_SYS",   # VIN eats from whichever diode is alive
 }
 U3B_NETS = {
     1: "MOSI", 2: "SCL", 5: "SDA", 6: "MISO", 7: "SCK", 8: "TFT_CS",
@@ -96,6 +99,18 @@ PARTS = {
     "U2":  (LIB_TERM, FP_TERM4, 58, 15, 0, "CHARGER  IN+ IN- B+ B-",
             {1: "+5V", 2: "GND", 3: "VBAT", 4: "GND"}),
 
+    # --- backup power: step-up + the diode-OR where the two 5V rails meet.
+    # Mains alive: buck 5V wins through D1 (charger tops the cell up).
+    # Mains cut: boost 5V takes over through D2. No code, no switching.
+    # Charger IN+ stays on the BUCK rail on purpose -- feeding it from
+    # 5V_SYS would let the battery charge itself through the boost.
+    "J13": (LIB_TERM, FP_TERM4, 14, 24, 0, "BOOST  IN+ IN- OUT+ OUT-",
+            {1: "VBAT", 2: "GND", 3: "+5V_BAT", 4: "GND"}),
+    "D1":  (LIB_DIODE, FP_DIODE, 38, 25, 0, "1N5822",
+            {1: "+5V_SYS", 2: "+5V"}),        # pad 1 = cathode (band)
+    "D2":  (LIB_DIODE, FP_DIODE, 56, 25, 0, "1N5822",
+            {1: "+5V_SYS", 2: "+5V_BAT"}),
+
     # --- the brain ---
     "U3A": (LIB_SOCKET, FP_SOCKET15, 32, 32, 0, "ESP32 L", U3A_NETS),
     "U3B": (LIB_SOCKET, FP_SOCKET15, 57.4, 32, 0, "ESP32 R", U3B_NETS),
@@ -103,15 +118,19 @@ PARTS = {
     # --- peripherals. Pin ORDER is the module's own silkscreen order, and
     # every physical pin gets a hole even where we do not use the signal.
     # TFT (blue ST7735S): GND VDD SCL SDA RST DC CS BLK
-    "J4":  (LIB_HEADER, hdr(8), 82, 20, 0, "TFT",
-            {1: "GND", 2: "+5V", 3: "SCK", 4: "MOSI", 5: "TFT_RST",
+    # All three stack down the right edge. U4 was briefly in the channel
+    # between the ESP32 rows -- that channel is a dead end (a pin row cannot
+    # be crossed), so every trace to it had to come the long way round and
+    # curl past U4's own unused pins. Six nets ended up knotted in there.
+    "J4":  (LIB_HEADER, hdr(8), 82, 12, 0, "TFT",
+            {1: "GND", 2: "+5V_SYS", 3: "SCK", 4: "MOSI", 5: "TFT_RST",
              6: "TFT_DC", 7: "TFT_CS", 8: "TFT_BLK"}),
     # RC522: SDA SCK MOSI MISO IRQ GND RST 3.3V  (IRQ unused but present)
-    "J5":  (LIB_HEADER, hdr(8), 82, 46, 0, "RC522",
+    "J5":  (LIB_HEADER, hdr(8), 82, 36, 0, "RC522",
             {1: "RC_SS", 2: "SCK", 3: "MOSI", 4: "MISO",
              6: "GND", 7: "RC_RST", 8: "+3V3"}),
     # GY-521: VCC GND SCL SDA XDA XCL AD0 INT  (last four unused but present)
-    "U4":  (LIB_HEADER, hdr(8), 36, 40, 90, "MPU-6050",
+    "U4":  (LIB_HEADER, hdr(8), 82, 60, 0, "MPU-6050",
             {1: "+3V3", 2: "GND", 3: "SCL", 4: "SDA"}),
 
     # --- passives ---
@@ -126,10 +145,11 @@ PARTS = {
             {1: "SENSE_MAINS", 2: "GND", 3: "VBAT"}),
     "J8":  (LIB_TERM, FP_TERM2, 36, 86, 0, "LED R", {1: "GND", 2: "LED_R_A"}),
     "J9":  (LIB_TERM, FP_TERM2, 48, 86, 0, "LED G", {1: "GND", 2: "LED_G_A"}),
+    # buzzer + relay live on 5V_SYS: the alarm must sound with the mains cut
     "J10": (LIB_HEADER, hdr(3), 58, 86, 90, "BUZZER",
-            {1: "+5V", 2: "GND", 3: "BUZZ"}),
+            {1: "+5V_SYS", 2: "GND", 3: "BUZZ"}),
     "K1":  (LIB_HEADER, hdr(3), 68, 86, 90, "HORN RLY",
-            {1: "HORN_IN", 2: "GND", 3: "+5V"}),
+            {1: "HORN_IN", 2: "GND", 3: "+5V_SYS"}),
     "J11": (LIB_TERM, FP_TERM2, 78, 86, 0, "HORN",
             {1: "+12V", 2: "HORN_RET"}),
 
@@ -292,8 +312,8 @@ def text(s, x, y, size=1.5):
 # Routed power is kept modest: these rails carry a relay coil and a buzzer,
 # not the horn, so 0.8 mm is ample and leaves lanes for the signals.
 NET_WIDTH = {
-    "GND": 1.2, "+5V": 0.8, "+3V3": 0.8,
-    "+12V": 1.2, "+12V_RAW": 1.2, "VBAT": 0.8,
+    "GND": 1.2, "+5V": 0.8, "+5V_BAT": 0.8, "+5V_SYS": 0.8, "+3V3": 0.8,
+    "+12V": 1.2, "VBAT": 0.8,
 }
 W_SIGNAL = 0.6
 
@@ -522,7 +542,7 @@ def build():
         base(x, 15, x, a, "GND", W_STUB)
     for x in (18.08, 26.54, 36, 48, 60.54, 70.54):
         base(x, 86, x, b, "GND", W_STUB)
-    for y in (20, 58.70):
+    for y in (12, 48.70, 62.54):        # J4 pin1, J5 pin6, U4 pin2
         base(82, y, b, y, "GND", W_STUB)
 
     # 12 V from the input terminal across to the buck
