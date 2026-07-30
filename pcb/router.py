@@ -20,6 +20,10 @@ EDGE_KEEPOUT = 0.8  # track centre must stay this far inside the board outline
 
 DIRS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 TURN_COST = 2       # discourages staircases without forcing wide detours
+VIA_COST = 25       # roughly 12 mm of travel -- used, but not casually
+VIA_D = 0.8         # via pad diameter
+VIA_DRILL = 0.4
+LAYERS = ("F.Cu", "B.Cu")
 
 
 class Obstacle:
@@ -39,10 +43,11 @@ class Router:
 
     # ---------------------------------------------------------------- input
     def add_pad(self, x, y, half, net):
+        """Through-hole pads and vias obstruct every layer."""
         self.pad_obs.append(Obstacle(x, y, half, net))
 
-    def add_track(self, x1, y1, x2, y2, width, net):
-        self.seg_obs.append((x1, y1, x2, y2, width / 2.0, net))
+    def add_track(self, x1, y1, x2, y2, width, net, layer):
+        self.seg_obs.append((x1, y1, x2, y2, width / 2.0, net, layer))
 
     # ------------------------------------------------------------ geometry
     @staticmethod
@@ -55,8 +60,8 @@ class Router:
         cx, cy = x1 + t * dx, y1 + t * dy
         return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
 
-    def _blocked_mask(self, net, half):
-        """Cells this net may not occupy, given its own track half-width."""
+    def _blocked_mask(self, net, half, layer):
+        """Cells this net may not occupy on `layer`, given its half-width."""
         blocked = bytearray(self.w * self.h)
 
         def stamp(cx, cy, radius):
@@ -77,8 +82,8 @@ class Router:
                 continue
             stamp(ob.x, ob.y, half + CLEAR + ob.half)
 
-        for x1, y1, x2, y2, ohalf, onet in self.seg_obs:
-            if onet == net:
+        for x1, y1, x2, y2, ohalf, onet, olayer in self.seg_obs:
+            if onet == net or olayer != layer:
                 continue
             radius = half + CLEAR + ohalf
             i0 = max(0, int((min(x1, x2) - radius) / GRID))
@@ -109,41 +114,71 @@ class Router:
                 max(0, min(self.h - 1, int(round(y / GRID)))))
 
     def route(self, net, a, b, half):
-        """Dijkstra with a turn penalty. Returns a list of (x,y) or None."""
-        blocked = self._blocked_mask(net, half)
+        """Dijkstra over (cell, layer, heading), with turn and via penalties.
+
+        Returns a list of (x, y, layer) or None. A layer change between two
+        consecutive points is a via at that position.
+        """
+        # A via is wider than a signal track, so plan against the larger of
+        # the two -- then a via is legal anywhere the path is.
+        eff = max(half, VIA_D / 2.0)
+        masks = [self._blocked_mask(net, eff, L) for L in LAYERS]
+
+        # A via may never land inside a pad's keepout, so via legality is
+        # judged against the masks before the endpoints are opened up.
+        via_ok = [bytes(m) for m in masks]
+
         si, sj = self._cell(*a)
         ti, tj = self._cell(*b)
 
-        # the pads themselves sit inside their own keepout; free the endpoints
-        for ci, cj in ((si, sj), (ti, tj)):
-            for di in range(-1, 2):
-                for dj in range(-1, 2):
-                    i, j = ci + di, cj + dj
-                    if 0 <= i < self.w and 0 <= j < self.h:
-                        blocked[j * self.w + i] = 0
+        # pads sit inside their own keepout; free both endpoints on both layers
+        for mask in masks:
+            for ci, cj in ((si, sj), (ti, tj)):
+                for di in range(-1, 2):
+                    for dj in range(-1, 2):
+                        i, j = ci + di, cj + dj
+                        if 0 <= i < self.w and 0 <= j < self.h:
+                            mask[j * self.w + i] = 0
 
-        start = (si, sj, -1)
-        dist = {start: 0}
+        # Both endpoints are through-hole pads, which already join the layers.
+        # So the path may start and finish on either side at no cost -- a via
+        # on top of a pad would be redundant copper.
+        dist = {}
         prev = {}
-        pq = [(0, start)]
+        pq = []
+        for L in (0, 1):
+            st = (si, sj, L, -1)
+            dist[st] = 0
+            heapq.heappush(pq, (0, st))
         goal = None
 
         while pq:
             d, cur = heapq.heappop(pq)
             if d > dist.get(cur, 1 << 30):
                 continue
-            i, j, pd = cur
+            i, j, layer, pd = cur
             if (i, j) == (ti, tj):
                 goal = cur
                 break
+
             for k, (di, dj) in enumerate(DIRS):
                 ni, nj = i + di, j + dj
                 if not (0 <= ni < self.w and 0 <= nj < self.h):
                     continue
-                if blocked[nj * self.w + ni]:
+                if masks[layer][nj * self.w + ni]:
                     continue
                 nd = d + 1 + (TURN_COST if pd != -1 and pd != k else 0)
-                nxt = (ni, nj, k)
+                nxt = (ni, nj, layer, k)
+                if nd < dist.get(nxt, 1 << 30):
+                    dist[nxt] = nd
+                    prev[nxt] = cur
+                    heapq.heappush(pq, (nd, nxt))
+
+            other = 1 - layer
+            idx = j * self.w + i
+            if not via_ok[other][idx] and not via_ok[layer][idx]:
+                nxt = (i, j, other, -1)
+                nd = d + VIA_COST
                 if nd < dist.get(nxt, 1 << 30):
                     dist[nxt] = nd
                     prev[nxt] = cur
@@ -155,27 +190,29 @@ class Router:
         path = []
         cur = goal
         while cur in prev:
-            path.append((cur[0] * GRID, cur[1] * GRID))
+            path.append((cur[0] * GRID, cur[1] * GRID, LAYERS[cur[2]]))
             cur = prev[cur]
-        path.append((cur[0] * GRID, cur[1] * GRID))
+        path.append((cur[0] * GRID, cur[1] * GRID, LAYERS[cur[2]]))
         path.reverse()
 
         # land exactly on the pad centres
-        path[0] = a
-        path[-1] = b
+        path[0] = (a[0], a[1], path[0][2])
+        path[-1] = (b[0], b[1], path[-1][2])
         return simplify(path)
 
 
 def simplify(path):
-    """Drop collinear intermediate points."""
+    """Drop collinear intermediate points, but never one that carries a via."""
     if len(path) < 3:
         return path
     out = [path[0]]
     for i in range(1, len(path) - 1):
-        ax, ay = out[-1]
-        bx, by = path[i]
-        cx, cy = path[i + 1]
-        if (bx - ax) * (cy - by) != (by - ay) * (cx - bx):
+        ax, ay, al = out[-1]
+        bx, by, bl = path[i]
+        cx, cy, cl = path[i + 1]
+        if al != bl or bl != cl:
+            out.append(path[i])
+        elif (bx - ax) * (cy - by) != (by - ay) * (cx - bx):
             out.append(path[i])
     out.append(path[-1])
     return out

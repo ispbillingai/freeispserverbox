@@ -1,5 +1,0 @@
-(version 1)
-
-(rule "wire links may cross"
-  (condition "A.Layer == 'B.Cu' && B.Layer == 'B.Cu'")
-  (constraint clearance (min 0mm)))

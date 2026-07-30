@@ -33,15 +33,17 @@ W_HV = 2.5           # offered for the long 12 V horn run
 # Stubs leave pads on 2.54 mm pitch, so they must stay narrow enough to clear
 # the neighbouring pin: 1.9 mm pad + 0.6 mm clearance leaves 1.98 mm of room.
 W_STUB = 1.5
-CLEARANCE = 0.6      # etchant undercuts; tight gaps bridge
-TRACK_MIN = 0.6
+# Fab rules, not etching rules. PCBWay's cheap tier does 0.15 mm; 0.25 mm is
+# a comfortable margin and buys real routing room over the 0.6 mm we needed
+# when the board was going to be made with chemicals in a tray.
+CLEARANCE = 0.25
+TRACK_MIN = 0.4
 
-# Pads are enlarged for hand drilling, but a pad can never exceed
-# (pitch - clearance) or neighbouring pins short. On 2.54 mm pitch that
-# caps us at 1.94 mm, which is why these differ per footprint pitch.
-PAD_P254 = 1.9       # headers and sockets
-PAD_P508 = 2.4       # terminal blocks
-PAD_RES = 2.2        # resistors, 7.62 mm pitch
+# Library pad sizes are right for a fab -- their drilling is accurate to about
+# 0.05 mm, so there is nothing to compensate for. 0 means "leave as drawn".
+PAD_P254 = 0
+PAD_P508 = 0
+PAD_RES = 0
 
 LIB_SOCKET = "Connector_PinSocket_2.54mm"
 LIB_HEADER = "Connector_PinHeader_2.54mm"
@@ -51,6 +53,7 @@ LIB_HOLE = "MountingHole"
 
 FP_SOCKET15 = "PinSocket_1x15_P2.54mm_Vertical"
 FP_TERM2 = "PhoenixContact_MCV_1,5_2-G-5.08_1x02_P5.08mm_Vertical"
+FP_TERM4 = "PhoenixContact_MCV_1,5_4-G-5.08_1x04_P5.08mm_Vertical"
 FP_RES = "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
 FP_HOLE = "MountingHole_3.2mm_M3"
 
@@ -61,7 +64,7 @@ def hdr(n):
 
 # ---------------------------------------------------------------- nets
 NETS = [
-    "", "GND", "+5V", "+3V3", "+12V", "+12V_RAW", "VBAT", "SENSE_BATT",
+    "", "GND", "+5V", "+3V3", "+12V", "VBAT", "SENSE_BATT",
     "SENSE_MAINS", "REED", "LED_R", "LED_R_A", "LED_G", "LED_G_A", "BUZZ",
     "HORN_IN", "HORN_RET", "MOSI", "MISO", "SCK", "TFT_CS", "TFT_DC",
     "TFT_RST", "TFT_BLK", "RC_SS", "RC_RST", "SDA", "SCL",
@@ -83,33 +86,33 @@ U3B_NETS = {
 }
 
 PARTS = {
-    # --- power in, top row ---
-    "J1":  (LIB_TERM, FP_TERM2, 12, 15, 0, "12V IN",
-            {1: "GND", 2: "+12V_RAW"}),
-    "F1":  (LIB_TERM, FP_TERM2, 25, 15, 0, "FUSE 2A",
-            {1: "+12V_RAW", 2: "+12V"}),
-    "U1":  (LIB_HEADER, hdr(4), 38, 15, 90, "LM2596 BUCK",
+    # --- power in, top row. The buck and charger are wire-pad modules, not
+    # pluggable headers, so they bolt alongside and land on screw terminals.
+    # Fuse the 12 V feed inline in the wire (silkscreened as a reminder).
+    "J1":  (LIB_TERM, FP_TERM2, 14, 15, 0, "12V IN",
+            {1: "GND", 2: "+12V"}),
+    "U1":  (LIB_TERM, FP_TERM4, 33, 15, 0, "BUCK  IN+ IN- OUT+ OUT-",
             {1: "+12V", 2: "GND", 3: "+5V", 4: "GND"}),
-    "U2":  (LIB_HEADER, hdr(4), 52, 15, 90, "TP4056",
+    "U2":  (LIB_TERM, FP_TERM4, 58, 15, 0, "CHARGER  IN+ IN- B+ B-",
             {1: "+5V", 2: "GND", 3: "VBAT", 4: "GND"}),
-    "J3":  (LIB_TERM, FP_TERM2, 65, 15, 0, "BATT",
-            {1: "VBAT", 2: "GND"}),
-    "J2":  (LIB_TERM, FP_TERM2, 78, 15, 0, "5V AUX",
-            {1: "+5V", 2: "GND"}),
 
     # --- the brain ---
     "U3A": (LIB_SOCKET, FP_SOCKET15, 32, 32, 0, "ESP32 L", U3A_NETS),
     "U3B": (LIB_SOCKET, FP_SOCKET15, 57.4, 32, 0, "ESP32 R", U3B_NETS),
 
-    # --- right edge: display, reader, motion ---
-    "J4":  (LIB_HEADER, hdr(8), 82, 22, 0, "TFT",
-            {1: "+5V", 2: "GND", 3: "SCK", 4: "MOSI", 5: "TFT_RST",
+    # --- peripherals. Pin ORDER is the module's own silkscreen order, and
+    # every physical pin gets a hole even where we do not use the signal.
+    # TFT (blue ST7735S): GND VDD SCL SDA RST DC CS BLK
+    "J4":  (LIB_HEADER, hdr(8), 82, 20, 0, "TFT",
+            {1: "GND", 2: "+5V", 3: "SCK", 4: "MOSI", 5: "TFT_RST",
              6: "TFT_DC", 7: "TFT_CS", 8: "TFT_BLK"}),
-    "J5":  (LIB_HEADER, hdr(7), 82, 46, 0, "RC522",
-            {1: "+3V3", 2: "RC_RST", 3: "GND", 4: "MISO", 5: "MOSI",
-             6: "SCK", 7: "RC_SS"}),
-    "U4":  (LIB_HEADER, hdr(4), 82, 68, 0, "MPU-6050",
-            {1: "+3V3", 2: "GND", 3: "SDA", 4: "SCL"}),
+    # RC522: SDA SCK MOSI MISO IRQ GND RST 3.3V  (IRQ unused but present)
+    "J5":  (LIB_HEADER, hdr(8), 82, 46, 0, "RC522",
+            {1: "RC_SS", 2: "SCK", 3: "MOSI", 4: "MISO",
+             6: "GND", 7: "RC_RST", 8: "+3V3"}),
+    # GY-521: VCC GND SCL SDA XDA XCL AD0 INT  (last four unused but present)
+    "U4":  (LIB_HEADER, hdr(8), 36, 40, 90, "MPU-6050",
+            {1: "+3V3", 2: "GND", 3: "SCL", 4: "SDA"}),
 
     # --- passives ---
     "R3":  (LIB_RES, FP_RES, 16, 72, 0, "100k", {1: "VBAT", 2: "SENSE_BATT"}),
@@ -306,11 +309,10 @@ def _on_segment(px, py, x1, y1, x2, y2, tol=0.15):
 def auto_route(tracks, strategy):
     """Route every net that is not already connected.
 
-    F.Cu is tried first. Where the single layer genuinely cannot get through,
-    the connection becomes a wire link on B.Cu. Links are insulated wire on
-    the component side, so they may cross each other freely -- B.Cu tracks are
-    never added as obstacles. They still avoid pads, so a nicked wire cannot
-    short onto one. See freeisp_brain.kicad_dru for the matching DRC rule.
+    Two etched layers: F.Cu is tried first, and anything that cannot get
+    through falls to B.Cu. Both are real copper and obstruct each other.
+    All pads are through-hole, so a connection can live entirely on either
+    layer and no vias are needed.
     """
     # Every pad is an obstacle, including the ESP32 pins we do not use --
     # an unconnected pin is still copper and a track across it is a short.
@@ -321,13 +323,12 @@ def auto_route(tracks, strategy):
             all_pads.append(p)
     pads = [p for p in all_pads if p["net"]]
 
-    rt_f = router.Router(BW, BH)
-    rt_b = router.Router(BW, BH)
+    rt = router.Router(BW, BH)
     for p in all_pads:
-        rt_f.add_pad(p["x"], p["y"], p["half"], p["net"])
-        rt_b.add_pad(p["x"], p["y"], p["half"], p["net"])
+        rt.add_pad(p["x"], p["y"], p["half"], p["net"])
     for t in tracks:
-        rt_f.add_track(t["x1"], t["y1"], t["x2"], t["y2"], t["w"], t["net"])
+        rt.add_track(t["x1"], t["y1"], t["x2"], t["y2"], t["w"], t["net"],
+                     t["layer"])
 
     # ---- union-find seeded with what the base copper already joins ----
     parent = {}
@@ -385,7 +386,7 @@ def auto_route(tracks, strategy):
     else:  # power rails first, then shortest
         edges.sort(key=lambda e: (e[1] not in NET_WIDTH, e[0]))
 
-    links = []
+    vias = []
     failed = []
     for _span, net, pa, pb in edges:
         seed()
@@ -395,26 +396,24 @@ def auto_route(tracks, strategy):
             continue
 
         width = NET_WIDTH.get(net, W_SIGNAL)
-        path = rt_f.route(net, a, b, width / 2.0)
-        layer = "F.Cu"
+        path = rt.route(net, a, b, width / 2.0)
         if path is None:
-            path = rt_b.route(net, a, b, width / 2.0)
-            layer = "B.Cu"
-            if path is None:
-                failed.append((net, pa["ref"], pb["ref"]))
-                continue
-            links.append((net, pa["ref"], pb["ref"]))
+            failed.append((net, pa["ref"], pb["ref"]))
+            continue
 
         for k in range(len(path) - 1):
-            x1, y1 = path[k]
-            x2, y2 = path[k + 1]
+            x1, y1, l1 = path[k]
+            x2, y2, l2 = path[k + 1]
+            if l1 != l2:
+                # the path stays put and changes layer: that is a via
+                vias.append({"x": x1, "y": y1, "net": net})
+                rt.add_pad(x1, y1, router.VIA_D / 2.0, net)
+                continue
             tracks.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                           "w": width, "net": net, "layer": layer})
-            # only etched copper constrains what comes after it
-            if layer == "F.Cu":
-                rt_f.add_track(x1, y1, x2, y2, width, net)
+                           "w": width, "net": net, "layer": l1})
+            rt.add_track(x1, y1, x2, y2, width, net, l1)
 
-    return links, failed
+    return vias, failed
 
 
 def write_project():
@@ -426,8 +425,10 @@ def write_project():
                 "rules": {
                     "min_clearance": CLEARANCE,
                     "min_track_width": TRACK_MIN,
-                    "min_through_hole_diameter": 0.8,
-                    "min_hole_to_hole": 0.5,
+                    # 0.3 mm drill / 0.25 mm hole-to-hole sits inside every
+                    # fab's cheap tier; the old 0.8 was a hand-drilling limit.
+                    "min_through_hole_diameter": 0.3,
+                    "min_hole_to_hole": 0.25,
                     "min_copper_edge_clearance": 0.5,
                     "min_text_height": 0.8,
                     "min_text_thickness": 0.08,
@@ -452,18 +453,10 @@ def write_project():
         json.dump(pro, fh, indent=2)
     print(f"wrote {path}")
 
-    # Nothing is etched on B.Cu. Tracks there represent insulated wire links
-    # soldered across the component side, which may cross one another, so
-    # copper clearance between two of them is not a real constraint.
+    # Both layers are etched now, so the wire-link exemption is gone.
     dru = OUT.replace(".kicad_pcb", ".kicad_dru")
-    with open(dru, "w", encoding="utf-8") as fh:
-        fh.write(
-            "(version 1)\n\n"
-            '(rule "wire links may cross"\n'
-            '  (condition "A.Layer == \'B.Cu\' && B.Layer == \'B.Cu\'")\n'
-            "  (constraint clearance (min 0mm)))\n"
-        )
-    print(f"wrote {dru}")
+    if os.path.exists(dru):
+        os.remove(dru)
 
 
 def build():
@@ -474,15 +467,17 @@ def build():
         ["generator_version", sexp.q("9.0")],
         ["general", ["thickness", "1.6"], ["legacy_teardrops", "no"]],
         ["paper", sexp.q("A4")],
-        # KiCad's minimum is 2 copper layers, so B.Cu is declared but never
-        # used -- every track is on F.Cu and only F.Cu gets plotted.
         ["layers",
          ["0", sexp.q("F.Cu"), "signal"],
          ["2", sexp.q("B.Cu"), "signal"],
          ["5", sexp.q("F.SilkS"), "user", sexp.q("F.Silkscreen")],
+         ["7", sexp.q("B.SilkS"), "user", sexp.q("B.Silkscreen")],
          ["1", sexp.q("F.Mask"), "user"],
+         ["3", sexp.q("B.Mask"), "user"],
          ["9", sexp.q("F.Adhes"), "user", sexp.q("F.Adhesive")],
+         ["11", sexp.q("B.Adhes"), "user", sexp.q("B.Adhesive")],
          ["13", sexp.q("F.Paste"), "user"],
+         ["15", sexp.q("B.Paste"), "user"],
          ["17", sexp.q("Dwgs.User"), "user", sexp.q("User.Drawings")],
          ["19", sexp.q("Cmts.User"), "user", sexp.q("User.Comments")],
          ["21", sexp.q("Eco1.User"), "user", sexp.q("User.Eco1")],
@@ -490,7 +485,9 @@ def build():
          ["25", sexp.q("Edge.Cuts"), "user"],
          ["27", sexp.q("Margin"), "user"],
          ["31", sexp.q("F.CrtYd"), "user", sexp.q("F.Courtyard")],
+         ["29", sexp.q("B.CrtYd"), "user", sexp.q("B.Courtyard")],
          ["35", sexp.q("F.Fab"), "user"],
+         ["33", sexp.q("B.Fab"), "user"],
          ],
         ["setup",
          ["pad_to_mask_clearance", "0.05"],
@@ -521,17 +518,15 @@ def build():
         base(*s, "GND", W_GND)
 
     # ground stubs: top row up, bottom row down, right headers across
-    for x in (12, 40.54, 45.62, 54.54, 59.62, 70.08, 83.08):
+    for x in (14, 38.08, 48.24, 63.08, 73.24):
         base(x, 15, x, a, "GND", W_STUB)
     for x in (18.08, 26.54, 36, 48, 60.54, 70.54):
         base(x, 86, x, b, "GND", W_STUB)
-    for y in (24.54, 51.08, 70.54):
+    for y in (20, 58.70):
         base(82, y, b, y, "GND", W_STUB)
 
-    # fused 12 V hops along the top row. 1.5 mm carries well over the horn's
-    # 1 A; wider would foul the pads either side of these short runs.
-    base(17.08, 15, 25, 15, "+12V_RAW", W_STUB)
-    base(30.08, 15, 38, 15, "+12V", W_STUB)
+    # 12 V from the input terminal across to the buck
+    base(19.08, 15, 33, 15, "+12V", W_STUB)
 
     base_tracks = list(tracks)
     n_base = len(tracks)
@@ -539,23 +534,34 @@ def build():
     best = None
     for strategy in ("power", "short", "long"):
         trial = [dict(t) for t in base_tracks]
-        links, failed = auto_route(trial, strategy)
-        score = len(failed) * 1000 + len(links)
-        print(f"  strategy {strategy:<6} -> {len(links)} links, {len(failed)} unrouted")
+        vias, failed = auto_route(trial, strategy)
+        score = len(failed) * 1000 + len(vias)
+        print(f"  strategy {strategy:<6} -> {len(vias)} vias, {len(failed)} unrouted")
         if best is None or score < best[0]:
-            best = (score, trial, links, failed, strategy)
+            best = (score, trial, vias, failed, strategy)
 
-    _, tracks, links, failed, strategy = best
+    _, tracks, vias, failed, strategy = best
     print(f"  using '{strategy}'")
 
     for t in tracks:
         pcb.append(seg(t["x1"], t["y1"], t["x2"], t["y2"],
                        t["net"], t["w"], t["layer"]))
+    for v in vias:
+        pcb.append([
+            "via",
+            ["at", f"{OX + v['x']:.4f}", f"{OY + v['y']:.4f}"],
+            ["size", f"{router.VIA_D}"],
+            ["drill", f"{router.VIA_DRILL}"],
+            ["layers", sexp.q("F.Cu"), sexp.q("B.Cu")],
+            ["net", str(NET_ID[v["net"]])],
+            ["uuid", uid()],
+        ])
 
     # ---- silkscreen ----
     # Kept clear of the part silk: the ring gap at the bottom is the only
     # open strip wide enough for text.
-    pcb.append(text("FREEISP BRAIN  REV C  -  1 LAYER", 50, 94, 1.8))
+    pcb.append(text("FREEISP BRAIN  REV D  -  2 LAYER", 50, 94, 1.8))
+    pcb.append(text("FUSE THE 12V FEED INLINE", 50, 11.5, 1.1))
 
     with open(OUT, "w", encoding="utf-8") as fh:
         fh.write(sexp.dumps(pcb) + "\n")
@@ -563,10 +569,7 @@ def build():
     print(f"wrote {OUT}")
     print(f"  {len(PARTS)} footprints, {len(NETS) - 1} nets")
     print(f"  {n_base} base segments, {len(tracks) - n_base} routed segments")
-    if links:
-        print(f"  {len(links)} wire links (routed on B.Cu):")
-        for net, ra, rb in links:
-            print(f"      {net:<12} {ra} -> {rb}")
+    print(f"  {len(vias)} vias")
     if failed:
         print(f"  !! {len(failed)} UNROUTED:")
         for net, ra, rb in failed:
