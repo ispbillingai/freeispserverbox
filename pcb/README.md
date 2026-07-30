@@ -9,30 +9,47 @@ nets are declared in the board file, so the ratsnest and DRC work without one.
 | | |
 |---|---|
 | Board | 100 × 100 mm, 1.6 mm FR-4 |
-| Copper | **one layer** (`F.Cu`). `B.Cu` is declared only because KiCad's minimum is two — nothing is routed on it |
+| Etched copper | **one layer** (`F.Cu`) — 190 segments |
+| Wire links | **19**, carried on `B.Cu` |
 | Clearance | 0.6 mm |
-| Track width | 0.6 mm signal · 1.5 mm power · 2.5 mm available for the 12 V horn run |
+| Track width | 0.6 mm signal · 0.8–1.2 mm power |
 | Pads | 1.9 mm on 2.54 mm pitch · 2.4 mm on terminals · 2.2 mm on resistors |
 | Mounting | 4 × M3 Ø3.2, 4.5 mm in from each corner |
-| DRC | **0 errors**, 38 unconnected (the unrouted signals) |
+| DRC | **0 errors, 0 unconnected** |
 
-## What is already done
+## It is fully routed
 
-Placement, all 27 nets, board outline, mounting holes, the perimeter ground
-ring, its stubs to every ground pin, and the fused 12 V hops across the top row.
+`router.py` is a grid maze router with real clearance inflation. It routes on
+`F.Cu` first; anything the single layer cannot get through becomes a wire link.
+Three orderings are tried — power-first, shortest-first, longest-first — and
+whichever needs fewest links wins. Shortest-first currently wins at 19.
 
-## What you do
+**`B.Cu` is never etched.** Every track on it is an insulated wire soldered
+between two holes on the component side. Such wires cross each other freely, so
+`freeisp_brain.kicad_dru` sets `B.Cu`-to-`B.Cu` clearance to zero. They still
+clear every pad, so a nicked wire cannot short onto one.
 
-1. Open the board. The blue ratsnest lines are the 24 signal connections left
-   to route.
-2. Route on **F.Cu only**. Where a trace genuinely cannot get through, place a
-   wire link — a track on `B.Cu` between two pads, fitted as a real wire on the
-   component side. Expect six to ten.
-3. `GPIO33` (TFT backlight) sits on the left row but J4 is on the right, so
-   that one needs a link no matter how you route it.
-4. Run DRC until it is clean.
-5. Plot **F.Cu mirrored** for toner transfer — copper goes on the bottom,
-   components on top.
+## Building it
+
+1. Plot **`F.Cu`, mirrored**, for toner transfer. That copper ends up on the
+   underside; components sit on the clean side.
+2. Etch, drill.
+3. **Fit the 19 wire links first** — they are the `B.Cu` tracks. Once tall
+   parts are seated you cannot reach the holes underneath them.
+4. Then resistors, then terminals, then the sockets.
+
+## Why 19 links
+
+The ESP32 sits in two 15-pin socket strips, and nothing can route *between*
+pins on 2.54 mm pitch: the gap is 0.64 mm and a 0.6 mm track with 0.6 mm
+clearance needs 1.5 mm. Each strip is a solid wall, so every signal travels
+around it. Two ways to cut the count:
+
+- **Flip J4 / J5 / U4.** Reversing a header's pin order can uncross a whole
+  bundle. Costs nothing and changes no firmware.
+- **Reassign the freely-chosen GPIOs** (TFT CS/DC/RST, RC522 SS/RST) so the
+  ESP32 pin order matches the header pin order. Bigger win, but it changes pin
+  defines in firmware that is already bench-proven.
 
 ## Warnings you can ignore
 

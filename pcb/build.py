@@ -13,8 +13,10 @@ What it leaves:    signal routing -- that is done interactively in KiCad,
 """
 
 import json
+import math
 import os
 import uuid as _uuid
+import router
 import sexp
 
 FPLIB = r"F:\kicad\share\kicad\footprints"
@@ -210,13 +212,54 @@ def place(ref, spec):
     return fp
 
 
-def seg(x1, y1, x2, y2, net, width):
+def pad_grow(lib):
+    if lib == LIB_RES:
+        return PAD_RES
+    if lib == LIB_TERM:
+        return PAD_P508
+    return PAD_P254
+
+
+def pad_positions(spec):
+    """Absolute pad centres in design coordinates, matching what place() emits.
+
+    KiCad rotates a footprint counter-clockwise with Y running down, so a pad
+    at local (lx, ly) lands at (px + lx.cos + ly.sin, py - lx.sin + ly.cos).
+    """
+    lib, name, dx, dy, rot, _value, netmap = spec
+    fp = load_fp(lib, name)
+    grow = pad_grow(lib)
+    th = math.radians(rot)
+    cos_t, sin_t = math.cos(th), math.sin(th)
+
+    out = []
+    for pad in sexp.find_all(fp, "pad"):
+        if pad[2] == "np_thru_hole":
+            continue
+        num = sexp.unq(pad[1])
+        at = sexp.find(pad, "at")
+        lx, ly = float(at[1]), float(at[2])
+        size = sexp.find(pad, "size")
+        w = max(float(size[1]), grow)
+        h = max(float(size[2]), grow)
+        net = netmap.get(int(num)) if num.isdigit() else None
+        out.append({
+            "num": num,
+            "x": dx + lx * cos_t + ly * sin_t,
+            "y": dy - lx * sin_t + ly * cos_t,
+            "half": max(w, h) / 2.0,
+            "net": net,
+        })
+    return out
+
+
+def seg(x1, y1, x2, y2, net, width, layer="F.Cu"):
     return [
         "segment",
         ["start", f"{OX + x1:.4f}", f"{OY + y1:.4f}"],
         ["end", f"{OX + x2:.4f}", f"{OY + y2:.4f}"],
         ["width", f"{width}"],
-        ["layer", sexp.q("F.Cu")],
+        ["layer", sexp.q(layer)],
         ["net", str(NET_ID[net])],
         ["uuid", uid()],
     ]
@@ -241,6 +284,137 @@ def text(s, x, y, size=1.5):
         ["uuid", uid()],
         ["effects", ["font", ["size", f"{size}", f"{size}"], ["thickness", "0.25"]]],
     ]
+
+
+# Routed power is kept modest: these rails carry a relay coil and a buzzer,
+# not the horn, so 0.8 mm is ample and leaves lanes for the signals.
+NET_WIDTH = {
+    "GND": 1.2, "+5V": 0.8, "+3V3": 0.8,
+    "+12V": 1.2, "+12V_RAW": 1.2, "VBAT": 0.8,
+}
+W_SIGNAL = 0.6
+
+
+def _key(x, y):
+    return (round(x * 100), round(y * 100))
+
+
+def _on_segment(px, py, x1, y1, x2, y2, tol=0.15):
+    return router.Router._seg_dist(px, py, x1, y1, x2, y2) <= tol
+
+
+def auto_route(tracks, strategy):
+    """Route every net that is not already connected.
+
+    F.Cu is tried first. Where the single layer genuinely cannot get through,
+    the connection becomes a wire link on B.Cu. Links are insulated wire on
+    the component side, so they may cross each other freely -- B.Cu tracks are
+    never added as obstacles. They still avoid pads, so a nicked wire cannot
+    short onto one. See freeisp_brain.kicad_dru for the matching DRC rule.
+    """
+    # Every pad is an obstacle, including the ESP32 pins we do not use --
+    # an unconnected pin is still copper and a track across it is a short.
+    all_pads = []
+    for ref in sorted(PARTS):
+        for p in pad_positions(PARTS[ref]):
+            p["ref"] = ref
+            all_pads.append(p)
+    pads = [p for p in all_pads if p["net"]]
+
+    rt_f = router.Router(BW, BH)
+    rt_b = router.Router(BW, BH)
+    for p in all_pads:
+        rt_f.add_pad(p["x"], p["y"], p["half"], p["net"])
+        rt_b.add_pad(p["x"], p["y"], p["half"], p["net"])
+    for t in tracks:
+        rt_f.add_track(t["x1"], t["y1"], t["x2"], t["y2"], t["w"], t["net"])
+
+    # ---- union-find seeded with what the base copper already joins ----
+    parent = {}
+
+    def find(k):
+        parent.setdefault(k, k)
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    def seed():
+        parent.clear()
+        for t in tracks:
+            union(_key(t["x1"], t["y1"]), _key(t["x2"], t["y2"]))
+        # a stub landing mid-ring shares copper with it
+        for t in tracks:
+            for px, py in ((t["x1"], t["y1"]), (t["x2"], t["y2"])):
+                for u in tracks:
+                    if u is t or u["net"] != t["net"]:
+                        continue
+                    if _on_segment(px, py, u["x1"], u["y1"], u["x2"], u["y2"]):
+                        union(_key(px, py), _key(u["x1"], u["y1"]))
+        for p in pads:
+            for t in tracks:
+                if t["net"] != p["net"]:
+                    continue
+                if _on_segment(p["x"], p["y"], t["x1"], t["y1"], t["x2"], t["y2"]):
+                    union(_key(p["x"], p["y"]), _key(t["x1"], t["y1"]))
+
+    by_net = {}
+    for p in pads:
+        by_net.setdefault(p["net"], []).append(p)
+
+    edges = []
+    for net, group in by_net.items():
+        if len(group) < 2:
+            continue
+        pts = [(p["x"], p["y"]) for p in group]
+        for i, j in router.mst_edges(pts):
+            span = abs(pts[i][0] - pts[j][0]) + abs(pts[i][1] - pts[j][1])
+            edges.append((span, net, group[i], group[j]))
+
+    # Routing order changes the result a lot and no heuristic wins every time,
+    # so build() tries each and keeps whichever needs the fewest links.
+    if strategy == "short":
+        edges.sort(key=lambda e: e[0])
+    elif strategy == "long":
+        edges.sort(key=lambda e: -e[0])
+    else:  # power rails first, then shortest
+        edges.sort(key=lambda e: (e[1] not in NET_WIDTH, e[0]))
+
+    links = []
+    failed = []
+    for _span, net, pa, pb in edges:
+        seed()
+        a = (pa["x"], pa["y"])
+        b = (pb["x"], pb["y"])
+        if find(_key(*a)) == find(_key(*b)):
+            continue
+
+        width = NET_WIDTH.get(net, W_SIGNAL)
+        path = rt_f.route(net, a, b, width / 2.0)
+        layer = "F.Cu"
+        if path is None:
+            path = rt_b.route(net, a, b, width / 2.0)
+            layer = "B.Cu"
+            if path is None:
+                failed.append((net, pa["ref"], pb["ref"]))
+                continue
+            links.append((net, pa["ref"], pb["ref"]))
+
+        for k in range(len(path) - 1):
+            x1, y1 = path[k]
+            x2, y2 = path[k + 1]
+            tracks.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                           "w": width, "net": net, "layer": layer})
+            # only etched copper constrains what comes after it
+            if layer == "F.Cu":
+                rt_f.add_track(x1, y1, x2, y2, width, net)
+
+    return links, failed
 
 
 def write_project():
@@ -277,6 +451,19 @@ def write_project():
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(pro, fh, indent=2)
     print(f"wrote {path}")
+
+    # Nothing is etched on B.Cu. Tracks there represent insulated wire links
+    # soldered across the component side, which may cross one another, so
+    # copper clearance between two of them is not a real constraint.
+    dru = OUT.replace(".kicad_pcb", ".kicad_dru")
+    with open(dru, "w", encoding="utf-8") as fh:
+        fh.write(
+            "(version 1)\n\n"
+            '(rule "wire links may cross"\n'
+            '  (condition "A.Layer == \'B.Cu\' && B.Layer == \'B.Cu\'")\n'
+            "  (constraint clearance (min 0mm)))\n"
+        )
+    print(f"wrote {dru}")
 
 
 def build():
@@ -322,24 +509,48 @@ def build():
     pcb += [edge(lo, lo, hi, lo), edge(hi, lo, hi, hi),
             edge(hi, hi, lo, hi), edge(lo, hi, lo, lo)]
 
-    # ---- perimeter ground ring ----
+    # ---- base copper: laid out by hand, then handed to the router as fixed ----
+    tracks = []
+
+    def base(x1, y1, x2, y2, net, width):
+        tracks.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                       "w": width, "net": net, "layer": "F.Cu"})
+
     a, b = RING, BW - RING
     for s in [(a, a, b, a), (b, a, b, b), (b, b, a, b), (a, b, a, a)]:
-        pcb.append(seg(*s, "GND", W_GND))
+        base(*s, "GND", W_GND)
 
-    # ---- ground stubs: top row up, bottom row down, right headers across ----
+    # ground stubs: top row up, bottom row down, right headers across
     for x in (12, 40.54, 45.62, 54.54, 59.62, 70.08, 83.08):
-        pcb.append(seg(x, 15, x, a, "GND", W_STUB))
+        base(x, 15, x, a, "GND", W_STUB)
     for x in (18.08, 26.54, 36, 48, 60.54, 70.54):
-        pcb.append(seg(x, 86, x, b, "GND", W_STUB))
+        base(x, 86, x, b, "GND", W_STUB)
     for y in (24.54, 51.08, 70.54):
-        pcb.append(seg(82, y, b, y, "GND", W_STUB))
+        base(82, y, b, y, "GND", W_STUB)
 
-    # ---- fused 12 V hops along the top row ----
-    # 1.5 mm carries well over the horn's 1 A; wider would foul the pads
-    # either side of these short runs.
-    pcb.append(seg(17.08, 15, 25, 15, "+12V_RAW", W_STUB))
-    pcb.append(seg(30.08, 15, 38, 15, "+12V", W_STUB))
+    # fused 12 V hops along the top row. 1.5 mm carries well over the horn's
+    # 1 A; wider would foul the pads either side of these short runs.
+    base(17.08, 15, 25, 15, "+12V_RAW", W_STUB)
+    base(30.08, 15, 38, 15, "+12V", W_STUB)
+
+    base_tracks = list(tracks)
+    n_base = len(tracks)
+
+    best = None
+    for strategy in ("power", "short", "long"):
+        trial = [dict(t) for t in base_tracks]
+        links, failed = auto_route(trial, strategy)
+        score = len(failed) * 1000 + len(links)
+        print(f"  strategy {strategy:<6} -> {len(links)} links, {len(failed)} unrouted")
+        if best is None or score < best[0]:
+            best = (score, trial, links, failed, strategy)
+
+    _, tracks, links, failed, strategy = best
+    print(f"  using '{strategy}'")
+
+    for t in tracks:
+        pcb.append(seg(t["x1"], t["y1"], t["x2"], t["y2"],
+                       t["net"], t["w"], t["layer"]))
 
     # ---- silkscreen ----
     # Kept clear of the part silk: the ring gap at the bottom is the only
@@ -351,6 +562,15 @@ def build():
 
     print(f"wrote {OUT}")
     print(f"  {len(PARTS)} footprints, {len(NETS) - 1} nets")
+    print(f"  {n_base} base segments, {len(tracks) - n_base} routed segments")
+    if links:
+        print(f"  {len(links)} wire links (routed on B.Cu):")
+        for net, ra, rb in links:
+            print(f"      {net:<12} {ra} -> {rb}")
+    if failed:
+        print(f"  !! {len(failed)} UNROUTED:")
+        for net, ra, rb in failed:
+            print(f"      {net:<12} {ra} -> {rb}")
     write_project()
 
 
