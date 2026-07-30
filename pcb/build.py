@@ -126,7 +126,7 @@ PARTS = {
     # reversed hookup harmless instead of fatal to the buck.
     "J1":  (LIB_TERM, FP_TERM2, 14, 15, 0, "12V IN",
             {1: "+12V_IN", 2: "GND"}),
-    "D3":  (LIB_DIODE, FP_DIODE, 23.5, 46, 270, "1N5822",
+    "D3":  (LIB_DIODE, FP_DIODE, 14, 47, 270, "1N5822",
             {1: "+12V", 2: "+12V_IN"}),   # series reverse-polarity protection
     "U1":  (LIB_TERM, FP_TERM4, 33, 15, 0, "BUCK  IN+ IN- OUT+ OUT-",
             {1: "+12V", 2: "GND", 3: "+5V", 4: "GND"}),
@@ -145,15 +145,15 @@ PARTS = {
     # vertical down the left edge (rot 270 runs the pads downward)
     "J13": (LIB_TERM, FP_TERM4, 14, 24, 270, "BOOST  IN+ IN- OUT+ OUT-",
             {1: "VBAT", 2: "GND", 3: "+5V_BAT", 4: "GND"}),
-    "D1":  (LIB_DIODE, FP_DIODE, 38, 25.5, 0, "1N5822",
-            {1: "+5V_SYS", 2: "+5V"}),        # pad 1 = cathode (band LEFT)
+    "D1":  (LIB_DIODE, FP_DIODE, 84, 30, 270, "1N5822",
+            {1: "+5V_SYS", 2: "+5V"}),        # pad 1 = cathode (band UP)
     # vertical, right of U3B -- the 19-pin socket ate its old horizontal spot
-    "D2":  (LIB_DIODE, FP_DIODE, 64, 33, 270, "1N5822",
+    "D2":  (LIB_DIODE, FP_DIODE, 76, 33, 270, "1N5822",
             {1: "+5V_SYS", 2: "+5V_BAT"}),    # cathode/band UP
 
     # --- the brain: 38-pin DevKitC in two 19-pin sockets ---
-    "U3A": (LIB_SOCKET, FP_SOCKET19, 32, 28, 0, "ESP32 L", U3A_NETS),
-    "U3B": (LIB_SOCKET, FP_SOCKET19, 32 + ESP_ROW, 28, 0, "ESP32 R", U3B_NETS),
+    "U3A": (LIB_SOCKET, FP_SOCKET19, 44, 34, 0, "ESP32 L", U3A_NETS),
+    "U3B": (LIB_SOCKET, FP_SOCKET19, 44 + ESP_ROW, 34, 0, "ESP32 R", U3B_NETS),
 
     # --- peripherals. Pin ORDER is the module's own silkscreen order, and
     # every physical pin gets a hole even where we do not use the signal.
@@ -176,20 +176,20 @@ PARTS = {
     # --- passives ---
     # 12V mains-presence divider lives ON the board (review C1): the +12V
     # rail, never a field wire, feeds it. 12V * 27/127 = 2.55V at GPIO34.
-    "R5":  (LIB_RES, FP_RES, 16, 68, 0, "100k", {1: "+12V", 2: "SENSE_MAINS"}),
-    "R6":  (LIB_RES, FP_RES, 16, 63.5, 0, "27k", {1: "GND", 2: "SENSE_MAINS"}),
-    "R3":  (LIB_RES, FP_RES, 16, 72, 0, "100k", {1: "VBAT", 2: "SENSE_BATT"}),
-    "R4":  (LIB_RES, FP_RES, 16, 78, 0, "100k", {1: "GND", 2: "SENSE_BATT"}),
+    "R5":  (LIB_RES, FP_RES, 13, 68, 0, "100k", {1: "+12V", 2: "SENSE_MAINS"}),
+    "R6":  (LIB_RES, FP_RES, 13, 63.5, 0, "27k", {1: "GND", 2: "SENSE_MAINS"}),
+    "R3":  (LIB_RES, FP_RES, 13, 72, 0, "100k", {1: "VBAT", 2: "SENSE_BATT"}),
+    "R4":  (LIB_RES, FP_RES, 13, 78, 0, "100k", {1: "GND", 2: "SENSE_BATT"}),
     # x=36: clear of the 19-pin socket's courtyard, which now reaches y75.5
-    "R2":  (LIB_RES, FP_RES, 36, 72, 0, "220R", {1: "LED_G", 2: "LED_G_A"}),
-    "R1":  (LIB_RES, FP_RES, 36, 78, 0, "220R", {1: "LED_R", 2: "LED_R_A"}),
-    "R8":  (LIB_RES, FP_RES, 35.5, 62, 0, "1k", {1: "REED_F", 2: "REED"}),
-    "R7":  (LIB_RES, FP_RES, 64, 79, 0, "1k", {1: "HORN_IN", 2: "HORN_DRV"}),
+    "R2":  (LIB_RES, FP_RES, 78, 64, 0, "220R", {1: "LED_G", 2: "LED_G_A"}),
+    "R1":  (LIB_RES, FP_RES, 78, 70, 0, "220R", {1: "LED_R", 2: "LED_R_A"}),
+    "R8":  (LIB_RES, FP_RES, 24, 95, 0, "1k", {1: "REED_F", 2: "REED"}),
+    "R7":  (LIB_RES, FP_RES, 78, 79, 0, "1k", {1: "HORN_IN", 2: "HORN_DRV"}),
     # ADC smoothing (100n at each divider node) + bulk on the diode-OR rail.
     # Discs sit in the channel under the ESP32 -- LOW parts only there.
-    "C2":  (LIB_CAP, FP_CAP_D, 36, 52, 270, "100n", {1: "SENSE_BATT", 2: "GND"}),
-    "C3":  (LIB_CAP, FP_CAP_D, 42, 52, 270, "100n", {1: "SENSE_MAINS", 2: "GND"}),
-    "C1":  (LIB_CAP, FP_CAP_EL, 75.5, 30, 270, "470u", {1: "+5V_SYS", 2: "GND"}),
+    "C2":  (LIB_CAP, FP_CAP_D, 13, 83, 270, "100n", {1: "SENSE_BATT", 2: "GND"}),
+    "C3":  (LIB_CAP, FP_CAP_D, 19, 83, 270, "100n", {1: "SENSE_MAINS", 2: "GND"}),
+    "C1":  (LIB_CAP, FP_CAP_EL, 90, 46, 270, "470u", {1: "+5V_SYS", 2: "GND"}),
 
     # --- field terminals, bottom row (J12 sense header DELETED, review C1/m5:
     # both sense sources are on-board nets; a field pin invited 12V into a
@@ -255,8 +255,8 @@ def place(ref, spec):
 
     # a few reference texts land on neighbours at their library default spot;
     # these overrides are in FOOTPRINT-LOCAL coords (they rotate with the part)
-    ref_at = {"D1": (6.35, 3.6), "D2": (7.2, 4.9), "J13": (0.0, 9.0),
-              "J11": (-3.5, -6.6), "R3": (3.81, 2.4)}.get(ref)
+    ref_at = {"D1": (6.35, -3.6), "D2": (6.35, -3.6), "J13": (0.0, 9.0),
+              "J11": (-3.5, -6.6), "R3": (3.81, 2.4), "C1": (-5.2, 0.0)}.get(ref)
 
     # reference + value text
     for prop in sexp.find_all(fp, "property"):
@@ -406,9 +406,9 @@ PIN_SILK = [
     # ESP32 orientation -- match these four corners to the devkit silkscreen.
     # 38-pin DevKitC: 3V3 top-left, 5V bottom-left, GND top-right, CLK
     # bottom-right (sockets anchor at (32,28); 19 pins end at y=73.72)
-    ("3V3", 29.2, 28, 0), ("5V", 29.4, 73.72, 0),
-    ("GND", 60.6, 28, 0), ("CLK", 60.6, 73.72, 0),
-    ("ANTENNA SIDE", 44.7, 30.5, 0), ("USB SIDE", 46.5, 69.4, 0),
+    ("3V3", 41.2, 34, 0), ("5V", 41.4, 79.72, 0),
+    ("GND", 72.6, 34, 0), ("CLK", 72.6, 79.72, 0),
+    ("ANTENNA SIDE", 56.7, 36.5, 0), ("USB SIDE", 56.7, 75.5, 0),
     # J4 TFT (right of pads; names = blue ST7735S silkscreen)
     ("GND", 100.6, 12, 0), ("VDD", 100.6, 14.54, 0), ("SCL", 100.6, 17.08, 0),
     ("SDA", 100.6, 19.62, 0), ("RST", 100.6, 22.16, 0), ("DC", 100.5, 24.70, 0),
@@ -452,7 +452,7 @@ def _on_segment(px, py, x1, y1, x2, y2, tol=0.15):
     return router.Router._seg_dist(px, py, x1, y1, x2, y2) <= tol
 
 
-def auto_route(tracks, strategy):
+def auto_route(tracks, strategy, priority=frozenset()):
     """Route every net that is not already connected.
 
     Two etched layers: F.Cu is tried first, and anything that cannot get
@@ -531,6 +531,9 @@ def auto_route(tracks, strategy):
         edges.sort(key=lambda e: -e[0])
     else:  # power rails first, then shortest
         edges.sort(key=lambda e: (e[1] not in NET_WIDTH, e[0]))
+    # nets that failed a previous round jump the queue before congestion forms
+    if priority:
+        edges.sort(key=lambda e: e[1] not in priority)
 
     vias = []
     failed = []
@@ -679,12 +682,23 @@ def build():
 
     best = None
     for strategy in ("power", "short", "long"):
-        trial = [dict(t) for t in base_tracks]
-        vias, failed = auto_route(trial, strategy)
-        score = len(failed) * 1000 + len(vias)
-        print(f"  strategy {strategy:<6} -> {len(vias)} vias, {len(failed)} unrouted")
-        if best is None or score < best[0]:
-            best = (score, trial, vias, failed, strategy)
+        pri = frozenset()
+        for attempt in range(4):
+            trial = [dict(t) for t in base_tracks]
+            vias, failed = auto_route(trial, strategy, pri)
+            score = len(failed) * 1000 + len(vias)
+            print(f"  strategy {strategy:<6} try {attempt + 1} -> "
+                  f"{len(vias)} vias, {len(failed)} unrouted")
+            if best is None or score < best[0]:
+                best = (score, trial, vias, failed, strategy)
+            if not failed:
+                break
+            new_pri = pri | {net for net, _a, _b in failed}
+            if new_pri == pri:
+                break
+            pri = new_pri
+        if best[3] == []:
+            break
 
     _, tracks, vias, failed, strategy = best
     print(f"  using '{strategy}'")
@@ -706,7 +720,7 @@ def build():
     # ---- silkscreen ----
     # Kept clear of the part silk: the ring gap at the bottom is the only
     # open strip wide enough for text.
-    pcb.append(text("FREEISP BRAIN  REV G - 115MM - 38-PIN DEVKITC", 57.5, 109, 1.8))
+    pcb.append(text("FREEISP BRAIN  REV H - 115MM - 38-PIN DEVKITC", 57.5, 109, 1.8))
     # The two set-points ARE the diode-OR priority mechanism: buck 0.4V above
     # boost means D1 always wins on mains and D2 is cleanly reverse-biased.
     # Printed on the board so the values cannot get lost in a document.
@@ -718,12 +732,12 @@ def build():
     # are estimates off the paper-test photo (antenna ~7mm, USB end ~12mm
     # incl. the Type-C) -- VERIFY on the printed sheet. Nothing taller than
     # the 8.5mm socket seat may live inside this rectangle.
-    bx0, bx1 = 30.5, 58.9
-    by0, by1 = 28 - 6.0, 73.72 + 12.0
+    bx0, bx1 = 42.5, 70.9
+    by0, by1 = 34 - 6.0, 79.72 + 12.0
     for s in [(bx0, by0, bx1, by0), (bx1, by0, bx1, by1),
               (bx1, by1, bx0, by1), (bx0, by1, bx0, by0)]:
         pcb.append(sline(*s))
-    pcb.append(text("ESP32 BODY - LOW PARTS ONLY", 44.7, 84.2, 0.8))
+    pcb.append(text("ESP32 BODY - KEEP EMPTY", 56.7, 89.5, 0.8))
 
     with open(OUT, "w", encoding="utf-8") as fh:
         fh.write(sexp.dumps(pcb) + "\n")
