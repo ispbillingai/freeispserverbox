@@ -182,6 +182,7 @@ def main():
             y += heights[r] + gap
 
     lane_n = {"L": 0, "R": 0}
+    cross_n = {"L": 0, "R": 0}
     for ref, title, silk, col, ckey in EXT:
         c = COL[ckey]
         lst = pads.get(ref, [])
@@ -226,15 +227,31 @@ def main():
 
             sx = bx + BW if col == "L" else bx
             sy = ry + 8
-            ex = (CX_L - 10) if col == "L" else (CX_R + 10)
             ey = pin_y(row)
             lane_n[col] += 1
             lane = (630 + lane_n[col] * 15) if col == "L" \
                 else (W - 630 - lane_n[col] * 14)
             wcol = GNDC if net == "GND" else c
-            d.line([(sx, sy), (lane, sy), (lane, ey), (ex, ey)],
-                   fill=wcol, width=2 if net == "GND" else 3)
+
+            # The pin may sit on the OPPOSITE column from its module. Ending
+            # the line at the near edge would point it at the wrong pins, so
+            # go round the chip -- whichever end is closer -- and arrive on
+            # the side the pin is really on.
+            ex = (CX_L - 10) if side == "L" else (CX_R + 10)
+            if side == col:
+                pts = [(sx, sy), (lane, sy), (lane, ey), (ex, ey)]
+            else:
+                cross_n[col] += 1
+                k = cross_n[col]
+                around = (top - 14 - (k % 7) * 10) if abs(ey - top) < abs(ey - bot) \
+                    else (bot + 14 + (k % 7) * 10)
+                far = (CX_L - 30 - k * 9) if side == "L" else (CX_R + 30 + k * 9)
+                pts = [(sx, sy), (lane, sy), (lane, around),
+                       (far, around), (far, ey), (ex, ey)]
+
+            d.line(pts, fill=wcol, width=2 if net == "GND" else 3)
             d.ellipse([sx - 4, sy - 4, sx + 4, sy + 4], fill=wcol)
+            d.ellipse([ex - 4, ey - 4, ex + 4, ey + 4], fill=wcol)
 
     ly = H - 58
     for i, (k, lab) in enumerate([("pwr", "12 V input"), ("batt", "battery / charge"),
