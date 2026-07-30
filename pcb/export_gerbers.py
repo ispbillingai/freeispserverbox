@@ -55,8 +55,13 @@ def main():
          "--layers", LAYERS, "--subtract-soldermask", "--no-protel-ext", BOARD])
     run([KICAD, "pcb", "export", "drill", "--output", OUTDIR,
          "--format", "excellon", "--excellon-units", "mm",
-         "--drill-origin", "absolute", "--excellon-separate-th",
-         "--generate-map", "--map-format", "gerberx2", BOARD])
+         "--drill-origin", "absolute", "--excellon-separate-th", BOARD])
+
+    # No drill MAPS. They are human-readable legends, not fabrication data,
+    # and PCBWay's uploader files them under "drawing" / "unknown" -- exactly
+    # the ambiguity you do not want an operator resolving by guesswork.
+    for f in glob.glob(f"{OUTDIR}/*drl_map*"):
+        os.remove(f)
 
     # ---- prove nothing sits outside the board outline ----
     bad = []
