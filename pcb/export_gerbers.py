@@ -7,12 +7,15 @@ must never be etched onto a real board.
 """
 
 import glob
+import math
 import os
 import re
 import shutil
 import subprocess
 import sys
 import zipfile
+
+import sexp
 
 KICAD = r"F:\kicad\bin\kicad-cli.exe"
 BOARD = "freeisp_brain.kicad_pcb"
@@ -68,6 +71,35 @@ def main():
                 and y0 >= -(Y0 + SIDE) - 0.5 and y1 <= -Y0 + 0.5):
             bad.append((os.path.basename(f), e))
 
+    # ---- every pad in the board must have a hole in the drill file ----
+    # Catches the worst silent failure: a stale export that predates the
+    # last change, so a connector exists in KiCad but not in the zip.
+    pcb = sexp.parse(open(BOARD, encoding="utf-8").read())
+    pads = []
+    for fp in sexp.find_all(pcb, "footprint"):
+        ref = "?"
+        for p in sexp.find_all(fp, "property"):
+            if sexp.unq(p[1]) == "Reference":
+                ref = sexp.unq(p[2])
+        at = sexp.find(fp, "at")
+        fx, fy = float(at[1]), float(at[2])
+        rot = math.radians(float(at[3]) if len(at) > 3 else 0)
+        c, s = math.cos(rot), math.sin(rot)
+        for pad in sexp.find_all(fp, "pad"):
+            a = sexp.find(pad, "at")
+            lx, ly = float(a[1]), float(a[2])
+            # drill files negate Y, same convention as gerber
+            pads.append((ref, round(fx + lx * c + ly * s, 2),
+                         round(-(fy - lx * s + ly * c), 2)))
+
+    holes = set()
+    for f in glob.glob(f"{OUTDIR}/*.drl"):
+        for line in open(f, encoding="utf-8", errors="ignore"):
+            m = re.match(r"^X([\d.-]+)Y([\d.-]+)$", line.strip())
+            if m:
+                holes.add((round(float(m.group(1)), 2), round(float(m.group(2)), 2)))
+    undrilled = [(r, x, y) for r, x, y in pads if (x, y) not in holes]
+
     edge = extents(f"{OUTDIR}/freeisp_brain-Edge_Cuts.gbr")
     w, h = edge[1] - edge[0], edge[3] - edge[2]
 
@@ -82,10 +114,12 @@ def main():
     print(f"outline      {w:.3f} x {h:.3f} mm")
     print(f"holes        {holes[0]} plated, {holes[1]} unplated (the M3 mounts)")
     print(f"off-board    {'CLEAN' if not bad else bad}")
+    print(f"pads drilled {len(pads) - len(undrilled)}/{len(pads)}"
+          + ("" if not undrilled else f"   MISSING: {undrilled}"))
     print(f"zip          {ZIPNAME}  "
           f"({os.path.getsize(ZIPNAME) / 1024:.0f} kB, "
           f"{len(glob.glob(f'{OUTDIR}/*'))} files)")
-    if bad or abs(w - SIDE) > 0.01 or abs(h - SIDE) > 0.01:
+    if bad or undrilled or abs(w - SIDE) > 0.01 or abs(h - SIDE) > 0.01:
         sys.exit("*** DO NOT ORDER - check the failures above ***")
     print("\nREADY TO UPLOAD")
 
