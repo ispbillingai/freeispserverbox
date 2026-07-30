@@ -103,7 +103,11 @@ PARTS = {
             {1: "+12V", 2: "+12V_IN"}),   # series reverse-polarity protection
     "U1":  (LIB_TERM, FP_TERM4, 33, 15, 0, "BUCK  IN+ IN- OUT+ OUT-",
             {1: "+12V", 2: "GND", 3: "+5V", 4: "GND"}),
-    "U2":  (LIB_TERM, FP_TERM4, 58, 15, 0, "CHARGER  IN+ IN- B+ B-",
+    # Protected TP4056: the LOAD hangs on the module's OUT+/OUT- (behind the
+    # DW01 protection FETs). The battery wires to the module's own B+/B- pads
+    # directly and never touches this board. Labelling the terminal B+/B-
+    # would instruct an unprotected discharge path.
+    "U2":  (LIB_TERM, FP_TERM4, 58, 15, 0, "CHARGER  IN+ IN- OUT+ OUT-",
             {1: "+5V", 2: "GND", 3: "VBAT", 4: "GND"}),
 
     # --- backup power: step-up + the diode-OR where the two 5V rails meet.
@@ -223,7 +227,7 @@ def place(ref, spec):
     # a few reference texts land on neighbours at their library default spot;
     # these overrides are in FOOTPRINT-LOCAL coords (they rotate with the part)
     ref_at = {"D1": (6.35, 3.6), "D2": (6.35, 3.6), "J13": (0.0, 9.0),
-              "J11": (2.54, -6.6), "R3": (3.81, 2.4)}.get(ref)
+              "J11": (-3.5, -6.6), "R3": (3.81, 2.4)}.get(ref)
 
     # reference + value text
     for prop in sexp.find_all(fp, "property"):
@@ -352,9 +356,9 @@ PIN_SILK = [
     # U1 buck terminal (below pads)
     ("IN+", 33, 20.9, 0), ("IN-", 38.08, 20.9, 0),
     ("OUT+", 43.16, 20.9, 0), ("OUT-", 48.24, 20.9, 0),
-    # U2 charger terminal (below pads)
+    # U2 charger terminal (below pads) -- OUT pads, NOT B+/B- (protection!)
     ("IN+", 58, 20.9, 0), ("IN-", 63.08, 20.9, 0),
-    ("B+", 68.16, 20.9, 0), ("B-", 73.24, 20.9, 0),
+    ("OUT+", 68.16, 20.9, 0), ("OUT-", 73.24, 20.9, 0),
     # J13 boost terminal, vertical: labels right of each pad, clear of the
     # body silk (which reaches x=18.85 after the 270 rotation)
     ("IN+", 20.4, 24, 0), ("IN-", 20.4, 29.08, 0),
@@ -662,7 +666,10 @@ def build():
     # Kept clear of the part silk: the ring gap at the bottom is the only
     # open strip wide enough for text.
     pcb.append(text("FREEISP BRAIN  REV E  -  2 LAYER", 50, 94, 1.8))
-    pcb.append(text("FUSE THE 12V FEED INLINE", 50, 6.5, 1.1))
+    # The two set-points ARE the diode-OR priority mechanism: buck 0.4V above
+    # boost means D1 always wins on mains and D2 is cleanly reverse-biased.
+    # Printed on the board so the values cannot get lost in a document.
+    pcb.append(text("FUSE 12V INLINE - SET BUCK 5.4V - BOOST 5.0V", 50, 6.5, 1.1))
     for s, lx, ly, rot in PIN_SILK:
         pcb.append(text(s, lx, ly, 0.8, rot))
 

@@ -93,7 +93,7 @@ STOP — it is not the assumed 30-pin layout.
 | J1 | 12V IN | **+12V · GND** | PSU 12 V, **fuse inline in the + wire** |
 | D3 | diode | band (K) toward the TOP | 1N5822 — reverse-polarity guard |
 | U1 | BUCK | IN+ · IN− · OUT+ · OUT− | LM2596 module — **set to 5.4–5.5 V FIRST** (measure before wiring; 5.0 V lets the battery fight the mains) |
-| U2 | CHARGER | IN+ · IN− · B+ · B− | TP4056 module; B+/B− to the 18650 |
+| U2 | CHARGER | IN+ · IN− · **OUT+ · OUT−** | TP4056 module's OUT pads — the load side, behind the protection FETs. **The 18650 wires straight to the module's own B+/B− pads and never touches this board.** Load on B+/B− would bypass the protection |
 | J13 | BOOST (left edge, vertical) | IN+ · IN− · OUT+ · OUT− | 5 V step-up module |
 | D1 | diode | band (K) toward the LEFT | 1N5822 — from buck |
 | D2 | diode | band (K) toward the LEFT | 1N5822 — from boost |
@@ -160,6 +160,23 @@ bursts, the TFT, the relay coil AND the sounding horn — buy a **≥2 A**
 step-up module, not a tiny 1 A one.
 
 ---
+
+## Match your modules by PRINTED NAME, never by pin position
+
+The board's labels are correct for the common versions of each module, but
+clones vary. At assembly, hold each module next to its terminal and match
+the words:
+
+- **Relay module** — 3-pin order differs between brands. Match IN, GND, VCC
+  by the module's own silkscreen. Also confirm a 3.3 V signal triggers it
+  (high-level-trigger boards can be marginal at 5 V VCC).
+- **TP4056** — board terminal takes the module's **OUT+ / OUT−**. Battery
+  goes on the module's **B+ / B−**. Four different pads, two different jobs.
+- **Buzzer module** — SIG pin must accept 3.3 V logic (the kit one does).
+- **TFT** — must be the 8-pin ST7735 type reading GND VDD SCL SDA RST DC CS
+  BLK. A different pin order means rewiring the plug, not forcing it in.
+- **Buck / boost** — set the trimmers with a multimeter BEFORE wiring:
+  buck 5.4 V, boost 5.0 V (also printed on the board's top edge).
 
 ## Before ordering — your part
 

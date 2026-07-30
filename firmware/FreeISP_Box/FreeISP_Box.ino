@@ -1,4 +1,11 @@
 /* ============================================================================
+   ⛔ SUPERSEDED — DO NOT FLASH THIS WITH THE BRAIN PCB (rev E).
+   This v0.1 prototype targets the old ESP32-S3 with PLACEHOLDER pins
+   (reed 4, siren 5, LEDs 6/7 — GPIO 6/7 are the classic ESP32's FLASH pins
+   and will not even boot). The PCB is wired for the pin map in
+   firmware/LiveDashboardNext + firmware/CardDisarm — that is the live code.
+   Kept only as the original feature-list reference.
+   ============================================================================
    FreeISP Box — ESP32-S3 Brain (v0.1 — FIRST COMPLETE PROGRAM)
    ----------------------------------------------------------------------------
    One program, many jobs (runs forever in loop()):
