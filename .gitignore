@@ -14,3 +14,6 @@ __pycache__/
 pcb/drc.json
 *.kicad_prl
 *-backups/
+
+# KiCad editor lock files
+~*.lck
