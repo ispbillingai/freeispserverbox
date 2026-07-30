@@ -15,7 +15,7 @@ import sexp
 
 BOARD = "freeisp_brain.kicad_pcb"
 OUT = "wiring_diagram.png"
-W, H = 2600, 1500
+W, H = 2600, 2010
 
 BG = (250, 250, 247)
 INK = (20, 26, 24)
@@ -126,6 +126,89 @@ BW, ROW = 540, 24
 
 def pin_y(i):
     return PY0 + i * PSTEP
+
+
+def box(d, x, y, w, h, title, sub, c, fill=(255, 255, 255)):
+    d.rounded_rectangle([x, y, x + w, y + h], 8, fill=fill, outline=c, width=3)
+    d.text((x + 14, y + 9), title, INK, font=F_N)
+    if sub:
+        d.text((x + 14, y + 31), sub, MUTED, font=F_TINY)
+
+
+def arrow(d, x1, y1, x2, y2, c, label=None):
+    d.line([(x1, y1), (x2, y2)], fill=c, width=4)
+    ang = 0 if y1 == y2 else (1 if y2 > y1 else -1)
+    if ang == 0:
+        d.polygon([(x2, y2), (x2 - 12, y2 - 7), (x2 - 12, y2 + 7)], fill=c)
+    else:
+        d.polygon([(x2, y2), (x2 - 7, y2 - 12 * ang), (x2 + 7, y2 - 12 * ang)], fill=c)
+    if label:
+        d.text(((x1 + x2) / 2 - d.textlength(label, font=F_TINY) / 2, y1 - 22),
+               label, MUTED, font=F_TINY)
+
+
+def draw_power_chain(d):
+    """The journey the 12 V takes before anything on the board sees it."""
+    P, B, S, G = COL["pwr"], COL["batt"], (35, 120, 180), COL["sig"]
+    y0 = H - 448
+    d.line([(60, y0 - 26), (W - 60, y0 - 26)], fill=(214, 218, 212), width=2)
+    d.text((60, y0 - 16), "POWER CHAIN  -  what the 12 V passes through before it "
+           "reaches anything", INK, font=F_B)
+    d.text((62, y0 + 10), "the battery path joins the same rail, so a mains cut "
+           "changes nothing the ESP32 can feel", MUTED, font=F_TINY)
+
+    BW_, BH_, PITCH = 176, 58, 218
+    ytop = y0 + 44
+    mains = [
+        ("12 V PSU", "mains adaptor", P),
+        ("FUSE", "inline, in the + wire", P),
+        ("J1", "12V IN terminal", P),
+        ("D3  1N5822", "reverse-polarity guard", P),
+        ("U1  BUCK", "set to 5.4 V", P),
+        ("D1  1N5822", "one-way valve", S),
+        ("5V_SYS", "the board's 5 V rail", S),
+        ("ESP32 5V", "+ TFT, buzzer, relay, horn", S),
+    ]
+    xs = []
+    for i, (t, s, c) in enumerate(mains):
+        x = 66 + i * PITCH
+        xs.append(x)
+        box(d, x, ytop, BW_, BH_, t, s, c)
+        if i:
+            arrow(d, xs[i - 1] + BW_, ytop + BH_ / 2, x - 4, ytop + BH_ / 2, c)
+
+    # the 12 V also feeds the sense divider
+    xsense = xs[3] + 30
+    ysense = ytop + BH_ + 62
+    box(d, xsense, ysense, BW_ + 30, BH_, "R5 / R6 divider",
+        "12 V -> 2.55 V so D34 can watch the mains", G)
+    arrow(d, xs[3] + BW_ / 2, ytop + BH_, xsense + 60, ysense - 4, G)
+
+    # battery path, merging into the same rail through D2
+    ybat = ytop + BH_ + 150
+    batt = [("U2  TP4056", "charges from the 5 V", B),
+            ("18650 CELL", "on the module's B+/B-", B),
+            ("J13  BOOST", "set to 5.0 V", B),
+            ("D2  1N5822", "one-way valve", B)]
+    for i, (t, s, c) in enumerate(batt):
+        x = xs[3] + 60 + i * PITCH
+        box(d, x, ybat, BW_, BH_, t, s, c)
+        if i:
+            arrow(d, x - PITCH + BW_, ybat + BH_ / 2, x - 4, ybat + BH_ / 2, c)
+        if i == len(batt) - 1:
+            mx = x + BW_ / 2
+            d.line([(mx, ybat), (mx, ytop + BH_ + 26)], fill=B, width=4)
+            arrow(d, mx, ytop + BH_ + 26, xs[6] + BW_ / 2, ytop + BH_ + 26, B)
+            d.line([(xs[6] + BW_ / 2, ytop + BH_ + 26),
+                    (xs[6] + BW_ / 2, ytop + BH_)], fill=B, width=4)
+            d.polygon([(xs[6] + BW_ / 2, ytop + BH_),
+                       (xs[6] + BW_ / 2 - 7, ytop + BH_ + 12),
+                       (xs[6] + BW_ / 2 + 7, ytop + BH_ + 12)], fill=B)
+    arrow(d, xs[4] + BW_ / 2, ytop + BH_, xs[3] + 60 + BW_ / 2, ybat - 4, B)
+
+    d.text((xs[4] + 30, ytop + BH_ + 108),
+           "D1 and D2 both point INTO the rail, so whichever side sits higher "
+           "feeds it and the other simply waits.", MUTED, font=F_TINY)
 
 
 def main():
@@ -252,6 +335,8 @@ def main():
             d.line(pts, fill=wcol, width=2 if net == "GND" else 3)
             d.ellipse([sx - 4, sy - 4, sx + 4, sy + 4], fill=wcol)
             d.ellipse([ex - 4, ey - 4, ex + 4, ey + 4], fill=wcol)
+
+    draw_power_chain(d)
 
     ly = H - 58
     for i, (k, lab) in enumerate([("pwr", "12 V input"), ("batt", "battery / charge"),
