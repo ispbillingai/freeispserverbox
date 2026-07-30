@@ -50,6 +50,7 @@ LIB_HEADER = "Connector_PinHeader_2.54mm"
 LIB_TERM = "Connector_Phoenix_MC_HighVoltage"
 LIB_RES = "Resistor_THT"
 LIB_DIODE = "Diode_THT"
+LIB_CAP = "Capacitor_THT"
 LIB_HOLE = "MountingHole"
 
 FP_SOCKET15 = "PinSocket_1x15_P2.54mm_Vertical"
@@ -57,6 +58,8 @@ FP_TERM2 = "PhoenixContact_MCV_1,5_2-G-5.08_1x02_P5.08mm_Vertical"
 FP_TERM4 = "PhoenixContact_MCV_1,5_4-G-5.08_1x04_P5.08mm_Vertical"
 FP_RES = "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
 FP_DIODE = "D_DO-201AD_P12.70mm_Horizontal"
+FP_CAP_EL = "CP_Radial_D8.0mm_P3.50mm"
+FP_CAP_D = "C_Disc_D5.0mm_W2.5mm_P5.00mm"
 FP_HOLE = "MountingHole_3.2mm_M3"
 
 
@@ -66,10 +69,10 @@ def hdr(n):
 
 # ---------------------------------------------------------------- nets
 NETS = [
-    "", "GND", "+5V", "+5V_BAT", "+5V_SYS", "+3V3", "+12V", "VBAT", "SENSE_BATT",
-    "SENSE_MAINS", "REED", "LED_R", "LED_R_A", "LED_G", "LED_G_A", "BUZZ",
-    "HORN_IN", "HORN_RET", "MOSI", "MISO", "SCK", "TFT_CS", "TFT_DC",
-    "TFT_RST", "TFT_BLK", "RC_SS", "RC_RST", "SDA", "SCL",
+    "", "GND", "+5V", "+5V_BAT", "+5V_SYS", "+3V3", "+12V", "+12V_IN", "VBAT",
+    "SENSE_BATT", "SENSE_MAINS", "REED", "REED_F", "LED_R", "LED_R_A", "LED_G",
+    "LED_G_A", "BUZZ", "HORN_IN", "HORN_DRV", "MOSI", "MISO", "SCK", "TFT_CS",
+    "TFT_DC", "TFT_RST", "TFT_BLK", "RC_SS", "RC_RST", "SDA", "SCL",
 ]
 NET_ID = {name: i for i, name in enumerate(NETS)}
 
@@ -92,8 +95,12 @@ PARTS = {
     # --- power in, top row. The buck and charger are wire-pad modules, not
     # pluggable headers, so they bolt alongside and land on screw terminals.
     # Fuse the 12 V feed inline in the wire (silkscreened as a reminder).
+    # +12V first to match PSU labelling (review M2). D3 downstream makes a
+    # reversed hookup harmless instead of fatal to the buck.
     "J1":  (LIB_TERM, FP_TERM2, 14, 15, 0, "12V IN",
-            {1: "GND", 2: "+12V"}),
+            {1: "+12V_IN", 2: "GND"}),
+    "D3":  (LIB_DIODE, FP_DIODE, 23.5, 46, 270, "1N5822",
+            {1: "+12V", 2: "+12V_IN"}),   # series reverse-polarity protection
     "U1":  (LIB_TERM, FP_TERM4, 33, 15, 0, "BUCK  IN+ IN- OUT+ OUT-",
             {1: "+12V", 2: "GND", 3: "+5V", 4: "GND"}),
     "U2":  (LIB_TERM, FP_TERM4, 58, 15, 0, "CHARGER  IN+ IN- B+ B-",
@@ -135,24 +142,38 @@ PARTS = {
             {1: "+3V3", 2: "GND", 3: "SCL", 4: "SDA"}),
 
     # --- passives ---
+    # 12V mains-presence divider lives ON the board (review C1): the +12V
+    # rail, never a field wire, feeds it. 12V * 27/127 = 2.55V at GPIO34.
+    "R5":  (LIB_RES, FP_RES, 16, 68, 0, "100k", {1: "+12V", 2: "SENSE_MAINS"}),
+    "R6":  (LIB_RES, FP_RES, 16, 63.5, 0, "27k", {1: "GND", 2: "SENSE_MAINS"}),
     "R3":  (LIB_RES, FP_RES, 16, 72, 0, "100k", {1: "VBAT", 2: "SENSE_BATT"}),
     "R4":  (LIB_RES, FP_RES, 16, 78, 0, "100k", {1: "GND", 2: "SENSE_BATT"}),
     "R2":  (LIB_RES, FP_RES, 33, 72, 0, "220R", {1: "LED_G", 2: "LED_G_A"}),
     "R1":  (LIB_RES, FP_RES, 33, 78, 0, "220R", {1: "LED_R", 2: "LED_R_A"}),
+    "R8":  (LIB_RES, FP_RES, 35.5, 62, 0, "1k", {1: "REED_F", 2: "REED"}),
+    "R7":  (LIB_RES, FP_RES, 64, 79, 0, "1k", {1: "HORN_IN", 2: "HORN_DRV"}),
+    # ADC smoothing (100n at each divider node) + bulk on the diode-OR rail.
+    # Discs sit in the channel under the ESP32 -- LOW parts only there.
+    "C2":  (LIB_CAP, FP_CAP_D, 36, 52, 270, "100n", {1: "SENSE_BATT", 2: "GND"}),
+    "C3":  (LIB_CAP, FP_CAP_D, 42, 52, 270, "100n", {1: "SENSE_MAINS", 2: "GND"}),
+    "C1":  (LIB_CAP, FP_CAP_EL, 66, 33, 270, "470u", {1: "+5V_SYS", 2: "GND"}),
 
-    # --- field terminals, bottom row ---
-    "J7":  (LIB_TERM, FP_TERM2, 13, 86, 0, "REED", {1: "REED", 2: "GND"}),
-    "J12": (LIB_HEADER, hdr(3), 24, 86, 90, "SENSE",
-            {1: "SENSE_MAINS", 2: "GND", 3: "VBAT"}),
+    # --- field terminals, bottom row (J12 sense header DELETED, review C1/m5:
+    # both sense sources are on-board nets; a field pin invited 12V into a
+    # 3.3V-max input-only GPIO) ---
+    "J7":  (LIB_TERM, FP_TERM2, 13, 86, 0, "REED", {1: "REED_F", 2: "GND"}),
     "J8":  (LIB_TERM, FP_TERM2, 36, 86, 0, "LED R", {1: "GND", 2: "LED_R_A"}),
     "J9":  (LIB_TERM, FP_TERM2, 48, 86, 0, "LED G", {1: "GND", 2: "LED_G_A"}),
     # buzzer + relay live on 5V_SYS: the alarm must sound with the mains cut
     "J10": (LIB_HEADER, hdr(3), 58, 86, 90, "BUZZER",
             {1: "+5V_SYS", 2: "GND", 3: "BUZZ"}),
+    # R7 in the drive line stops the relay board's opto back-feeding GPIO13
     "K1":  (LIB_HEADER, hdr(3), 68, 86, 90, "HORN RLY",
-            {1: "HORN_IN", 2: "GND", 3: "+5V_SYS"}),
+            {1: "HORN_DRV", 2: "GND", 3: "+5V_SYS"}),
+    # Horn loop (review C2 -- the old HORN_RET pad connected to NOTHING):
+    # J11 +12V -> relay COM, relay NO -> horn +, horn - -> J11 HORN- -> GND.
     "J11": (LIB_TERM, FP_TERM2, 78, 86, 0, "HORN",
-            {1: "+12V", 2: "HORN_RET"}),
+            {1: "+12V", 2: "GND"}),
 
     # --- mechanical ---
     "H1":  (LIB_HOLE, FP_HOLE, 4.5, 4.5, 0, "M3", {}),
@@ -199,7 +220,8 @@ def place(ref, spec):
 
     # a few reference texts land on neighbours at their library default spot;
     # these overrides are in FOOTPRINT-LOCAL coords (they rotate with the part)
-    ref_at = {"D1": (6.35, 3.6), "D2": (6.35, 3.6), "J13": (0.0, 9.0)}.get(ref)
+    ref_at = {"D1": (6.35, 3.6), "D2": (6.35, 3.6), "J13": (0.0, 9.0),
+              "J11": (2.54, -6.6), "R3": (3.81, 2.4)}.get(ref)
 
     # reference + value text
     for prop in sexp.find_all(fp, "property"):
@@ -323,8 +345,8 @@ def text(s, x, y, size=1.5, rot=0):
 # MODULE it wires to -- so Francis confirms board-against-part, not
 # board-against-my-notes. (label, x, y, rot)
 PIN_SILK = [
-    # J1 12V in (below pads)
-    ("GND", 14, 19.6, 0), ("+12V", 19.08, 19.6, 0),
+    # J1 12V in (below pads) -- +12V first, matching PSU convention
+    ("+12V", 14, 19.6, 0), ("GND", 19.08, 19.6, 0),
     # U1 buck terminal (below pads)
     ("IN+", 33, 20.9, 0), ("IN-", 38.08, 20.9, 0),
     ("OUT+", 43.16, 20.9, 0), ("OUT-", 48.24, 20.9, 0),
@@ -336,9 +358,10 @@ PIN_SILK = [
     ("IN+", 20.4, 24, 0), ("IN-", 20.4, 29.08, 0),
     ("OUT+", 20.8, 34.16, 0), ("OUT-", 20.8, 39.24, 0),
     # ESP32 orientation -- match these four corners to the devkit silkscreen
-    ("EN", 27.3, 30, 0), ("VIN", 27.1, 65.56, 0),
-    ("D23", 60.3, 30, 0), ("3V3", 60.3, 65.56, 0),
-    ("ANTENNA SIDE", 43.7, 32.5, 0), ("USB SIDE", 43.7, 63.0, 0),
+    # (sockets anchor at (32,32) and (57.4,32); labels hug the pin rows)
+    ("EN", 29.2, 32, 0), ("VIN", 29.0, 67.56, 0),
+    ("D23", 60.6, 32, 0), ("3V3", 60.6, 67.56, 0),
+    ("ANTENNA SIDE", 44.7, 34.5, 0), ("USB SIDE", 44.7, 65.0, 0),
     # J4 TFT (right of pads; names = blue ST7735S silkscreen)
     ("GND", 85.6, 12, 0), ("VDD", 85.6, 14.54, 0), ("SCL", 85.6, 17.08, 0),
     ("SDA", 85.6, 19.62, 0), ("RST", 85.6, 22.16, 0), ("DC", 85.5, 24.70, 0),
@@ -356,11 +379,10 @@ PIN_SILK = [
     ("REED", 13, 80.3, 0), ("GND", 18.08, 80.3, 0),
     ("GND", 36, 80.3, 0), ("LED+", 41.08, 80.3, 0),
     ("GND", 48, 80.3, 0), ("LED+", 53.08, 80.3, 0),
-    ("+12V", 78, 80.3, 0), ("HORN", 83.08, 80.3, 0),
+    ("+12V", 78, 80.3, 0), ("HORN-", 83.08, 80.3, 0),
     # function headings for the ref-hidden bottom headers
-    ("SENSE", 26.54, 88.4, 0), ("BUZZ", 60.54, 88.4, 0), ("RELAY", 70.54, 88.4, 0),
+    ("BUZZ", 60.54, 88.4, 0), ("RELAY", 70.54, 88.4, 0),
     # bottom headers, vertical labels (2.54 pitch is too tight for horizontal)
-    ("MAINS", 24, 81.6, 90), ("GND", 26.54, 82.4, 90), ("VBAT", 29.08, 81.9, 90),
     ("5V", 58, 82.8, 90), ("GND", 60.54, 82.4, 90), ("SIG", 63.08, 82.6, 90),
     ("IN", 68, 82.8, 90), ("GND", 70.54, 82.4, 90), ("VCC", 73.08, 82.6, 90),
 ]
@@ -370,7 +392,7 @@ PIN_SILK = [
 # not the horn, so 0.8 mm is ample and leaves lanes for the signals.
 NET_WIDTH = {
     "GND": 1.2, "+5V": 0.8, "+5V_BAT": 0.8, "+5V_SYS": 0.8, "+3V3": 0.8,
-    "+12V": 1.2, "VBAT": 0.8,
+    "+12V": 1.2, "+12V_IN": 1.2, "VBAT": 0.8,
 }
 W_SIGNAL = 0.6
 
@@ -595,17 +617,15 @@ def build():
         base(*s, "GND", W_GND)
 
     # ground stubs: top row up, bottom row down, right headers across
-    for x in (14, 38.08, 48.24, 63.08, 73.24):
+    for x in (19.08, 38.08, 48.24, 63.08, 73.24):
         base(x, 15, x, a, "GND", W_STUB)
-    for x in (18.08, 26.54, 36, 48, 60.54, 70.54):
+    for x in (18.08, 36, 48, 60.54, 70.54, 83.08):
         base(x, 86, x, b, "GND", W_STUB)
     for y in (12, 48.70, 62.54):        # J4 pin1, J5 pin6, U4 pin2
         base(82, y, b, y, "GND", W_STUB)
     for y in (29.08, 39.24):            # J13 boost IN-/OUT- to the left ring
         base(14, y, a, y, "GND", W_STUB)
-
-    # 12 V from the input terminal across to the buck
-    base(19.08, 15, 33, 15, "+12V", W_STUB)
+    # (the old J1->buck 12V hop is gone: the feed now goes through D3)
 
     base_tracks = list(tracks)
     n_base = len(tracks)
@@ -639,7 +659,7 @@ def build():
     # ---- silkscreen ----
     # Kept clear of the part silk: the ring gap at the bottom is the only
     # open strip wide enough for text.
-    pcb.append(text("FREEISP BRAIN  REV D  -  2 LAYER", 50, 94, 1.8))
+    pcb.append(text("FREEISP BRAIN  REV E  -  2 LAYER", 50, 94, 1.8))
     pcb.append(text("FUSE THE 12V FEED INLINE", 50, 6.5, 1.1))
     for s, lx, ly, rot in PIN_SILK:
         pcb.append(text(s, lx, ly, 0.8, rot))

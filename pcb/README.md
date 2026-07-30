@@ -59,13 +59,23 @@ The 12 V feed is fused **inline in the wire**, not on the board.
 
 ## Still open
 
-- **Backup power is not solved.** The TP4056 outputs battery voltage
-  (3.0–4.2 V), not 5 V, and has no automatic switchover. Running the box off
-  the 18650 when mains dies needs a boost converter that is not on this board
-  yet. The 12 V horn needs its own answer — a thief cutting power is exactly
-  when the alarm must still sound.
+- **Firmware has no code yet for GPIO34 (mains sense), GPIO35 (battery
+  sense) or GPIO13 (horn relay)** — those subsystems exist only as copper.
+  Add the defines and reads to `LiveDashboardNext` before the first
+  board-level test, or the new hardware is invisible.
+- Set the LM2596 to **5.4–5.5 V** before wiring it in (review finding M1:
+  at 5.0 V the battery boost can win the diode-OR and cycle the cell).
+- J4 (5 V) and J5 (3.3 V) are identical 8-pin headers side by side — mark
+  the plugs; a swap puts 5 V on the RC522.
 - ESP32 pin map in `build.py` (`U3A_NETS` / `U3B_NETS`) is the standard 30-pin
   DevKit V1 order. Verify against your board's silkscreen.
+
+An independent electrical review (2026-07-30) found two critical faults the
+geometric checks could not see — a field "MAINS" pin wired bare into a 3.3 V
+GPIO, and a horn return that connected to nothing. Both are fixed in rev E,
+with the reverse-polarity diode, bulk capacitance and sense-line RC filters
+from the same review. Lesson recorded: DRC + audit prove the copper matches
+the netlist; only a circuit-level review proves the netlist is right.
 
 ## Warnings you can ignore
 
