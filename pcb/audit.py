@@ -18,7 +18,7 @@ import math
 import sys
 import sexp
 
-CLEARANCE = 0.25
+CLEARANCE = 0.45
 TOUCH_EPS = 0.01        # endpoints closer than this are the same point
 
 BOARD = "freeisp_brain.kicad_pcb"

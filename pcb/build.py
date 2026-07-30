@@ -39,7 +39,7 @@ W_STUB = 1.5
 # Fab rules, not etching rules. PCBWay's cheap tier does 0.15 mm; 0.25 mm is
 # a comfortable margin and buys real routing room over the 0.6 mm we needed
 # when the board was going to be made with chemicals in a tray.
-CLEARANCE = 0.25
+CLEARANCE = 0.45
 TRACK_MIN = 0.4
 
 # Library pad sizes are right for a fab -- their drilling is accurate to about
