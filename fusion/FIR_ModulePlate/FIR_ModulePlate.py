@@ -13,9 +13,10 @@
 #       - the three WIRE-IN modules that never touch the PCB
 #         (LM2596 buck, TP4056 charger, 5V boost)
 #       - the 18650 holder
-#   A 115mm PCB cannot fit a 130x115 plate with anything beside it, so the
-#   tray grew. It is now a flat mounting tray, not the floor of a sealed
-#   gadget shell.
+#   The modules go UNDERNEATH the PCB, not beside it. They need only 26% of
+#   the area under a 115x115 board, so spreading them out sideways was pure
+#   waste - the first draft came out 150x180. Raising the PCB on 26mm posts
+#   puts all four in space that was empty anyway, and the tray is 125x125.
 #
 # ⚠️ KNOCK-ON: the box-side mounting for this tray must be redrawn to match
 #   TRAY_MOUNT below. The old FIR_ModuleGadget shell (130x115 cavity) can no
@@ -28,7 +29,7 @@
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
 # ---------------- TRAY ----------------
-PLATE_W, PLATE_H, PLATE_TH = 150.0, 180.0, 3.0
+PLATE_W, PLATE_H, PLATE_TH = 125.0, 125.0, 3.0
 PLATE_TOP = PLATE_TH
 CORNER_R = 6.0
 
@@ -36,35 +37,37 @@ CORNER_R = 6.0
 # freeisp_brain rev H: 115x115, M3 holes 4.5mm in from each corner
 PCB_W = PCB_H = 115.0
 PCB_HOLE_PITCH = PCB_W - 2 * 4.5          # 106.0 mm square
-PCB_CX, PCB_CY = 11.5, 0.0                # tray-centred origin
-# 6mm clears the through-hole solder joints underneath the board
-POST_D, POST_H, POST_PILOT = 7.0, 6.0, 2.5
+PCB_CX, PCB_CY = 0.0, 0.0                 # PCB is centred on the tray
+# 26mm: tall enough to stand the PCB OVER every module. The battery holder
+# is the tallest at 20mm, so its top sits at 23mm and the board underside at
+# 29mm - 6mm of clear air, which also swallows the solder joints underneath.
+POST_D, POST_H, POST_PILOT = 7.0, 26.0, 2.5
 
 # ---------------- wire-in modules: name, w, l, h, cx, cy ----------------
 # Held by corner brackets + a zip tie, NOT screws: the mounting holes on
 # these cheap modules move between batches, the outline does not.
-# Each module sits beside the PCB terminal it feeds, so the wires stay short:
-# the PCB's buck and charger terminals are on its TOP edge, the boost terminal
-# on its LEFT edge. Heights include the trimpot, which must stay reachable.
+# All four live UNDER the PCB. Heights include the trimpot; set the buck to
+# 5.4V and the boost to 5.0V BEFORE the board goes on, because reaching them
+# afterwards means taking the four PCB screws out.
 MODULES = [
-    ('LM2596 buck',  43.0, 21.0, 14.0,   0.0,  75.0),   # above the PCB
-    ('TP4056',       26.0, 17.0,  6.0,  48.0,  75.0),   # above, beside the buck
-    ('5V boost',     17.0, 36.0, 14.0, -61.0,  60.0),   # left, by its terminal
-    ('18650 holder', 20.0, 75.0, 20.0, -61.0, -22.0),   # left, below the boost
+    ('18650 holder', 20.0, 75.0, 20.0, -35.0,   0.0),
+    ('LM2596 buck',  43.0, 21.0, 14.0,  20.0,  38.0),
+    ('5V boost',     17.0, 36.0, 14.0,   5.0, -25.0),
+    ('TP4056',       26.0, 17.0,  6.0,  35.0, -25.0),
 ]
 BRACKET_T, BRACKET_L = 2.5, 8.0           # corner bracket thickness / leg length
 TIE_SLOT = (3.0, 10.0)                    # zip-tie slot through the plate
 
 # tray -> box.  ⚠️ the box side must be redrawn to match these.
-TRAY_MOUNT = [(-68.0, -85.0), (68.0, -85.0), (-68.0, 85.0), (68.0, 85.0)]
+TRAY_MOUNT = [(0.0, -58.0), (0.0, 58.0), (-58.0, 0.0), (58.0, 0.0)]
 TRAY_CLEAR, TRAY_CB, TRAY_CB_D = 3.4, 6.0, 1.5
 
 # harness tie-downs: loop a zip tie round each pair
-TIE_POSTS = [(-20.0, -80.0), (-10.0, -80.0), (30.0, -80.0), (40.0, -80.0)]
+TIE_POSTS = [(-58.0, 26.0), (-58.0, 36.0), (58.0, 26.0), (58.0, 36.0)]
 
 # weight savings, kept clear of every post and bracket
-LIGHTEN = [(11.5, 0.0), (11.5, 40.0), (11.5, -40.0), (-20.0, -25.0)]
-LIGHTEN_SZ = (30.0, 22.0)
+LIGHTEN = [(-8.0, 8.0), (46.0, 12.0), (38.0, -46.0), (-40.0, 50.0)]
+LIGHTEN_SZ = (14.0, 14.0)
 
 SHOW_PARTS = False        # True = draw the PCB and modules to check the fit
 
@@ -174,7 +177,7 @@ def build_plate(comp):
 
     # ---- wire-in modules ----
     for (name, w, l, h, cx, cy) in MODULES:
-        wall = 6.0 if h > 10 else 4.0
+        wall = 5.0 if h > 10 else 3.5
         corner_brackets(comp, plate, cx, cy, w, l, wall)
         tie_slots(comp, plate, cx, cy, w)
 
@@ -195,7 +198,7 @@ def build_parts(comp):
     b = box(comp, PCB_CX, PCB_CY, PLATE_TOP + POST_H, PCB_W, PCB_H, 1.6,
             NEW).bodies.item(0)
     b.name = 'PART: brain PCB 115x115'
-    # the ESP32 stands on sockets above the PCB
+    # the ESP32 stands on its sockets above the PCB
     e = box(comp, PCB_CX, PCB_CY, PLATE_TOP + POST_H + 1.6 + 8.5,
             28.0, 56.0, 13.0, NEW).bodies.item(0)
     e.name = 'PART: ESP32 DevKitC'
