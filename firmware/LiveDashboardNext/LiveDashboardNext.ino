@@ -17,13 +17,29 @@
     - HEARTBEAT to your server (SRV_URL in secrets.h; "" = feature off)
     - DOOR ALARM: reed switch -> LEDs + buzzer + red screen, all LOCAL
       first, server second. OFF until you set ALARM_WIRED 1 below.
+    - MOTION ALARM: MPU-6050 jolt/tilt, instant siren, no grace.
+    - HORN RELAY on GPIO13 — the LOUD part. The little buzzer does the
+      rhythm, the horn is the volume. OFF until HORN_WIRED 1.
+    - RFID CARD QUIET: tap a paired card, everything goes quiet for an
+      hour (door AND motion). Cards live in NVS, not in the firmware, so
+      ONE binary flashes every box. OFF until RFID_WIRED 1.
+    - POWER SENSING on GPIO34/35: mains present + battery volts, straight
+      off the board's own dividers. OFF until POWER_WIRED 1.
+    - MEMORY: armed state, open count and disarm count survive a reboot.
+    - OTA: update over WiFi once OTA_PASS is set in secrets.h.
     - REMOTE COMMANDS from either the router note or the server:
-        screen=on | screen=off | alarm=arm | alarm=disarm
+        screen=on | screen=off | alarm=arm | alarm=disarm | alarm=clear
         siren=off (shut it up, stay alarmed) | siren=test
+        motion=learn | quiet=off (end a card's quiet early) | cards=clear
 
-  Needs: secrets.h next to this file, ArduinoJson library.
+  Needs: secrets.h next to this file, ArduinoJson + MFRC522 libraries.
   Board = "ESP32 Dev Module", COM6, hold BOOT while uploading.
   Serial Monitor @ 115200.
+
+  EVERY new subsystem is behind its own *_WIRED switch and every one of
+  them ships 0. A board with nothing new soldered to it behaves EXACTLY
+  like the version that already works — wire one part, flip one flag,
+  reboot, watch the self-test. Never flip two at once.
 */
 #define SCREEN_TAB  INITR_GREENTAB
 #define SCREEN_ROT  1
@@ -38,7 +54,15 @@
 #include <esp_wifi.h>
 #include <Wire.h>
 #include <math.h>
+#include <Preferences.h>
+#include <MFRC522.h>
+#include <ArduinoOTA.h>
 #include "secrets.h"
+
+// secrets.h from an older build may not have these yet — keep compiling.
+#ifndef OTA_PASS
+#define OTA_PASS ""      // set a real one in secrets.h to enable OTA
+#endif
 
 #define TFT_CS   5
 #define TFT_DC   2
@@ -74,8 +98,11 @@
 // click once. It only sings if you feed it a frequency. That is what the
 // blue 3-pin module on the bench turned out to be (BuzzTest: only test C
 // made a sound). 1 = drive it with tone(), 0 = drive it with a level.
-// ⚠️ SET THIS BACK TO 0 when the 12V horn goes on a RELAY — a relay is a
-//    level device, you cannot feed it a tone.
+//
+// NOTE (was wrong before rev E): this flag has NOTHING to do with the horn
+// any more. The board gives the horn relay its OWN pin (GPIO13, K1), so the
+// passive buzzer keeps its tone() drive and the relay gets a plain level.
+// Leave this at 1 for the bench buzzer; see HORN_WIRED below for the horn.
 #define BUZZER_PASSIVE 1
 
 // Only used when BUZZER_PASSIVE is 0. Kit buzzers sound when the pin goes
@@ -95,9 +122,86 @@ const uint16_t TONE_CHIRP_HZ   = 2000;   // polite tick during the grace
 const uint16_t TONE_SIREN_A_HZ = 2000;   // siren, low note
 const uint16_t TONE_SIREN_B_HZ = 4250;   // siren, high note = loudest
 
+// ================================================================
+//  HORN — the LOUD one, on the relay (board K1 / J11, GPIO13).
+//  The little buzzer does the RHYTHM; the horn does the VOLUME.
+// ================================================================
+#define HORN_WIRED 0          // 0 = relay pin never touched
+
+#define PIN_RELAY 13          // K1 "IN" via R7 1k — board rev E
+
+// Relay boards differ: most cheap blue ones are ACTIVE LOW (IN pulled to
+// GND = clack). Get this backwards and the horn sounds when all is well
+// and goes quiet during the alarm — so TEST IT with siren=test before
+// trusting it. PINOUT.md warns the 3-pin order also varies by brand.
+#define RELAY_ACTIVE_HIGH 1
+
+// The horn is held STEADY for the whole siren instead of being beeped with
+// the buzzer. Two reasons: a mechanical relay clacking every 300ms for 3
+// minutes is 600 operations it does not need, and a continuous horn is
+// simply louder than a pulsed one. The buzzer still beeps, so the box
+// still SOUNDS like an alarm rather than a stuck car.
+// The horn stays silent during the GRACE period — grace is a polite
+// warning, and the polite warning is not a 100dB horn.
+
+// ================================================================
+//  RFID — tap a paired card, the box goes quiet for an hour.
+//  Ported from firmware/CardDisarm/CardDisarm.ino (proven on bench).
+// ================================================================
+#define RFID_WIRED 0          // 0 = reader never touched
+
+#define PIN_RC522_SS  16      // J5 "SDA" (chip select) — board rev E
+#define PIN_RC522_RST 17      // J5 "RST"
+                              // SCK 18 / MOSI 23 / MISO 19 are SHARED with
+                              // the TFT. Different CS pins, so they coexist
+                              // — but the TFT must be started FIRST.
+
+// ⚠️ RC522 runs on 3.3V ONLY. 5V destroys it. Board J5 pin 8 is the 3V3
+//    rail on purpose, and J4 (TFT) pin 2 is 5V — do not swap the plugs.
+
+const uint32_t CARD_QUIET_MS = 3600000;   // 1 hour of quiet per tap
+const uint8_t  CARDS_PER_BOX = 2;         // how many ship with each box
+const uint8_t  MAX_CARDS     = 4;         // room for replacements later
+
+// The quiet period covers the DOOR **and** the MOTION sensor. Someone who
+// taps a card is about to handle the box — open it, move it, pull cables.
+// Quieting only the reed would let the siren fire the moment they lean on
+// it, and the card would look broken. When the hour ends the box re-learns
+// its tilt baseline, because by then it may legitimately hang differently.
+
+// ================================================================
+//  POWER SENSING — mains present + battery volts, off the board's
+//  own dividers. Nothing here is a field wire: both nets are
+//  on-board (review fix C1), so no GPIO can ever see 12V.
+// ================================================================
+#define POWER_WIRED 0         // 0 = ADCs never read
+
+#define PIN_SENSE_MAINS 34    // R5/R6 100k/27k off +12V — input-only, ADC1
+#define PIN_SENSE_BATT  35    // R3/R4 100k/100k off VBAT — input-only, ADC1
+                              // ADC1 on purpose: ADC2 stops working when
+                              // WiFi is on, and this box is always on WiFi.
+
+// What the divider does to the voltage, so we can undo it in software.
+//   mains: 12V * 27/(100+27) = 2.55V at the pin  -> multiply by 127/27
+//   batt:  VBAT * 100/(100+100) = VBAT/2         -> multiply by 2
+const float MAINS_DIV = 127.0f / 27.0f;   // = 4.7037
+const float BATT_DIV  = 2.0f;
+
+// Below this the 12V rail is gone — the mains is out and the box is
+// running off the 18650. Well under 12V so a sagging PSU is not a scare,
+// well over 0V so it trips before the rail is fully dead.
+const float MAINS_PRESENT_V = 7.0f;
+
+// 18650 flat is ~3.0V, full is ~4.2V. Warn early enough to matter.
+const float BATT_LOW_V = 3.4f;
+
+const uint32_t POWER_MS = 2000;   // how often to read both ADCs
+
 // ---- how the alarm behaves ----
 #define ALARM_ARMED_AT_BOOT 1     // 1 = live the moment it powers up
                                   // 0 = boots quiet, arm it with a command
+                                  // (only used the FIRST time — after that
+                                  //  the box remembers, see NVS below)
 
 const uint32_t DEBOUNCE_MS  = 60;      // reed settle time, ignore contact bounce
 const uint32_t GRACE_MS     = 15000;   // polite chirping first, THEN the siren.
@@ -111,40 +215,30 @@ const uint32_t SIREN_MAX_MS = 180000;  // siren gives up after 3 min (battery +
                                        // server alert STAY on until it closes.
                                        // 0 = never stop sounding.
 
-// FOR THE FINAL BUILD (decided, not yet split out): a MOTION alarm should
-// sound for 2 MINUTES CONTINUOUSLY - its own timer, separate from the door
-// siren above. Someone tearing the box off the wall earns a longer, harder
-// alarm than a lid being opened. Add MOTION_SIREN_MS = 120000 and have
-// pollBuzzer use it when alarmReason == "MOTION".
+// A MOTION alarm gets its OWN, longer timer. Someone tearing the box off
+// the wall earns a harder alarm than a lid being lifted, so this runs
+// instead of SIREN_MAX_MS whenever alarmReason == "MOTION".
+const uint32_t MOTION_SIREN_MS = 120000;   // 2 minutes, continuous
+
+// Stopping it ONLINE works for both: siren=off from the server (or the
+// router note) silences ANY alarm, motion included. The only limit is
+// timing - server commands ride the heartbeat, so a command lands within
+// HEART_MS (20s). Shorten that if 20s is too long to wait.
 //
-// ...and it must be stoppable ONLINE, which already works: siren=off from
-// the server (or the router note) silences ANY alarm, motion included. The
-// only limit is timing - server commands ride the heartbeat, so it lands
-// within HEART_MS (20s). Shorten that if 20s is too long to wait.
+// TURNING THE ALARM OFF COMPLETELY (for a site that does not want one) is
+// alarm=disarm, and it now SURVIVES A REBOOT — see REMEMBER_STATE above.
+// The remaining work is on the server: an on/off switch per box in the
+// customer's account that sends disarm/arm and shows the state back.
 //
-// FOR THE FINAL BUILD: a customer must be able to turn the alarms OFF
-// COMPLETELY from their ACCOUNT on the dashboard - not just silence one
-// event. Some sites do not want an alarm at all. alarm=disarm already does
-// exactly this and survives as a state, so the work is on the server side:
-// an on/off switch per box in the account that sends disarm/arm and shows
-// the current state. Two things it MUST get right:
-//   1. the box remembers "disarmed" across a reboot (store it in NVS, or a
-//      power cut silently re-arms a box the customer switched off), and
-//   2. the dashboard shows DISARMED loudly - a customer who forgets they
-//      turned it off will swear the alarm is broken.
-//
-// FOR THE FINAL BUILD - SHOW THE DISARMED STATE, DO NOT HIDE IT:
-// whenever something disarms or silences the box (a card tap, an account
-// switch, a remote siren=off), that must be VISIBLE, not silent:
-//   - the SECURITY page shows DISARMED / QUIET with the time LEFT counting
-//     down ("QUIET 47:12"), so anyone looking knows it is off and for how
-//     much longer - a box that looks armed but is not is the worst state
-//   - keep a COUNT of how many times it has been disarmed, next to the
-//     existing "times opened" count, so a box being silenced repeatedly is
-//     obvious at a glance
-//   - both go in the heartbeat too, so the account shows the same thing
-//     and the history is on the server, not only on a screen nobody is
-//     standing in front of
+// THE DISARMED STATE IS SHOWN, NEVER HIDDEN. A box that looks armed but is
+// not is the worst state to be in, so:
+//   - the SECURITY page shows OFF, or QUIET with the time LEFT counting
+//     down ("QUIET 47:12"), so anyone standing there knows it is off and
+//     for how much longer
+//   - disarmCount sits next to openCount, so a box being silenced over and
+//     over is obvious at a glance
+//   - both ride the heartbeat, so the account shows the same thing and the
+//     history lives on the server, not only on a screen nobody is watching
 
 // ================================================================
 //  MOTION CONFIG — the MPU-6050 "torn off the wall" sensor.
@@ -179,27 +273,23 @@ const uint32_t MOTION_SETTLE_MS = 2000; // ignore everything this long after
 #define ALARM_BEAT_ON_CHANGE 1    // 1 = push an instant heartbeat to the server
                                   //     the moment the door opens/closes
 
-// ---- PLANNED, not built yet: RFID card = 1 hour of quiet ----
-// Tapping a known card on the RC522 pad kills ALL sound for an hour, so a
-// technician can work in the box without the siren going. The door state,
-// the open count and the server report all keep running - only the noise
-// stops, and it comes back by itself after the hour.
-//   const uint32_t CARD_QUIET_MS = 3600000;   // 1 hour
-//
-// ⚠️ THE QUIET PERIOD MUST COVER **MOTION** TOO, NOT JUST THE DOOR.
-// Someone who taps a card is about to HANDLE the box - open it, move it,
-// pull cables. If the card only quiets the reed and leaves the MPU live,
-// the siren fires the moment they lean on it and the card looks broken.
-// So while the quiet period runs, pollMotion() must not raise an alarm
-// either - and it should re-learn the tilt baseline when the quiet ENDS,
-// because the box may legitimately be sitting at a new angle by then.
-// (alarmArmed already suppresses both; the card quiet must behave the same.)
-//
-// Proven on the bench in firmware/CardDisarm/CardDisarm.ino, which also
-// settled how cards are stored: NOT in the firmware, but paired into the
-// ESP32's NVS flash - each box learns the 2 cards it ships with, so one
-// binary flashes every box. Port that here along with the quiet period.
 // ================================================================
+//  MEMORY (NVS) — what the box must NOT forget when the power dies.
+//
+//  A power cut that silently re-arms a box the customer switched off is
+//  the worst kind of bug: it looks like the alarm "went off by itself".
+//  So the armed state is stored, not assumed. Same for the two counts —
+//  a box that resets its history on every blackout can never show that
+//  it is being opened, or silenced, over and over.
+//
+//  Stored in namespace "freeisp" (the same one CardDisarm uses, so a box
+//  paired on the bench stays paired here):
+//     armed    the last arm/disarm decision
+//     opens    how many times the door has been opened, ever
+//     disarms  how many times someone silenced or disarmed it, ever
+//     n,card0..cardN   the cards paired to THIS box
+// ================================================================
+#define REMEMBER_STATE 1      // 0 = go back to forgetting on every boot
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
@@ -221,12 +311,14 @@ const uint32_t SYS_MS    = 10000;  // cpu/memory/uptime
 const uint32_t CMD_MS    = 3000;   // remote-command check (router system note)
 const uint32_t HEART_MS  = 20000;  // heartbeat to Francis's server
 const uint32_t LIVE_MS   = 500;    // screen repaint
+const uint32_t STATUS_MS = 30000;  // "how is every part doing" block on serial
 
 const uint8_t NUM_PAGES = 5;
 
 // ---- state ----
 uint8_t  page = 0;
 uint32_t lastPage = 0, lastPoll = 0, lastUsers = 0, lastSys = 0, lastLive = 0, lastCmd = 0, lastBeat = 0;
+uint32_t lastStatus = 0;
 bool     heartbeat = false;
 bool     screenOn  = true;
 
@@ -247,9 +339,21 @@ uint32_t   openedAt      = 0;   // when this opening started
 uint32_t   beepAt        = 0;
 bool       beepOn        = false;
 uint32_t   openCount     = 0;
+uint32_t   disarmCount   = 0;   // times someone silenced/disarmed it, ever
 uint16_t   buzzHz        = TONE_SIREN_A_HZ;  // pitch the next buzz() will use
 bool       sirenAlt      = false;            // flips the two siren notes
 String     alarmReason   = "";               // "DOOR" / "MOTION" - why it rang
+bool       hornOn        = false;            // relay state, so we only click it on a change
+bool       beatPending   = false;            // "send a heartbeat at the next safe moment"
+
+// ---- card quiet state ----
+uint32_t quietUntil = 0;        // 0 = not quiet. millis() deadline otherwise.
+
+// ---- power state ----
+bool  mainsOk    = true;        // is the 12V rail (and so the mains) there
+bool  powerOk    = false;       // have we actually read the ADCs yet
+float railV      = 0;           // measured 12V rail
+float battV      = 0;           // measured battery
 
 // ---- motion state (MPU-6050) ----
 bool     mpuOk       = false;   // did the sensor answer at boot
@@ -260,6 +364,16 @@ float    lastTiltDeg = 0;
 uint32_t motionReadyAt = 0;     // ignore readings until this time
 uint32_t tiltSince     = 0;     // when the tilt first went over the limit
 uint32_t lastMotionAt  = 0;     // last time it saw real movement
+
+// ---- RFID state ----
+MFRC522     rfid(PIN_RC522_SS, PIN_RC522_RST);
+Preferences store;              // the ESP32's own permanent memory (NVS)
+
+String   cards[MAX_CARDS];
+uint8_t  cardCount  = 0;
+bool     rc522Ok    = false;
+String   lastUid    = "";
+uint32_t lastCardAt = 0;
 
 const char* alarmStateName() {
   switch (alarmState) {
@@ -303,6 +417,122 @@ void logLine(const char* lvl, const char* tag, const String& msg) {
 #define logOK(tag, msg)   logLine("OK", tag, msg)
 #define logErr(tag, msg)  logLine("!!", tag, msg)
 
+// things defined further down that this block needs to call
+void buzz(bool on);
+void drawStatic();
+void motionLearn(const char* why);
+void startSiren(const char* reason);
+bool alarmRaised();
+
+// ================================================================
+//  NVS — the handful of things that must outlive a power cut.
+//  Every write is a flash write, so these are only ever called when
+//  something ACTUALLY changed, never on a timer.
+// ================================================================
+void nvsLoadState() {
+#if REMEMBER_STATE
+  store.begin("freeisp", true);                  // read-only
+  alarmArmed  = store.getBool ("armed",   ALARM_ARMED_AT_BOOT);
+  openCount   = store.getULong("opens",   0);
+  disarmCount = store.getULong("disarms", 0);
+  store.end();
+  logOK("NVS", String("remembered: ") + (alarmArmed ? "ARMED" : "DISARMED") +
+               ", " + String(openCount) + " opens, " +
+               String(disarmCount) + " disarms");
+#else
+  logInfo("NVS", "REMEMBER_STATE=0 - starting from defaults every boot");
+#endif
+}
+
+void nvsPut(const char* key, uint32_t v) {
+#if REMEMBER_STATE
+  store.begin("freeisp", false);
+  store.putULong(key, v);
+  store.end();
+#endif
+}
+
+void nvsPutArmed(bool v) {
+#if REMEMBER_STATE
+  store.begin("freeisp", false);
+  store.putBool("armed", v);
+  store.end();
+#endif
+}
+
+// ================================================================
+//  HORN — one place that knows the relay's polarity.
+//  Everything else just says horn(true) / horn(false).
+// ================================================================
+void horn(bool on) {
+  if (on == hornOn) return;              // never click the relay for nothing
+  hornOn = on;
+#if HORN_WIRED
+  digitalWrite(PIN_RELAY, (on == (RELAY_ACTIVE_HIGH != 0)) ? HIGH : LOW);
+  logErr("HORN", on ? "RELAY ON - horn sounding" : "relay off - horn quiet");
+#endif
+}
+
+// ================================================================
+//  CARD QUIET PERIOD — an hour of silence bought with a card tap.
+//  Covers the door AND the motion sensor, deliberately.
+// ================================================================
+
+// A box that has not been given its cards yet must NOT scream at the
+// person setting it up — they have nothing to tap to stop it.
+bool enrolling() {
+#if RFID_WIRED
+  return cardCount < CARDS_PER_BOX;
+#else
+  return false;                          // no reader = nothing to enrol
+#endif
+}
+
+// millis() rolls over after ~49 days, so compare as a SIGNED difference
+// rather than "now < deadline" — otherwise a box that has been up that
+// long goes permanently quiet at exactly the wrong moment.
+bool inQuietPeriod() {
+  return quietUntil != 0 && (int32_t)(millis() - quietUntil) < 0;
+}
+
+uint32_t quietSecsLeft() {
+  if (!inQuietPeriod()) return 0;
+  return (uint32_t)((int32_t)(quietUntil - millis())) / 1000;
+}
+
+void startQuiet(const char* why) {
+  buzz(false);                           // silence FIRST, explain after
+  horn(false);
+  if (alarmState == AS_GRACE || alarmState == AS_SIREN) alarmState = AS_SILENT;
+  quietUntil = millis() + CARD_QUIET_MS;
+  if (quietUntil == 0) quietUntil = 1;   // never land on "off" by accident
+  disarmCount++;
+  nvsPut("disarms", disarmCount);
+  logOK("QUIET", String(why) + " - quiet for " +
+                 String(CARD_QUIET_MS / 60000) + " minutes (disarm #" +
+                 String(disarmCount) + ")");
+  beatPending = true;
+}
+
+// the hour running out is an EVENT, not just a flag going false
+void pollQuiet() {
+  if (!quietUntil || inQuietPeriod()) return;
+  quietUntil = 0;
+
+  // the box may legitimately be hanging at a new angle after an hour of
+  // someone working in it — re-learn, or it alarms on the new normal
+  if (mpuOk) motionLearn("quiet period ended");
+
+  if (doorOpen && alarmArmed) {
+    logErr("QUIET", "quiet period OVER and the door is still open - siren");
+    startSiren("DOOR");
+  } else {
+    logOK("QUIET", "quiet period over - box armed again");
+    if (!alarmRaised()) drawStatic();
+  }
+  beatPending = true;
+}
+
 String httpExplain(int code) {
   switch (code) {
     case 200: return "OK";
@@ -319,6 +549,18 @@ String routerHost() {
   return (strcmp(MT_HOST, "auto") == 0) ? WiFi.gatewayIP().toString()
                                         : String(MT_HOST);
 }
+
+// ---- how loudly the router is allowed to complain ----
+// The four fetchers poll every 2-10s. When the router is unreachable that
+// used to be a wall of identical timeout lines, several per second, and it
+// buried everything else on the monitor. So: say it properly ONCE, then
+// stay quiet about the SAME error until it changes, it recovers, or this
+// long has passed. Nothing is hidden, it just stops repeating itself.
+const uint32_t REST_REPEAT_MS = 60000;
+
+uint32_t restFailStreak  = 0;
+uint32_t restLastLogAt   = 0;
+String   restLastLogMsg  = "";
 
 // one shared REST GET: fills doc, returns true on success, logs failures
 bool restGet(const char* tag, const String& path, JsonDocument& doc) {
@@ -337,14 +579,31 @@ bool restGet(const char* tag, const String& path, JsonDocument& doc) {
   if (code != 200) {
     lastErr = httpExplain(code);
     String peek = (code > 0) ? http.getString().substring(0, 120) : "";
-    logErr(tag, "GET " + path + " on " + host + " failed after " +
-                String(took) + "ms: " + lastErr +
-                (peek.length() ? ("  reply: " + peek) : ""));
+    restFailStreak++;
+
+    uint32_t nowMs = millis();
+    bool changed = (lastErr != restLastLogMsg);
+    if (changed || restFailStreak == 1 || nowMs - restLastLogAt >= REST_REPEAT_MS) {
+      logErr(tag, "GET " + path + " on " + host + " failed after " +
+                  String(took) + "ms: " + lastErr +
+                  (peek.length() ? ("  reply: " + peek) : "") +
+                  (restFailStreak > 1 ? "  (x" + String(restFailStreak) + ")" : "") +
+                  "  [further identical errors suppressed]");
+      restLastLogAt  = nowMs;
+      restLastLogMsg = lastErr;
+    }
     http.end();
     return false;
   }
   String body = http.getString();
   http.end();
+
+  if (restFailStreak) {                 // recovery is always worth one line
+    logOK("ROUTER", "router answering again after " + String(restFailStreak) +
+                    " failed request(s)");
+    restFailStreak = 0;
+    restLastLogMsg = "";
+  }
 
   DeserializationError err = deserializeJson(doc, body);
   if (err) {
@@ -475,9 +734,21 @@ void drawAlarmBanner() {
   tft.print(alarmReason == "MOTION" ? "BOX IS BEING MOVED" : "DOOR IS OPEN");
 }
 
+// Ask for a heartbeat — do NOT send one from here.
+//
+// sendHeartbeat() blocks while it waits on the network. This used to be
+// called straight out of onDoorChange() and pollMotion(), i.e. from inside
+// the alarm path, so a slow or dead server froze the siren's rhythm at the
+// exact moment the alarm went off. The sound never stopped (tone() and the
+// relay are both latched in hardware) but it sat on one note instead of
+// wailing — the box sounded broken precisely when it mattered.
+//
+// So the alarm only ever raises a FLAG. loop() sends it a moment later,
+// once the local response has already happened. That is the golden rule:
+// locally first, server second.
 void alarmBeat() {
 #if ALARM_BEAT_ON_CHANGE
-  sendHeartbeat();
+  beatPending = true;
 #endif
 }
 
@@ -489,6 +760,12 @@ bool alarmRaised() {
 // ONE place that starts the siren, whatever set it off. Motion skips the
 // grace period on purpose — the plan says a box being torn off the wall
 // does not get 15 polite seconds.
+// how long THIS siren is allowed to sound. A box being torn off the wall
+// gets the longer, continuous motion timer; a lifted lid gets the door one.
+uint32_t sirenMaxMs() {
+  return (alarmReason == "MOTION") ? MOTION_SIREN_MS : SIREN_MAX_MS;
+}
+
 void startSiren(const char* reason) {
   alarmReason = reason;
   alarmState  = AS_SIREN;
@@ -496,6 +773,7 @@ void startSiren(const char* reason) {
   beepAt      = millis();
   nextSirenNote();
   buzz(true);
+  horn(true);                          // the loud one, steady, until it stops
   digitalWrite(PIN_LED_R, HIGH);
   digitalWrite(PIN_LED_G, LOW);
   if (!screenOn) setScreen(true);      // alarm overrides screen-off
@@ -510,13 +788,26 @@ void onDoorChange(bool open) {
 
   if (open) {
     openCount++;
+    nvsPut("opens", openCount);         // survives the next power cut
     openedAt = millis();
     beepAt   = millis();
 
     if (!alarmArmed) {                  // disarmed = you opened it on purpose
       alarmState = AS_SILENT;
       buzz(false);
+      horn(false);
       logInfo("ALARM", "door OPEN but alarm is DISARMED - staying quiet");
+    } else if (enrolling()) {           // no cards paired = nothing to stop it
+      alarmState = AS_SILENT;
+      buzz(false);
+      horn(false);
+      logInfo("ALARM", "door OPEN but this box has no cards yet (ENROL) - quiet");
+    } else if (inQuietPeriod()) {       // a card bought silence
+      alarmState = AS_SILENT;
+      buzz(false);
+      horn(false);
+      logInfo("ALARM", "door OPEN but a card bought quiet (" +
+                       String(quietSecsLeft() / 60) + " min left) - staying quiet");
     } else if (GRACE_MS > 0) {          // chirp first, siren after the grace
       alarmReason = "DOOR";
       alarmState = AS_GRACE;
@@ -535,6 +826,8 @@ void onDoorChange(bool open) {
     alarmReason = "";
     motionAlarm = false;
     buzz(false);
+    horn(false);
+    quietUntil = 0;              // lid shut ends a card's quiet early
     drawStatic();
     logOK("ALARM", "door CLOSED - siren OFF, box secure");
   }
@@ -633,6 +926,10 @@ void pollMotion() {
 
   if (!alarmArmed) return;                // disarmed = don't cry about it
   if (alarmState == AS_SIREN) return;     // already screaming
+  // A card tap quiets MOTION as well as the door. Someone who tapped is
+  // about to handle the box, and a siren the moment they lean on it would
+  // make the card look broken. Same for a box that has no cards yet.
+  if (inQuietPeriod() || enrolling()) return;
 
   // 1) JOLT - a real impact. Instant, no grace.
   if (fabsf(m - 1.0f) > MOTION_JOLT_G) {
@@ -657,6 +954,221 @@ void pollMotion() {
   } else {
     tiltSince = 0;                        // back where it belongs
   }
+}
+
+// ================================================================
+//  RFID — cards live in the BOX, not in the firmware.
+//  Ported from CardDisarm.ino. Each box learns the cards that ship
+//  with it, so ONE binary flashes every box and customer A's card
+//  never opens customer B's box.
+// ================================================================
+
+String uidToString(MFRC522::Uid* uid) {
+  String s = "";
+  for (byte i = 0; i < uid->size; i++) {
+    if (uid->uidByte[i] < 0x10) s += "0";
+    s += String(uid->uidByte[i], HEX);
+    if (i + 1 < uid->size) s += " ";
+  }
+  s.toUpperCase();
+  return s;
+}
+
+void loadCards() {
+  store.begin("freeisp", true);                // read-only
+  cardCount = store.getUChar("n", 0);
+  if (cardCount > MAX_CARDS) cardCount = 0;    // corrupt -> start clean
+  for (uint8_t i = 0; i < cardCount; i++)
+    cards[i] = store.getString(("card" + String(i)).c_str(), "");
+  store.end();
+}
+
+void saveCard(const String& uid) {
+  if (cardCount >= MAX_CARDS) return;
+  cards[cardCount] = uid;
+  store.begin("freeisp", false);
+  store.putString(("card" + String(cardCount)).c_str(), uid);
+  cardCount++;
+  store.putUChar("n", cardCount);
+  store.end();
+}
+
+// Forget the cards WITHOUT forgetting the armed state or the counts —
+// store.clear() would wipe the whole namespace and silently re-arm a box
+// the customer had switched off.
+void forgetCards() {
+  store.begin("freeisp", false);
+  for (uint8_t i = 0; i < MAX_CARDS; i++)
+    store.remove(("card" + String(i)).c_str());
+  store.putUChar("n", 0);
+  store.end();
+  cardCount = 0;
+  logOK("CARD", "all cards forgotten - box is back in ENROL mode, tap " +
+                String(CARDS_PER_BOX) + " card(s) to pair it");
+}
+
+bool knownCard(const String& uid) {
+  for (uint8_t i = 0; i < cardCount; i++)
+    if (uid == cards[i]) return true;
+  return false;
+}
+
+void cardBegin() {
+#if RFID_WIRED
+  // SPI is shared with the TFT (SCK 18 / MOSI 23 / MISO 19, different CS).
+  // The TFT has already called SPI.begin() by now; calling PCD_Init here
+  // is safe because both drivers use SPI transactions.
+  rfid.PCD_Init();
+  delay(50);
+  byte v = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+  if (v == 0x00 || v == 0xFF) {
+    rc522Ok = false;
+    logErr("CARD", "RC522 NOT ANSWERING - check 3.3V (NOT 5V), MISO 19, "
+                   "SDA 16, RST 17, and that the header is soldered");
+  } else {
+    rc522Ok = true;
+    // Clones boot with the receiver turned right down: SPI answers
+    // perfectly while the radio is too weak to wake a card. "Alive" is
+    // not "working" — force the gain or it reads nothing.
+    rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+    rfid.PCD_AntennaOff();
+    delay(20);
+    rfid.PCD_AntennaOn();
+    logOK("CARD", "RC522 alive (version 0x" + String(v, HEX) +
+                  "), antenna gain MAX");
+  }
+
+  // cards were already loaded in setup(), before the door's boot state was
+  // decided — an unpaired box must not boot straight into a siren
+  logOK("CARD", String(cardCount) + " card(s) paired to this box" +
+                (enrolling() ? "  >> ENROL MODE: tap the " +
+                               String(CARDS_PER_BOX) + " cards that ship with it"
+                             : ""));
+#else
+  logInfo("CARD", "RFID_WIRED=0 - no card reader");
+#endif
+}
+
+void pollCards() {
+#if RFID_WIRED
+  if (!rc522Ok) return;
+  uint32_t now = millis();
+
+  // reader field watchdog — only speaks up when something is wrong
+  static uint32_t lastPoke = 0;
+  if (now - lastPoke >= 5000) {
+    lastPoke = now;
+    byte tx = rfid.PCD_ReadRegister(MFRC522::TxControlReg);
+    if ((tx & 0x03) == 0) {                    // bits 0-1 = antenna drivers
+      rfid.PCD_AntennaOn();
+      rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+      logInfo("CARD", "RF field had dropped - turned back on");
+    }
+  }
+
+  if (!rfid.PICC_IsNewCardPresent()) return;
+
+  // A card the reader can start talking to but cannot finish reading
+  // leaves the RC522 stuck mid-conversation - after which it ignores
+  // EVERY card, the right one included, until a reboot. So always close
+  // the conversation, and reset the reader if it keeps failing.
+  static uint8_t failCount = 0;
+  if (!rfid.PICC_ReadCardSerial()) {
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    if (++failCount >= 3) {
+      failCount = 0;
+      rfid.PCD_Init();
+      rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+      rfid.PCD_AntennaOn();
+      logInfo("CARD", "a card confused the reader - reset, ready again");
+    }
+    return;
+  }
+  failCount = 0;
+
+  String uid = uidToString(&rfid.uid);
+  if (uid == lastUid && now - lastCardAt < 1500) {   // card left sitting on it
+    rfid.PICC_HaltA();
+    return;
+  }
+  lastUid    = uid;
+  lastCardAt = now;
+
+  if (enrolling()) {
+    if (knownCard(uid)) {
+      logInfo("CARD", uid + " is already paired to this box");
+    } else {
+      saveCard(uid);
+      logOK("CARD", "PAIRED card " + String(cardCount) + " of " +
+                    String(CARDS_PER_BOX) + ": " + uid);
+      buzzHz = TONE_SIREN_B_HZ; buzz(true); delay(90); buzz(false);
+      if (!enrolling()) logOK("CARD", ">> BOX IS PAIRED AND ARMED. Ship it.");
+    }
+  } else if (knownCard(uid)) {
+    startQuiet(("card " + uid).c_str());
+    buzzHz = TONE_SIREN_B_HZ;
+    buzz(true); delay(70); buzz(false); delay(60);
+    buzz(true); delay(70); buzz(false);
+    if (!alarmRaised()) drawStatic();
+  } else {
+    // deliberately no reassuring beep for a stranger's card
+    logErr("CARD", "REJECTED " + uid + " - not this box's card, alarm continues");
+  }
+
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+#endif
+}
+
+// ================================================================
+//  POWER — mains present + battery volts, straight off the board's
+//  own dividers. Both nets are on-board, so no GPIO can see 12V.
+// ================================================================
+void powerBegin() {
+#if POWER_WIRED
+  // 11dB attenuation = the full ~0-3.1V span. The mains divider sits at
+  // 2.55V and the battery at ~2.1V, so the default 0-1.1V range would
+  // read both of them pinned at maximum and call a flat battery full.
+  analogSetPinAttenuation(PIN_SENSE_MAINS, ADC_11db);
+  analogSetPinAttenuation(PIN_SENSE_BATT,  ADC_11db);
+  logOK("POWER", "sensing on GPIO34 (mains) + GPIO35 (battery)");
+#else
+  logInfo("POWER", "POWER_WIRED=0 - no mains or battery sensing");
+#endif
+}
+
+void pollPower() {
+#if POWER_WIRED
+  static uint32_t lastRead = 0;
+  uint32_t now = millis();
+  if (now - lastRead < POWER_MS) return;
+  lastRead = now;
+
+  // analogReadMilliVolts applies the chip's own factory ADC calibration —
+  // a raw analogRead() on an ESP32 is nonlinear enough to misjudge a
+  // battery by several hundred mV.
+  railV = analogReadMilliVolts(PIN_SENSE_MAINS) / 1000.0f * MAINS_DIV;
+  battV = analogReadMilliVolts(PIN_SENSE_BATT)  / 1000.0f * BATT_DIV;
+  powerOk = true;
+
+  bool nowMains = (railV >= MAINS_PRESENT_V);
+  if (nowMains != mainsOk) {
+    mainsOk = nowMains;
+    if (mainsOk) logOK ("POWER", "MAINS BACK - rail " + String(railV, 1) + "V");
+    else         logErr("POWER", "MAINS LOST - running on battery, " +
+                                 String(battV, 2) + "V");
+    beatPending = true;            // a power cut is worth telling you about
+  }
+
+  static bool warnedLow = false;   // warn once per discharge, not every 2s
+  if (!mainsOk && battV < BATT_LOW_V && !warnedLow) {
+    warnedLow = true;
+    logErr("POWER", "BATTERY LOW - " + String(battV, 2) + "V, box is about to die");
+    beatPending = true;
+  }
+  if (mainsOk) warnedLow = false;
+#endif
 }
 
 void pollDoor() {
@@ -684,6 +1196,7 @@ void pollBuzzer() {
         beepAt = now;
         nextSirenNote();
         buzz(true);
+        horn(true);                       // the horn only joins in for real
         logErr("ALARM", "grace expired - FULL SIREN");
         break;
       }
@@ -694,20 +1207,31 @@ void pollBuzzer() {
       }
       break;
 
-    case AS_SIREN:
-      if (SIREN_MAX_MS > 0 && now - openedAt >= SIREN_MAX_MS) {
+    case AS_SIREN: {
+      uint32_t maxMs = sirenMaxMs();      // motion runs on its own timer
+      if (maxMs > 0 && now - openedAt >= maxMs) {
         alarmState = AS_SILENT;           // stop the noise, stay alarmed
         buzz(false);
-        logErr("ALARM", "siren timed out after " + String(SIREN_MAX_MS / 1000) +
-                        "s - still OPEN, screen + server stay red");
+        horn(false);
+        logErr("ALARM", "siren timed out after " + String(maxMs / 1000) +
+                        "s - still raised, screen + server stay red");
         break;
       }
       if (now - beepAt >= BEEP_MS) {
         beepAt = now;
-        if (!beepOn) nextSirenNote();     // each new beep = the other note
-        buzz(!beepOn);
+        if (motionAlarm) {
+          // MOTION = continuous wail. The two notes swap with no silence
+          // between them, so it never lets up. A box being torn off the
+          // wall gets a harder sound than a lid being lifted.
+          nextSirenNote();
+          buzz(true);
+        } else {
+          if (!beepOn) nextSirenNote();   // each new beep = the other note
+          buzz(!beepOn);
+        }
       }
       break;
+    }
 
     case AS_SILENT:
     default:
@@ -718,19 +1242,24 @@ void pollBuzzer() {
 void setArmed(bool on) {
   if (on == alarmArmed) return;
   alarmArmed = on;
-  logOK("CMD", on ? "alarm ARMED" : "alarm DISARMED");
-  if (!on && doorOpen) {                  // disarming shuts a running siren up
-    alarmState = AS_SILENT;
+  nvsPutArmed(on);                        // a power cut must not undo this
+  if (!on) {                              // being switched off is worth counting
+    disarmCount++;
+    nvsPut("disarms", disarmCount);
+  }
+  logOK("CMD", on ? "alarm ARMED"
+                  : "alarm DISARMED (disarm #" + String(disarmCount) + ")");
+  // Disarming has to stop a MOTION siren too — that one rings with the
+  // door still shut, so the old "only if the door is open" test left it
+  // screaming after a disarm.
+  if (!on) {
+    alarmState = doorOpen ? AS_SILENT : AS_SECURE;
+    if (alarmState == AS_SECURE) { alarmReason = ""; motionAlarm = false; }
     buzz(false);
+    horn(false);
     drawStatic();
-  } else if (on && doorOpen) {            // arming onto an open door = alarm now
-    alarmState = AS_SIREN;
-    openedAt = millis();
-    beepAt   = millis();
-    nextSirenNote();
-    buzz(true);
-    if (!screenOn) setScreen(true);
-    drawAlarmBanner();
+  } else if (doorOpen && !inQuietPeriod() && !enrolling()) {
+    startSiren("DOOR");                   // arming onto an open door = alarm now
   }
   alarmBeat();
 }
@@ -740,7 +1269,11 @@ void silenceSiren() {
   if (alarmState == AS_GRACE || alarmState == AS_SIREN) {
     alarmState = AS_SILENT;
     buzz(false);
-    logOK("CMD", "siren silenced (door still OPEN)");
+    horn(false);
+    disarmCount++;                        // silencing counts as a disarm
+    nvsPut("disarms", disarmCount);
+    logOK("CMD", "siren silenced (alarm still raised, disarm #" +
+                 String(disarmCount) + ")");
   }
 }
 
@@ -752,15 +1285,18 @@ void clearAlarm() {
   alarmReason = "";
   motionAlarm = false;
   buzz(false);
+  horn(false);
   digitalWrite(PIN_LED_R, LOW);
   digitalWrite(PIN_LED_G, HIGH);
+  if (mpuOk) motionLearn("alarm cleared");   // this angle is the new normal
   drawStatic();
   logOK("CMD", "alarm cleared - box secure again");
   alarmBeat();
 }
 
 // run a command no matter where it came from (router note or server)
-//   screen=on|off   alarm=arm|disarm|clear   siren=off|test   motion=learn
+//   screen=on|off   alarm=arm|disarm|clear   siren=off|test
+//   motion=learn    quiet=off    cards=clear
 void runCommand(const String& cmdRaw) {
   String cmd = cmdRaw; cmd.toLowerCase(); cmd.trim();
   if (cmd.length() == 0) return;
@@ -770,6 +1306,13 @@ void runCommand(const String& cmdRaw) {
   else if (cmd.indexOf("alarm=arm")    >= 0) setArmed(true);
   else if (cmd.indexOf("alarm=clear")  >= 0) clearAlarm();
   else if (cmd.indexOf("motion=learn") >= 0) motionLearn("command");
+  // end a card's quiet hour early — the box goes straight back on guard
+  else if (cmd.indexOf("quiet=off")    >= 0) {
+    if (quietUntil) { quietUntil = 1; logOK("CMD", "quiet period cancelled"); }
+    else            logInfo("CMD", "quiet=off but the box was not quiet");
+  }
+  // a customer who lost BOTH cards: forget them so replacements can pair
+  else if (cmd.indexOf("cards=clear")  >= 0) forgetCards();
   else if (cmd.indexOf("siren=off")    >= 0) silenceSiren();
   else if (cmd.indexOf("siren=test")   >= 0) {
     logOK("CMD", "siren test - two notes");
@@ -789,7 +1332,7 @@ void sendHeartbeat() {
   JsonDocument d;
   d["key"]     = SRV_KEY;
   d["box"]     = BOX_ID;
-  d["fw"]      = "live-3.0";
+  d["fw"]      = "live-3.1";
   d["door"]    = doorOpen ? "OPEN" : "CLOSED";
   d["opens"]   = openCount;
   d["armed"]   = alarmArmed;
@@ -803,6 +1346,17 @@ void sendHeartbeat() {
   d["router"]  = routerOk;
   d["ip"]      = WiFi.localIP().toString();
   d["rssi"]    = WiFi.RSSI();
+  // a box that has been silenced must say so, loudly and on every beat —
+  // one that looks armed on the dashboard but is not is the worst state
+  d["quiet"]   = quietSecsLeft();          // 0 = not quiet
+  d["disarms"] = disarmCount;
+  d["cards"]   = cardCount;
+  d["horn"]    = HORN_WIRED ? hornOn : false;   // never claim a horn we have not got
+  // power: -1 means "not wired / never read", so the server can tell the
+  // difference between a dead battery and a box that has no sensing
+  d["mains"]   = POWER_WIRED ? (mainsOk ? 1 : 0) : -1;
+  d["rail"]    = powerOk ? railV : -1;
+  d["batt"]    = powerOk ? battV : -1;
   String body;
   serializeJson(d, body);
 
@@ -811,8 +1365,11 @@ void sendHeartbeat() {
   bool isHttps = String(SRV_URL).startsWith("https");
   if (isHttps) { tls.setInsecure(); http.begin(tls, SRV_URL); }
   else         { http.begin(SRV_URL); }
-  http.setConnectTimeout(4000);
-  http.setTimeout(8000);
+  // While an alarm is running the loop must come back fast — the siren's
+  // rhythm is driven from loop() and a dead server would otherwise hold it
+  // on one note for twelve seconds. Sound first, reporting second.
+  if (alarmRaised()) { http.setConnectTimeout(1500); http.setTimeout(2500); }
+  else               { http.setConnectTimeout(4000); http.setTimeout(8000); }
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
 
@@ -978,14 +1535,16 @@ void drawStatic() {
       label(10, 52, "MEMORY FREE");
       label(10, 84, "ROUTER");
       label(10, 108, "BOX IP");
+      label(10, 118, "POWER");
       break;
     case 4:
       titleBar("SECURITY");
       label(10, 26, "DOOR");
       label(88, 26, "ALARM");
       label(10, 62, "OPENED");
-      label(72, 62, "TILT");
-      label(10, 98, "SIREN");
+      label(58, 62, "OFF");
+      label(104, 62, "TILT");
+      label(10, 98, "STATE");
       break;
   }
 }
@@ -993,6 +1552,19 @@ void drawStatic() {
 void drawLive() {
   heartbeat = !heartbeat;
   tft.fillCircle(tft.width() - 8, 8, 3, heartbeat ? C_GOOD : C_BAR);
+
+  // A mains cut is too important to live on one page nobody may be looking
+  // at, so it rides the title bar on EVERY page.
+#if POWER_WIRED
+  if (!mainsOk) {
+    tft.setTextSize(1);
+    tft.setTextColor(C_BAD, C_BAR);
+    tft.setCursor(106, 4);
+    tft.print("BATT");
+  } else {
+    tft.fillRect(106, 4, 30, 8, C_BAR);
+  }
+#endif
 
   switch (page) {
     case 0: {
@@ -1077,21 +1649,170 @@ void drawLive() {
             WiFi.status() == WL_CONNECTED
               ? WiFi.localIP().toString() + "  " + String(WiFi.RSSI()) + "dBm"
               : "no wifi", 104);
+      value(56, 118, 1,
+            !POWER_WIRED ? C_LABEL : (!mainsOk ? C_BAD :
+                                      (battV > 0 && battV < BATT_LOW_V ? C_WARN : C_GOOD)),
+            !POWER_WIRED ? "not wired"
+                         : (!powerOk ? "reading..."
+                                     : String(mainsOk ? "MAINS " : "BATTERY ") +
+                                       String(battV, 2) + "V"), 104);
       break;
     }
-    case 4:
+    case 4: {
       value(10, 38, 2, doorOpen ? C_BAD : C_GOOD, doorOpen ? "OPEN" : "CLOSED", 76);
       value(88, 40, 1, alarmArmed ? C_GOOD : C_WARN, alarmArmed ? "ARMED" : "OFF", 66);
-      value(10, 74, 2, C_VALUE, String(openCount), 56);
-      value(72, 76, 1, mpuOk ? (lastTiltDeg > MOTION_TILT_DEG ? C_BAD : C_VALUE) : C_LABEL,
-            mpuOk ? (String((int)lastTiltDeg) + "deg") : "no sensor", 82);
-      value(10, 110, 1,
-            alarmState == AS_SIREN ? C_BAD : (alarmState == AS_GRACE ? C_WARN : C_LABEL),
-            alarmState == AS_SIREN  ? "SOUNDING" :
-            alarmState == AS_GRACE  ? "grace..."  :
-            alarmState == AS_SILENT ? "silenced"  : "quiet", 80);
+      value(10, 74, 2, C_VALUE, String(openCount), 44);
+      value(58, 74, 2, disarmCount ? C_WARN : C_VALUE, String(disarmCount), 42);
+      value(104, 76, 1, mpuOk ? (lastTiltDeg > MOTION_TILT_DEG ? C_BAD : C_VALUE) : C_LABEL,
+            mpuOk ? (String((int)lastTiltDeg) + "deg") : "--", 50);
+
+      // The bottom line must never let a silenced box look armed. A quiet
+      // period or a disarm outranks the siren state here on purpose: those
+      // are the states someone standing at the box needs to see.
+      String st; uint16_t stc;
+      if (inQuietPeriod()) {
+        uint32_t s = quietSecsLeft();
+        char b[20];
+        snprintf(b, sizeof(b), "QUIET %lu:%02lu",
+                 (unsigned long)(s / 60), (unsigned long)(s % 60));
+        st = b; stc = C_WARN;
+      } else if (!alarmArmed)              { st = "DISARMED";     stc = C_WARN;  }
+        else if (alarmState == AS_SIREN)   { st = "SOUNDING";     stc = C_BAD;   }
+        else if (alarmState == AS_GRACE)   { st = "grace...";     stc = C_WARN;  }
+        else if (alarmState == AS_SILENT)  { st = "silenced";     stc = C_WARN;  }
+        else                               { st = "armed, quiet"; stc = C_LABEL; }
+      value(10, 110, 1, stc, st, 110);
       break;
+    }
   }
+}
+
+// ================================================================
+//  OTA — update the box over WiFi instead of over a cable.
+//
+//  It stays OFF until OTA_PASS is set in secrets.h. An open OTA port on
+//  a box sitting in someone else's shop is a way to hand a stranger the
+//  firmware, and the whole point of these boxes is that the firmware is
+//  the product. No password, no OTA — deliberately, not accidentally.
+// ================================================================
+bool otaReady    = false;
+bool otaDisabled = false;   // decided once, so loop() stops asking
+
+void otaBegin() {
+  if (otaDisabled || otaReady) return;
+  if (strlen(OTA_PASS) == 0) {
+    otaDisabled = true;     // say it ONCE, not on every pass of loop()
+    logInfo("OTA", "OTA_PASS empty in secrets.h - OTA off (cable only)");
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) return;   // retry after it connects
+  ArduinoOTA.setHostname(BOX_ID);
+  ArduinoOTA.setPassword(OTA_PASS);
+
+  // The alarm must not be left mid-note by an update, and a half-written
+  // flash must not leave a box that boots into a siren.
+  ArduinoOTA.onStart([]() {
+    buzz(false);
+    horn(false);
+    logOK("OTA", "update starting - alarm outputs released");
+  });
+  ArduinoOTA.onEnd([]()  { logOK("OTA", "update done, rebooting"); });
+  ArduinoOTA.onError([](ota_error_t e) {
+    logErr("OTA", "update failed, error " + String((int)e));
+  });
+  ArduinoOTA.begin();
+  otaReady = true;
+  logOK("OTA", String("ready as '") + BOX_ID + "' on " +
+               WiFi.localIP().toString());
+}
+
+// ================================================================
+//  STATUS BLOCK — every part of the box, in one place, every 30s.
+//  The router is only ONE line of this; when it is down the rest of
+//  the box is still working and you should be able to see that.
+// ================================================================
+void statusRow(const char* name, bool wired, bool ok, const String& detail) {
+  Serial.printf("   %-7s %s  %s\n", name,
+                !wired ? "--" : (ok ? "OK" : "!!"), detail.c_str());
+}
+
+void printStatus() {
+  Serial.println();
+  Serial.printf("---------- STATUS @ %lus ----------\n", millis() / 1000);
+
+  bool wifiUp = (WiFi.status() == WL_CONNECTED);
+  statusRow("WIFI", true, wifiUp,
+            wifiUp ? WiFi.localIP().toString() + "  " + String(WiFi.RSSI()) + "dBm  ch" +
+                     String(WiFi.channel()) + "  " + String(WIFI_SSID)
+                   : "disconnected");
+
+  statusRow("ROUTER", true, routerOk,
+            routerOk ? routerHost() + "  " + boardName + " v" + rosVersion +
+                       "  cpu " + String(cpuLoad) + "%  up " + rosUptime
+                     : (restFailStreak ? "no reply (" + String(restFailStreak) +
+                                         " failed, last: " + lastErr + ")"
+                                       : "not read yet"));
+
+  if (routerOk) {
+    String pl = "";
+    for (int i = 0; i < NPORTS; i++)
+      if (ports[i].seen) pl += ports[i].name + (ports[i].running ? "=up " : "=DOWN ");
+    statusRow("PORTS", true, true, pl.length() ? pl : "none read");
+    statusRow("USERS", true, true, String(usersOnline) + " hotspot, " +
+                                   String(pppoeOnline) + " pppoe");
+  }
+
+  statusRow("SCREEN", true, screenOn,
+            screenOn ? "on, page " + String(page + 1) + "/" + String(NUM_PAGES)
+                     : "off (screen=on to wake it)");
+
+  statusRow("DOOR", ALARM_WIRED, !doorOpen,
+            !ALARM_WIRED ? "ALARM_WIRED=0, reed not read"
+                         : String(doorOpen ? "OPEN" : "CLOSED") +
+                           "  " + String(alarmArmed ? "ARMED" : "DISARMED") +
+                           "  " + alarmStateName() +
+                           "  opens=" + String(openCount) +
+                           "  disarms=" + String(disarmCount));
+
+  statusRow("MOTION", MOTION_WIRED, mpuOk,
+            !MOTION_WIRED ? "MOTION_WIRED=0, no sensor"
+                          : (mpuOk ? String(lastTiltDeg, 0) + " deg off baseline, " +
+                                     String(lastG, 2) + "g"
+                                   : "MPU-6050 not answering on 21/22"));
+
+  statusRow("CARDS", RFID_WIRED, rc522Ok,
+            !RFID_WIRED ? "RFID_WIRED=0, no reader"
+                        : (!rc522Ok ? "RC522 not answering on 16/17"
+                                    : String(cardCount) + "/" + String(CARDS_PER_BOX) +
+                                      " paired" + (enrolling() ? "  >> ENROL MODE" : "")));
+
+  statusRow("QUIET", RFID_WIRED, !inQuietPeriod(),
+            !RFID_WIRED ? "no reader, nothing can buy quiet"
+                        : (inQuietPeriod()
+                             ? "SILENCED - " + String(quietSecsLeft() / 60) + "m" +
+                               String(quietSecsLeft() % 60) + "s left"
+                             : "armed, nothing silenced"));
+
+  statusRow("POWER", POWER_WIRED, mainsOk,
+            !POWER_WIRED ? "POWER_WIRED=0, no mains/battery sensing"
+                         : (!powerOk ? "not read yet"
+                                     : String(mainsOk ? "MAINS OK" : "ON BATTERY") +
+                                       "  rail " + String(railV, 1) + "V" +
+                                       "  batt " + String(battV, 2) + "V"));
+
+  statusRow("HORN", HORN_WIRED, !hornOn,
+            !HORN_WIRED ? "HORN_WIRED=0, relay pin idle"
+                        : (hornOn ? "SOUNDING" : "quiet, relay released"));
+
+  statusRow("SERVER", strlen(SRV_URL) > 0, !beatPending,
+            strlen(SRV_URL) == 0 ? "SRV_URL empty in secrets.h - reporting off"
+                                 : String(SRV_URL) + (beatPending ? "  (beat queued)" : ""));
+
+  statusRow("MEMORY", true, ESP.getFreeHeap() > 40000,
+            String(ESP.getFreeHeap() / 1024) + " KB heap free");
+
+  Serial.println("------------------------------------");
+  Serial.println();
 }
 
 void setup() {
@@ -1100,10 +1821,32 @@ void setup() {
   Serial.println("==========================================");
   Serial.println(" LiveDashboardNext - dashboard + alarm");
   Serial.println(" users + ports + traffic + system + door");
+  Serial.println(" + horn + cards + power + memory + OTA");
   Serial.println("==========================================");
 
   pinMode(TFT_BLK, OUTPUT);
   digitalWrite(TFT_BLK, HIGH);
+
+  // What the box remembers comes FIRST: everything below (including the
+  // boot self-test and the door's opening state) depends on whether this
+  // box is supposed to be armed at all.
+  nvsLoadState();
+#if RFID_WIRED
+  loadCards();          // needed before the door's boot state is decided
+#endif
+
+#if HORN_WIRED
+  // Drive the relay to its OFF level BEFORE making the pin an output.
+  // The other order leaves the pin briefly at 0 on an active-low board,
+  // which is a horn blast every time the box powers up.
+  digitalWrite(PIN_RELAY, RELAY_ACTIVE_HIGH ? LOW : HIGH);
+  pinMode(PIN_RELAY, OUTPUT);
+  digitalWrite(PIN_RELAY, RELAY_ACTIVE_HIGH ? LOW : HIGH);
+  hornOn = false;
+  Serial.println("[BOOT] HORN_WIRED=1 - relay on GPIO13, released");
+#else
+  Serial.println("[BOOT] HORN_WIRED=0 - horn relay pin not touched");
+#endif
 
 #if ALARM_WIRED
   // alarm hardware + POWER-ON SELF TEST: both LEDs light, buzzer chirps
@@ -1140,7 +1883,9 @@ void setup() {
   lastReedRaw = raw;
   reedChangedAt = millis();
   openedAt = millis();
-  alarmState = (doorOpen && alarmArmed)
+  // A box with no cards paired must NOT boot into a siren — whoever is
+  // setting it up has nothing to tap to stop it.
+  alarmState = (doorOpen && alarmArmed && !enrolling())
                  ? (GRACE_MS > 0 ? AS_GRACE : AS_SIREN)
                  : (doorOpen ? AS_SILENT : AS_SECURE);
   if (doorOpen) alarmReason = "DOOR";
@@ -1154,12 +1899,19 @@ void setup() {
   tft.setRotation(SCREEN_ROT);
   titleBar("BOOT");
 
+  // AFTER the TFT: both share the SPI bus, and the reader's init is
+  // cleaner once the display driver has already claimed and configured it.
+  cardBegin();
+  powerBegin();
+
   connectWiFi();
+  otaBegin();
 
   // first data before the first page shows
   fetchPorts();
   fetchUsers();
   fetchSystem();
+  printStatus();                   // one full picture before the pages start
   if (alarmRaised()) { drawAlarmBanner(); }
   else               { drawStatic(); }
 }
@@ -1175,6 +1927,9 @@ void loop() {
 #if MOTION_WIRED
   pollMotion();
 #endif
+  pollCards();       // a card tap must land even while the siren is going
+  pollQuiet();       // ...and the hour it buys has to be able to run out
+  pollPower();       // mains/battery, cheap: two ADC reads every 2s
 
   static uint32_t lastWifiTry = 0;
   if (WiFi.status() != WL_CONNECTED && now - lastWifiTry > 15000) {
@@ -1184,12 +1939,21 @@ void loop() {
     if (strlen(WIFI_PASS) == 0) WiFi.begin(WIFI_SSID);
     else                        WiFi.begin(WIFI_SSID, WIFI_PASS);
   }
+  if (otaReady) ArduinoOTA.handle();
+  else if (!otaDisabled && WiFi.status() == WL_CONNECTED) otaBegin();  // after a reconnect
 
   if (now - lastPoll  >= POLL_MS)  { lastPoll  = now; fetchPorts();   }
   if (now - lastUsers >= USERS_MS) { lastUsers = now; fetchUsers();   }
   if (now - lastSys   >= SYS_MS)   { lastSys   = now; fetchSystem();  }
   if (now - lastCmd   >= CMD_MS)   { lastCmd   = now; fetchCommand();  }
-  if (now - lastBeat  >= HEART_MS) { lastBeat  = now; sendHeartbeat(); }
+
+  // An alarm asked for an instant report. Send it HERE, not from inside
+  // the alarm code, so the siren has already been running for a full pass
+  // of the loop before we go anywhere near the network.
+  if (beatPending) { beatPending = false; lastBeat = now; sendHeartbeat(); }
+  else if (now - lastBeat >= HEART_MS) { lastBeat = now; sendHeartbeat(); }
+
+  if (now - lastStatus >= STATUS_MS) { lastStatus = now; printStatus(); }
 
   if (!screenOn) return;           // data keeps flowing, drawing paused
   // the red banner owns the screen only while the alarm is actually raised

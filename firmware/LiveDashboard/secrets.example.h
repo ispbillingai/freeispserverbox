@@ -18,6 +18,12 @@
 #define MT_PASS  "READ_ONLY_PASSWORD"
 
 
+// ---- OTA (update the box over WiFi instead of over a cable, optional) ----
+// Leave EMPTY to keep OTA switched off. An open OTA port hands a stranger
+// your firmware, so there is deliberately no default: no password, no OTA.
+#define OTA_PASS  ""                  // set one and the box appears as a
+                                      // network port in the Arduino IDE
+
 // ---- your server (heartbeat + remote commands, optional) ----
 #define SRV_URL  ""                   // e.g. "https://yourserver.com/box.php"; "" = off
 #define SRV_KEY  "CHANGE_ME"          // must MATCH $KEY inside box.php
