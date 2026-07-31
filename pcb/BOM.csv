@@ -1,0 +1,20 @@
+Item,Qty,Designators,Description,Notes
+1,2,C2 C3,Ceramic capacitor 100nF,5mm disc
+2,1,C1,Electrolytic capacitor 470uF 16V,"8mm dia, 3.5mm pitch"
+3,2,U3A U3B,"Female header socket 1x19, 2.54mm",cut from a 40-pin strip
+4,1,J10,"Male pin header 1x3, 2.54mm",buzzer
+5,1,K1,"Male pin header 1x3, 2.54mm",relay control
+6,1,U4,"Male pin header 1x8, 2.54mm",MPU-6050 socket
+7,1,J5,"Male pin header 1x8, 2.54mm",RC522 socket
+8,1,J4,"Male pin header 1x8, 2.54mm",TFT socket
+9,1,J14,"Male pin header 2x5, 2.54mm",EXPANSION
+10,1,R5,Resistor 100k 1/4W,12V divider
+11,2,R3 R4,Resistor 100k 1/4W,battery divider
+12,1,R8,Resistor 1k 1/4W,reed input
+13,1,R7,Resistor 1k 1/4W,relay drive
+14,1,R2,Resistor 220R 1/4W,green LED
+15,1,R1,Resistor 220R 1/4W,red LED
+16,1,R6,Resistor 27k 1/4W,12V divider
+17,3,D1 D2 D3,Schottky diode 3A DO-201AD,1N5822 (or SR340/SB360)
+18,5,J1 J11 J7 J8 J9,Screw terminal 2-way 5.08mm,"KF301 / MCV 1,5-2-G-5.08"
+19,3,J13 U1 U2,Screw terminal 4-way 5.08mm,"KF301 / MCV 1,5-4-G-5.08"
