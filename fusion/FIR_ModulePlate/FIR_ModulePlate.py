@@ -1,44 +1,83 @@
 # FIR_ModulePlate.py - Autodesk Fusion 360 script
-# The BOTTOM that closes the FIR_ModuleGadget shell. Fits up inside the shell's
-# open bottom, screws up into the shell's 4 corner bosses, and carries the boards
-# on standoffs. Run this in the SAME design as FIR_ModuleGadget to see it CLOSED.
+# The ELECTRONICS TRAY. Everything electrical bolts to this one flat plate,
+# which then mounts into the big box.
 #
-#  shell (open bottom)  +  this plate (the floor)  =  sealed router unit
-#  >>> Component sizes are plan defaults - VERIFY with calipers. <<<
+# REDRAWN 2026-07-31 for the real brain PCB (freeisp_brain rev H).
+# ---------------------------------------------------------------------------
+# What changed and why:
+#   The old plate was 130x115 and carried FIVE loose boards on standoffs -
+#   ESP32, buck, charger, MPU, battery. That is obsolete. There is now a real
+#   115x115mm PCB which already carries the ESP32, the MPU and all the
+#   passives, so the tray only has to hold:
+#       - the PCB itself, on 4 posts matching its M3 holes (106mm square)
+#       - the three WIRE-IN modules that never touch the PCB
+#         (LM2596 buck, TP4056 charger, 5V boost)
+#       - the 18650 holder
+#   A 115mm PCB cannot fit a 130x115 plate with anything beside it, so the
+#   tray grew. It is now a flat mounting tray, not the floor of a sealed
+#   gadget shell.
+#
+# ⚠️ KNOCK-ON: the box-side mounting for this tray must be redrawn to match
+#   TRAY_MOUNT below. The old FIR_ModuleGadget shell (130x115 cavity) can no
+#   longer close over this - that shell is superseded.
+#
+# ⚠️ Module sizes are TYPICAL for these parts. Vernier the real three and
+#   correct MODULES before printing - especially the heights, which are set
+#   by the trimpots, not the board.
 
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
-# ---------------- PLATE (fits inside the shell's 130x115 cavity) ----------------
-PLATE_W, PLATE_H, PLATE_TH = 130.0, 115.0, 3.0   # EXACT cover cavity size = press fit, no side play
-PLATE_TOP = PLATE_TH                         # plate occupies z 0..3, top at z=3
-CORNER_R = 7.5                               # EXACT cover inner cavity corner radius
+# ---------------- TRAY ----------------
+PLATE_W, PLATE_H, PLATE_TH = 150.0, 180.0, 3.0
+PLATE_TOP = PLATE_TH
+CORNER_R = 6.0
 
-# screws up into the shell bosses (must match FIR_ModuleGadget SCREW_XY)
-SCREW_XY = [(-58.5, 50.0), (58.5, 50.0), (-58.5, -50.0), (58.5, -50.0)]
-BOSS_D, BOSS_RISE, SCREW_CLEAR = 7.0, 3.0, 3.4
-CB_D, CB_DEPTH = 6.0, 1.5                    # counterbore on the bottom for the screw head
+# ---------------- the PCB ----------------
+# freeisp_brain rev H: 115x115, M3 holes 4.5mm in from each corner
+PCB_W = PCB_H = 115.0
+PCB_HOLE_PITCH = PCB_W - 2 * 4.5          # 106.0 mm square
+PCB_CX, PCB_CY = 11.5, 0.0                # tray-centred origin
+# 6mm clears the through-hole solder joints underneath the board
+POST_D, POST_H, POST_PILOT = 7.0, 6.0, 2.5
 
-STANDOFF_OD, STANDOFF_H, STANDOFF_PILOT = 5.5, 4.0, 2.2
-
-# brain + power boards:  name, w, l, h, cx, cy, posts
-COMPONENTS = [
-    ('ESP32-S3',     70.0, 26.0, 13.0,  0.0,   6.0, 4),
-    ('LM2596 buck',  52.0, 27.0, 15.0,  0.0, -24.0, 4),
-    ('18650 holder', 75.0, 20.0, 20.0,  0.0,  44.0, 2),
-    ('TP4056',       26.0, 17.0,  6.0,  0.0, -45.0, 2),
-    ('MPU-6050',     22.0, 17.0,  4.0, 48.0,  28.0, 2),
+# ---------------- wire-in modules: name, w, l, h, cx, cy ----------------
+# Held by corner brackets + a zip tie, NOT screws: the mounting holes on
+# these cheap modules move between batches, the outline does not.
+# Each module sits beside the PCB terminal it feeds, so the wires stay short:
+# the PCB's buck and charger terminals are on its TOP edge, the boost terminal
+# on its LEFT edge. Heights include the trimpot, which must stay reachable.
+MODULES = [
+    ('LM2596 buck',  43.0, 21.0, 14.0,   0.0,  75.0),   # above the PCB
+    ('TP4056',       26.0, 17.0,  6.0,  48.0,  75.0),   # above, beside the buck
+    ('5V boost',     17.0, 36.0, 14.0, -61.0,  60.0),   # left, by its terminal
+    ('18650 holder', 20.0, 75.0, 20.0, -61.0, -22.0),   # left, below the boost
 ]
-REED_C = (-50.0, 47.0)                       # tamper reed near the top edge
-LIGHTEN = [(-50.0, 10.0), (-50.0, -22.0), (44.0, -38.0), (44.0, -2.0)]
-SHOW_PARTS = False        # placeholders OFF - flip to True only to check board fit
+BRACKET_T, BRACKET_L = 2.5, 8.0           # corner bracket thickness / leg length
+TIE_SLOT = (3.0, 10.0)                    # zip-tie slot through the plate
+
+# tray -> box.  ⚠️ the box side must be redrawn to match these.
+TRAY_MOUNT = [(-68.0, -85.0), (68.0, -85.0), (-68.0, 85.0), (68.0, 85.0)]
+TRAY_CLEAR, TRAY_CB, TRAY_CB_D = 3.4, 6.0, 1.5
+
+# harness tie-downs: loop a zip tie round each pair
+TIE_POSTS = [(-20.0, -80.0), (-10.0, -80.0), (30.0, -80.0), (40.0, -80.0)]
+
+# weight savings, kept clear of every post and bracket
+LIGHTEN = [(11.5, 0.0), (11.5, 40.0), (11.5, -40.0), (-20.0, -25.0)]
+LIGHTEN_SZ = (30.0, 22.0)
+
+SHOW_PARTS = False        # True = draw the PCB and modules to check the fit
 
 CM = 0.1
+
+
 def mm(v):
     return v * CM
 
-NEW  = adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+
+NEW = adsk.fusion.FeatureOperations.NewBodyFeatureOperation
 JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
-CUT  = adsk.fusion.FeatureOperations.CutFeatureOperation
+CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
 
@@ -81,53 +120,88 @@ def fillet_vertical(comp, body, r):
                     coll.add(e)
         if coll.count:
             fi = comp.features.filletFeatures.createInput()
-            fi.addConstantRadiusEdgeSet(coll, adsk.core.ValueInput.createByReal(mm(r)), False)
+            fi.addConstantRadiusEdgeSet(
+                coll, adsk.core.ValueInput.createByReal(mm(r)), False)
             comp.features.filletFeatures.add(fi)
     except Exception as e:
         SKIPPED.append('corner fillet: {}'.format(e))
 
 
-def standoffs(comp, body, cx, cy, w, l, n):
-    pts = [(-1, -1), (1, -1), (-1, 1), (1, 1)] if n >= 4 else [(-1, 0), (1, 0)]
-    for (sx, sy) in pts:
-        x, y = cx + sx * (w / 2 - 3.5), cy + sy * (l / 2 - 3.5)
-        cyl(comp, x, y, PLATE_TOP, STANDOFF_OD, STANDOFF_H, JOIN, [body])
-        cyl(comp, x, y, PLATE_TOP, STANDOFF_PILOT, STANDOFF_H + 1, CUT, [body])
+def corner_brackets(comp, body, cx, cy, w, l, h):
+    """Four L-shaped corners that locate a module by its OUTLINE.
+
+    Deliberately not screw posts: hole positions on these modules vary
+    between batches, the outside dimensions do not. 0.4mm of slack per side
+    so a printed part still accepts the board.
+    """
+    hw, hl = w / 2.0 + 0.4, l / 2.0 + 0.4
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            x = cx + sx * (hw + BRACKET_T / 2.0)
+            y = cy + sy * (hl + BRACKET_T / 2.0)
+            # one leg along X, one along Y -> an L that traps the corner
+            box(comp, x - sx * (BRACKET_L - BRACKET_T) / 2.0, y,
+                PLATE_TOP, BRACKET_L, BRACKET_T, h, JOIN, [body])
+            box(comp, x, y - sy * (BRACKET_L - BRACKET_T) / 2.0,
+                PLATE_TOP, BRACKET_T, BRACKET_L, h, JOIN, [body])
+
+
+def tie_slots(comp, body, cx, cy, w):
+    """A pair of slots either side of a module: one zip tie straps it down."""
+    sw, sl = TIE_SLOT
+    for sx in (-1, 1):
+        box(comp, cx + sx * (w / 2.0 + 5.0), cy, -1, sw, sl,
+            PLATE_TH + 2, CUT, [body])
 
 
 def build_plate(comp):
     plate = box(comp, 0, 0, 0, PLATE_W, PLATE_H, PLATE_TH, NEW).bodies.item(0)
-    plate.name = 'FIR Bottom Plate'
+    plate.name = 'FIR Electronics Tray'
     fillet_vertical(comp, plate, CORNER_R)
 
     for (vx, vy) in LIGHTEN:
-        box(comp, vx, vy, -1, 14, 22, PLATE_TH + 2, CUT, [plate])
+        box(comp, vx, vy, -1, LIGHTEN_SZ[0], LIGHTEN_SZ[1],
+            PLATE_TH + 2, CUT, [plate])
 
-    # screw bosses (rise to meet the shell bosses) + counterbored clearance hole
-    for (x, y) in SCREW_XY:
-        cyl(comp, x, y, PLATE_TOP, BOSS_D, BOSS_RISE, JOIN, [plate])
-        cyl(comp, x, y, -1, SCREW_CLEAR, PLATE_TH + BOSS_RISE + 2, CUT, [plate])
-        cyl(comp, x, y, 0, CB_D, CB_DEPTH, CUT, [plate])         # head pocket on the bottom
+    # ---- the PCB: 4 posts on its own M3 pattern ----
+    half = PCB_HOLE_PITCH / 2.0
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            x, y = PCB_CX + sx * half, PCB_CY + sy * half
+            cyl(comp, x, y, PLATE_TOP, POST_D, POST_H, JOIN, [plate])
+            # pilot for an M3 self-tapper, stopping short of the underside
+            cyl(comp, x, y, PLATE_TOP, POST_PILOT, POST_H - 0.5, CUT, [plate])
 
-    for (name, w, l, h, cx, cy, n) in COMPONENTS:
-        standoffs(comp, plate, cx, cy, w, l, n)
+    # ---- wire-in modules ----
+    for (name, w, l, h, cx, cy) in MODULES:
+        wall = 6.0 if h > 10 else 4.0
+        corner_brackets(comp, plate, cx, cy, w, l, wall)
+        tie_slots(comp, plate, cx, cy, w)
 
-    rx, ry = REED_C
-    box(comp, rx - 3, ry, PLATE_TOP, 2, 8, 9, JOIN, [plate])
-    box(comp, rx + 3, ry, PLATE_TOP, 2, 8, 9, JOIN, [plate])
+    # ---- tray -> box ----
+    for (x, y) in TRAY_MOUNT:
+        cyl(comp, x, y, -1, TRAY_CLEAR, PLATE_TH + 2, CUT, [plate])
+        cyl(comp, x, y, 0, TRAY_CB, TRAY_CB_D, CUT, [plate])
 
-    # cable tie-down: two solid posts - loop a zip tie around both to clamp the
-    # harness. No bridging bar = no floating region, prints support-free.
-    box(comp, 28, -8, PLATE_TOP, 3.5, 10, 7, JOIN, [plate])
-    box(comp, 36, -8, PLATE_TOP, 3.5, 10, 7, JOIN, [plate])
+    # ---- harness tie-down posts ----
+    for (x, y) in TIE_POSTS:
+        box(comp, x, y, PLATE_TOP, 3.5, 10, 7, JOIN, [plate])
+
     return plate
 
 
 def build_parts(comp):
-    sz_top = PLATE_TOP + STANDOFF_H
-    for (name, w, l, h, cx, cy, n) in COMPONENTS:
-        b = box(comp, cx, cy, sz_top, w, l, h, NEW).bodies.item(0)
-        b.name = 'PART: ' + name
+    """Placeholders, to eyeball the fit. Never printed."""
+    b = box(comp, PCB_CX, PCB_CY, PLATE_TOP + POST_H, PCB_W, PCB_H, 1.6,
+            NEW).bodies.item(0)
+    b.name = 'PART: brain PCB 115x115'
+    # the ESP32 stands on sockets above the PCB
+    e = box(comp, PCB_CX, PCB_CY, PLATE_TOP + POST_H + 1.6 + 8.5,
+            28.0, 56.0, 13.0, NEW).bodies.item(0)
+    e.name = 'PART: ESP32 DevKitC'
+    for (name, w, l, h, cx, cy) in MODULES:
+        m = box(comp, cx, cy, PLATE_TOP, w, l, h, NEW).bodies.item(0)
+        m.name = 'PART: ' + name
 
 
 def run(context):
@@ -150,7 +224,8 @@ def run(context):
             build_parts(design.rootComponent)
         app.activeViewport.fit()
         if SKIPPED:
-            ui.messageBox('Plate built. Skipped:\n - ' + '\n - '.join(SKIPPED))
+            ui.messageBox('Tray built. Skipped:\n - ' + '\n - '.join(SKIPPED))
     except:  # noqa
         if ui:
-            ui.messageBox('FIR_ModulePlate failed:\n{}'.format(traceback.format_exc()))
+            ui.messageBox('FIR_ModulePlate failed:\n{}'.format(
+                traceback.format_exc()))
