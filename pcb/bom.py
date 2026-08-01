@@ -66,7 +66,13 @@ PLUGS_IN = [
     ("Relay module", "into K1 + its own screw terminals", "you have it"),
     ("LM2596 buck module", "wired to U1 terminal", "you have it"),
     ("TP4056 charger (protected)", "wired to U2 terminal", "you have it"),
-    ("5V boost module, >=2A", "wired to J13 terminal", "TO BUY"),
+    # Francis has 2x MT3608 (2026-08-01). They work, but a MT3608's 2A is a
+    # SWITCH rating -- from a 3.7V cell it is only about 1A out at 5V, and on
+    # battery this module carries the ESP32's WiFi bursts, the TFT, the relay
+    # coil AND the sounding horn together. Fine for the bench, thin for the
+    # real build: expect the rail to sag when the horn fires on battery.
+    ("5V boost module, >=2A", "wired to J13 terminal",
+     "have 2x MT3608 - bench OK, UNDERSIZED for the horn"),
     ("18650 cell + holder", "onto the TP4056's own B+/B-", "you have it"),
     ("Horn 3-5V", "via the relay contacts to J11", "you have it"),
     ("Reed switch + neodymium magnet", "to J7", "magnet TO BUY"),
