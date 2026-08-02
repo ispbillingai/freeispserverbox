@@ -197,6 +197,36 @@ const float BATT_LOW_V = 3.4f;
 
 const uint32_t POWER_MS = 2000;   // how often to read both ADCs
 
+// TO BUILD — BATTERY PERCENTAGE ON THE SCREEN (Francis, 2026-08-02).
+// The SYSTEM page shows raw volts today. A percentage is what anyone
+// standing at the box actually understands, and it goes in the heartbeat
+// too so the account can show "this box is running on 40% battery".
+//
+// Do NOT map 3.0-4.2V straight onto 0-100%. Four things make that lie:
+//
+//   1. The discharge curve is FLAT. A Li-ion cell sits between 3.6 and
+//      3.8V for well over half its capacity, so a linear map shows 100%
+//      for a minute, then sticks around 50% for hours, then falls off a
+//      cliff. Use a small piecewise table (4.20/4.06/3.98/3.92/3.87/3.82/
+//      3.79/3.70/3.60/3.40/3.00 -> 100/90/80/.../10/0) and interpolate.
+//
+//   2. Voltage SAGS under load. Read it while the horn is sounding and a
+//      healthy cell looks nearly flat. Sample only when the box is quiet
+//      (no siren, no horn), or hold the last reading while it sounds.
+//
+//   3. CHARGING lifts it. The TP4056 pushes the cell to 4.2V, so the
+//      percentage reads full long before it is. While mainsOk is true,
+//      show "CHARGING" or "MAINS" rather than a number - a percentage is
+//      only meaningful on battery.
+//
+//   4. ADC noise makes it JUMP. Average several reads and add a little
+//      hysteresis, or the screen flickers between 61% and 64% and looks
+//      broken. A percentage that only ever falls (while discharging) is
+//      more believable than an honest one that dances.
+//
+// Then: battPercent() on the SYSTEM page next to the volts, "batt%" in
+// the heartbeat beside "batt", and a column in box.php's fleet table.
+
 // ---- how the alarm behaves ----
 #define ALARM_ARMED_AT_BOOT 1     // 1 = live the moment it powers up
                                   // 0 = boots quiet, arm it with a command
