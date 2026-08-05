@@ -113,6 +113,18 @@ void setup() {
     Serial.printf("OK RC522 firmware version 0x%02X (%s) - reader is alive\n",
                   v, (v == 0x91 || v == 0x92) ? "v1.0/v2.0 genuine-style"
                                               : "clone, usually fine");
+
+    // ALIVE IS NOT WORKING. This sketch used to stop at the line above and
+    // then read no cards at all, which looks like broken wiring and is not.
+    // These clones boot with the receiver turned right down: SPI answers
+    // perfectly while the RF field is too weak to wake a card sitting on
+    // the pad. Forcing the gain to max, and cycling the antenna so the new
+    // setting takes, is what actually makes it read.
+    rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+    rfid.PCD_AntennaOff();
+    delay(20);
+    rfid.PCD_AntennaOn();
+    Serial.println("   antenna gain forced to MAX (clones boot too quiet)");
     chirp(2000, 80);
   }
 
