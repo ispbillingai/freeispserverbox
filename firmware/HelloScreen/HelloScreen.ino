@@ -600,14 +600,37 @@ uint32_t restFailStreak  = 0;
 uint32_t restLastLogAt   = 0;
 String   restLastLogMsg  = "";
 
+// ---- BACKOFF: why an unreachable router used to eat card taps ----
+// Every restGet BLOCKS the loop for up to 8s waiting on a timeout, and
+// four fetchers poll every 2-10s. With the router unreachable that adds
+// up to more time blocked than running -- and pollCards() only runs
+// between calls. A card tapped during the block is simply never seen,
+// which is why CardTest reads a card instantly and the dashboard would
+// not pair one. So: once the router has failed a few times in a row,
+// stop hammering it. Retry on a widening interval instead, capped, and
+// go straight back to normal the moment one request succeeds.
+const uint32_t REST_BACKOFF_AFTER = 3;        // failures before backing off
+const uint32_t REST_BACKOFF_MIN_MS = 15000;   // first retry gap
+const uint32_t REST_BACKOFF_MAX_MS = 300000;  // never wait longer than 5 min
+uint32_t restNextTryAt = 0;                   // millis() gate, 0 = try now
+
 // one shared REST GET: fills doc, returns true on success, logs failures
 bool restGet(const char* tag, const String& path, JsonDocument& doc) {
   if (WiFi.status() != WL_CONNECTED) { lastErr = "no WiFi"; return false; }
 
+  // Signed compare: millis() rollover must not unblock or freeze the gate.
+  if (restNextTryAt && (int32_t)(millis() - restNextTryAt) < 0) {
+    lastErr = "router backoff (still down, not retrying yet)";
+    return false;
+  }
+
   HTTPClient http;
   String host = routerHost();
-  http.setConnectTimeout(3000);
-  http.setTimeout(8000);
+  // Short timeouts on purpose: this runs on the same thread as the card
+  // reader and the reed. A router that needs longer than this is down as
+  // far as the box is concerned, and the box's job is to stay responsive.
+  http.setConnectTimeout(1500);
+  http.setTimeout(2500);
   http.begin(String("http://") + host + path);
   http.setAuthorization(MT_USER, MT_PASS);
   uint32_t t0 = millis();
@@ -630,12 +653,22 @@ bool restGet(const char* tag, const String& path, JsonDocument& doc) {
       restLastLogAt  = nowMs;
       restLastLogMsg = lastErr;
     }
+    // Widen the retry gap: 15s, 30s, 60s ... capped. Keeps the loop free
+    // for the reed, the reader and the screen while the router is out.
+    if (restFailStreak >= REST_BACKOFF_AFTER) {
+      uint32_t gap = REST_BACKOFF_MIN_MS << (restFailStreak - REST_BACKOFF_AFTER);
+      if (gap > REST_BACKOFF_MAX_MS || gap < REST_BACKOFF_MIN_MS)
+        gap = REST_BACKOFF_MAX_MS;           // also catches the shift overflow
+      restNextTryAt = nowMs + gap;
+      if (restNextTryAt == 0) restNextTryAt = 1;
+    }
     http.end();
     return false;
   }
   String body = http.getString();
   http.end();
 
+  restNextTryAt = 0;                    // answered: drop the backoff at once
   if (restFailStreak) {                 // recovery is always worth one line
     logOK("ROUTER", "router answering again after " + String(restFailStreak) +
                     " failed request(s)");
