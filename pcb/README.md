@@ -57,34 +57,6 @@ The **LM2596 buck** and **TP4056 charger** have edge pads meant for wires, not
 
 The 12 V feed is fused **inline in the wire**, not on the board.
 
-## Next revision — silkscreen
-
-Assembling rev H showed the silk is written for the *designer*, not the person
-holding the iron. Reference designators are what the board file calls things;
-they are not what anyone reads at the bench. Francis could not find "K1" —
-he found the header labelled `RELAY`, which is the same thing.
-
-For the next board, print the **job name first and the designator second**, or
-drop the designator entirely on anything a person plugs into:
-
-| Now | Should read |
-|---|---|
-| `K1` + `RELAY` | `RELAY` (IN GND VCC) |
-| `J11` + `HORN` | `HORN` |
-| `J4` | `TFT 5V` |
-| `J5` | `RC522 3V3` |
-| `U4` | `MPU-6050` |
-| `J10` | `BUZZER` |
-| `J7` | `REED` |
-| `J8` / `J9` | `LED RED` / `LED GREEN` |
-| `U1` / `U2` / `J13` | `BUCK` / `CHARGER` / `BOOST` |
-
-Put the **voltage on the two 8-pin headers** (`TFT 5V`, `RC522 3V3`) — they are
-identical connectors side by side, and the swap kills the reader. The rail
-name on the silk is the cheapest possible guard against it.
-
-Gerbers must be re-exported after any silk change.
-
 ## Still open
 
 - **Firmware has no code yet for GPIO34 (mains sense), GPIO35 (battery
