@@ -202,20 +202,25 @@ PARTS = {
     # --- field terminals, bottom row (J12 sense header DELETED, review C1/m5:
     # both sense sources are on-board nets; a field pin invited 12V into a
     # 3.3V-max input-only GPIO) ---
+    # The strip below the ESP32's USB end (x ~48-65 past y92) is KEPT EMPTY:
+    # the USB plug overmold + cable must reach the soldered-in devkit for
+    # reflashing. J9 moved right of the path; J10/K1 moved up beside R8/R7.
     "J7":  (LIB_TERM, FP_TERM2, 13, 101, 0, "REED", {1: "REED_F", 2: "GND"}),
     "J8":  (LIB_TERM, FP_TERM2, 36, 101, 0, "LED R", {1: "GND", 2: "LED_R_A"}),
-    "J9":  (LIB_TERM, FP_TERM2, 48, 101, 0, "LED G", {1: "GND", 2: "LED_G_A"}),
-    # buzzer + relay live on 5V_SYS: the alarm must sound with the mains cut
-    "J10": (LIB_HEADER, hdr(3), 58, 101, 90, "BUZZER",
+    "J9":  (LIB_TERM, FP_TERM2, 68, 101, 0, "LED G", {1: "GND", 2: "LED_G_A"}),
+    # buzzer + relay live on 5V_SYS: the alarm must sound with the mains cut.
+    # Raised off the bottom row so header pins + wires clear the USB cable.
+    "J10": (LIB_HEADER, hdr(3), 25, 90, 90, "BUZZER",
             {1: "+5V_SYS", 2: "GND", 3: "BUZZ"}),
-    # R7 in the drive line stops the relay board's opto back-feeding GPIO13
-    "K1":  (LIB_HEADER, hdr(3), 68, 101, 90, "HORN RLY",
+    # R7 in the drive line stops the relay board's opto back-feeding GPIO13;
+    # K1 now sits directly below R7 on the horn side, clear of the USB path
+    "K1":  (LIB_HEADER, hdr(3), 78, 90, 90, "HORN RLY",
             {1: "HORN_DRV", 2: "GND", 3: "+5V_SYS"}),
     # Horn loop (review C2 -- the old HORN_RET pad connected to NOTHING):
     # J11 5V -> relay COM, relay NO -> horn +, horn - -> J11 HORN- -> GND.
     # Francis's horn is 3-5V, NOT 12V -- so it feeds from 5V_SYS: it keeps
     # sounding on battery after a mains cut, and can never see 12V.
-    "J11": (LIB_TERM, FP_TERM2, 78, 101, 0, "HORN",
+    "J11": (LIB_TERM, FP_TERM2, 80, 101, 0, "HORN",
             {1: "+5V_SYS", 2: "GND"}),
 
     # --- EXPANSION: every spare pin plus power and ground, so a button,
@@ -455,10 +460,11 @@ PIN_SILK = [
     # footprint), so labels sit at 80.3
     ("REED", 13, 95.3, 0), ("GND", 18.08, 95.3, 0),
     ("GND", 36, 95.3, 0), ("LED+", 41.08, 95.3, 0),
-    ("GND", 48, 95.3, 0), ("LED+", 53.08, 95.3, 0),
-    ("+5V", 78, 95.3, 0), ("HORN-", 83.08, 95.3, 0),
-    # function headings for the ref-hidden bottom headers
-    ("BUZZ", 60.54, 103.4, 0), ("RELAY", 70.54, 103.4, 0),
+    ("GND", 68, 95.3, 0), ("LED+", 73.08, 95.3, 0),
+    ("+5V", 80, 95.3, 0), ("HORN-", 85.08, 95.3, 0),
+    # function headings for the ref-hidden buzzer/relay headers (now up
+    # beside R8 and R7, out of the USB cable path)
+    ("BUZZ", 27.54, 83.4, 0), ("RELAY", 80.54, 83.4, 0),
     # J14 expansion: odd pins label to the left, even pins to the right
     ("3V3", 26.4, 40, 0), ("5V", 36.0, 40, 0),
     ("GND", 26.4, 42.54, 0), ("GND", 36.4, 42.54, 0),
@@ -466,9 +472,9 @@ PIN_SILK = [
     ("D14", 26.4, 47.62, 0), ("D12", 36.4, 47.62, 0),
     ("EN", 26.2, 50.16, 0), ("GND", 36.4, 50.16, 0),
     ("EXPANSION", 31.3, 36.6, 0),
-    # bottom headers, vertical labels (2.54 pitch is too tight for horizontal)
-    ("5V", 58, 97.8, 90), ("GND", 60.54, 97.4, 90), ("SIG", 63.08, 97.6, 90),
-    ("IN", 68, 97.8, 90), ("GND", 70.54, 97.4, 90), ("VCC", 73.08, 97.6, 90),
+    # buzzer/relay headers, vertical labels (2.54 pitch too tight horizontal)
+    ("5V", 25, 86.8, 90), ("GND", 27.54, 86.4, 90), ("SIG", 30.08, 86.6, 90),
+    ("IN", 78, 86.8, 90), ("GND", 80.54, 86.4, 90), ("VCC", 83.08, 86.6, 90),
 ]
 
 
@@ -707,7 +713,7 @@ def build():
     # ground stubs: top row up, bottom row down, right headers across
     for x in (19.08, 38.08, 48.24, 63.08, 73.24):
         base(x, 15, x, a, "GND", W_STUB)
-    for x in (18.08, 36, 48, 60.54, 70.54, 83.08):
+    for x in (18.08, 36, 68, 85.08):
         base(x, 101, x, b, "GND", W_STUB)
     for y in (12, 48.70, 62.54):        # J4 pin1, J5 pin6, U4 pin2
         base(97, y, b, y, "GND", W_STUB)
