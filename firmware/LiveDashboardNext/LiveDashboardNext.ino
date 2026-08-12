@@ -159,7 +159,11 @@ const uint16_t TONE_SIREN_B_HZ = 4250;   // siren, high note = loudest
 // ⚠️ RC522 runs on 3.3V ONLY. 5V destroys it. Board J5 pin 8 is the 3V3
 //    rail on purpose, and J4 (TFT) pin 2 is 5V — do not swap the plugs.
 
-const uint32_t CARD_QUIET_MS = 3600000;   // 1 hour of quiet per tap
+const uint32_t CARD_QUIET_MS = 300000;    // 5 minutes of quiet per tap
+                                          // (Francis, 2026-08-13 -- was 1h:
+                                          // long enough to service the box,
+                                          // short enough that it re-arms
+                                          // before anyone forgets it)
 const uint8_t  CARDS_PER_BOX = 2;         // how many ship with each box
 const uint8_t  MAX_CARDS     = 4;         // room for replacements later
 
@@ -275,7 +279,7 @@ const uint32_t MOTION_SIREN_MS = 120000;   // 2 minutes, continuous
 //  Same rule as the alarm: leave 0 until it is actually wired, or
 //  the box will read nonsense from an absent sensor.
 // ================================================================
-#define MOTION_WIRED 0
+#define MOTION_WIRED 1        // MPU-6050 plugged into the rev-H board's U4
 
 #define PIN_SDA   21          // MPU-6050 SDA -> GPIO 21
 #define PIN_SCL   22          // MPU-6050 SCL -> GPIO 22
@@ -586,7 +590,11 @@ String routerHost() {
 // buried everything else on the monitor. So: say it properly ONCE, then
 // stay quiet about the SAME error until it changes, it recovers, or this
 // long has passed. Nothing is hidden, it just stops repeating itself.
-const uint32_t REST_REPEAT_MS = 60000;
+// 30 min (was 60s): on Francis's bench the router deliberately blocks the
+// box, so even one line a minute per fetcher was four lines a minute of
+// known news. The STATUS block still shows ROUTER !! with the fail count
+// every cycle, so the state is never invisible -- it just stops narrating.
+const uint32_t REST_REPEAT_MS = 1800000;
 
 uint32_t restFailStreak  = 0;
 uint32_t restLastLogAt   = 0;
