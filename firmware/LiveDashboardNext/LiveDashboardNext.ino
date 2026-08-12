@@ -174,7 +174,7 @@ const uint8_t  MAX_CARDS     = 4;         // room for replacements later
 //  own dividers. Nothing here is a field wire: both nets are
 //  on-board (review fix C1), so no GPIO can ever see 12V.
 // ================================================================
-#define POWER_WIRED 0         // 0 = ADCs never read
+#define POWER_WIRED 1         // rev-H board assembled: dividers live on GPIO34/35
 
 #define PIN_SENSE_MAINS 34    // R5/R6 100k/27k off +12V — input-only, ADC1
 #define PIN_SENSE_BATT  35    // R3/R4 100k/100k off VBAT — input-only, ADC1

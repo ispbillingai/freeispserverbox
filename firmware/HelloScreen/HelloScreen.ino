@@ -79,7 +79,7 @@
 //  0 = dashboard only, exactly like the version that already works.
 //  1 = alarm active (needs the GPIO32 jumper/reed wired, else the
 //      box thinks the door sensor was cut and boots into ALARM).
-#define ALARM_WIRED 1
+#define ALARM_WIRED 0
 
 // ---- alarm hardware (wire one at a time, reboot = self-test) ----
 #define PIN_LED_R 25  // red LED long leg -> 25, short -> 220R -> GND
@@ -148,7 +148,7 @@ const uint16_t TONE_SIREN_B_HZ = 4250;   // siren, high note = loudest
 //  RFID — tap a paired card, the box goes quiet for an hour.
 //  Ported from firmware/CardDisarm/CardDisarm.ino (proven on bench).
 // ================================================================
-#define RFID_WIRED 1          // 0 = reader never touched
+#define RFID_WIRED 0          // 0 = reader never touched
 
 #define PIN_RC522_SS  16      // J5 "SDA" (chip select) — board rev E
 #define PIN_RC522_RST 17      // J5 "RST"
@@ -174,7 +174,7 @@ const uint8_t  MAX_CARDS     = 4;         // room for replacements later
 //  own dividers. Nothing here is a field wire: both nets are
 //  on-board (review fix C1), so no GPIO can ever see 12V.
 // ================================================================
-#define POWER_WIRED 0         // 0 = ADCs never read
+#define POWER_WIRED 1         // rev-H board assembled: dividers live on GPIO34/35
 
 #define PIN_SENSE_MAINS 34    // R5/R6 100k/27k off +12V — input-only, ADC1
 #define PIN_SENSE_BATT  35    // R3/R4 100k/100k off VBAT — input-only, ADC1
@@ -764,18 +764,6 @@ void drawAlarmBanner() {
   tft.print(alarmReason == "MOTION" ? "BOX IS BEING MOVED" : "DOOR IS OPEN");
 }
 
-// The red banner used to LOCK the screen until the door closed, which
-// meant an open door hid every other page — you could not see the users,
-// the ports, or whether the router was even up while the box was crying.
-// Now the banner is just page number NUM_PAGES: while the alarm is raised
-// it joins the 5s rotation, so the red screen still comes round every
-// cycle but the dashboard keeps showing what is happening.
-void showAlarmBanner() {
-  page = NUM_PAGES;                    // jump the rotation to the banner NOW
-  lastPage = millis();                 // and give it its full 5 seconds
-  drawAlarmBanner();
-}
-
 // Ask for a heartbeat — do NOT send one from here.
 //
 // sendHeartbeat() blocks while it waits on the network. This used to be
@@ -819,7 +807,7 @@ void startSiren(const char* reason) {
   digitalWrite(PIN_LED_R, HIGH);
   digitalWrite(PIN_LED_G, LOW);
   if (!screenOn) setScreen(true);      // alarm overrides screen-off
-  showAlarmBanner();
+  drawAlarmBanner();
 }
 
 void onDoorChange(bool open) {
@@ -856,7 +844,7 @@ void onDoorChange(bool open) {
       buzzHz = TONE_CHIRP_HZ;
       buzz(true);
       if (!screenOn) setScreen(true);   // alarm overrides screen-off
-      showAlarmBanner();
+      drawAlarmBanner();
       logErr("ALARM", "door OPEN (count=" + String(openCount) + ") - " +
                       String(GRACE_MS / 1000) + "s grace, then siren");
     } else {                            // no grace configured = straight to it
@@ -1552,10 +1540,6 @@ void bar(int x, int y, int w, int h, float frac, uint16_t color) {
 
 // ---- pages ----
 void drawStatic() {
-  if (page >= NUM_PAGES) {             // the ALARM banner page
-    if (alarmRaised()) { drawAlarmBanner(); return; }
-    page = NUM_PAGES - 1;              // alarm over — land on SECURITY
-  }
   switch (page) {
     case 0:
       titleBar("HOME");
@@ -1596,17 +1580,6 @@ void drawStatic() {
 }
 
 void drawLive() {
-  if (page >= NUM_PAGES) {             // ALARM banner: live state + timer,
-    uint32_t s = (millis() - openedAt) / 1000;   // so it's not a frozen page
-    char b[24];
-    snprintf(b, sizeof(b), "%-6s %lu:%02lu", alarmStateName(),
-             (unsigned long)(s / 60), (unsigned long)(s % 60));
-    tft.setTextSize(1);
-    tft.setTextColor(ST77XX_WHITE, C_BAD);
-    tft.setCursor(28, 100);
-    tft.print(b);
-    return;
-  }
   heartbeat = !heartbeat;
   tft.fillCircle(tft.width() - 8, 8, 3, heartbeat ? C_GOOD : C_BAR);
 
@@ -1820,9 +1793,7 @@ void printStatus() {
   }
 
   statusRow("SCREEN", true, screenOn,
-            screenOn ? (page >= NUM_PAGES
-                          ? String("on, ALARM banner page")
-                          : "on, page " + String(page + 1) + "/" + String(NUM_PAGES))
+            screenOn ? "on, page " + String(page + 1) + "/" + String(NUM_PAGES)
                      : "off (screen=on to wake it)");
 
   statusRow("DOOR", ALARM_WIRED, !doorOpen,
@@ -1971,7 +1942,7 @@ void setup() {
   fetchUsers();
   fetchSystem();
   printStatus();                   // one full picture before the pages start
-  if (alarmRaised()) { showAlarmBanner(); }
+  if (alarmRaised()) { drawAlarmBanner(); }
   else               { drawStatic(); }
 }
 
@@ -2015,14 +1986,13 @@ void loop() {
   if (now - lastStatus >= STATUS_MS) { lastStatus = now; printStatus(); }
 
   if (!screenOn) return;           // data keeps flowing, drawing paused
+  // the red banner owns the screen only while the alarm is actually raised
+  // (door OR motion); if you disarmed it, the dashboard keeps running
+  if (alarmRaised()) return;
 
-  // While the alarm is raised the red banner joins the rotation as an
-  // extra page instead of freezing the screen — the dashboard keeps
-  // cycling so you can still see users/ports/router while it cries.
-  uint8_t numPages = NUM_PAGES + (alarmRaised() ? 1 : 0);
   if (now - lastPage >= PAGE_MS) {
     lastPage = now;
-    page = (page + 1) % numPages;
+    page = (page + 1) % NUM_PAGES;
     drawStatic();
   }
   if (now - lastLive >= LIVE_MS) {
