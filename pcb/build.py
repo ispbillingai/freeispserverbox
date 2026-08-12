@@ -474,7 +474,10 @@ PIN_SILK = [
     ("EXPANSION", 31.3, 36.6, 0),
     # buzzer/relay headers, vertical labels (2.54 pitch too tight horizontal)
     ("5V", 25, 86.8, 90), ("GND", 27.54, 86.4, 90), ("SIG", 30.08, 86.6, 90),
-    ("IN", 78, 86.8, 90), ("GND", 80.54, 86.4, 90), ("VCC", 83.08, 86.6, 90),
+    # Francis's relay (Tongling JQC-3FF-S-Z) prints S + - , not IN GND VCC.
+    # The silk exists to be held next to the module and matched word for word,
+    # so it follows the module in hand rather than the generic naming.
+    ("S", 78, 86.8, 90), ("-", 80.54, 86.4, 90), ("+", 83.08, 86.6, 90),
 ]
 
 
