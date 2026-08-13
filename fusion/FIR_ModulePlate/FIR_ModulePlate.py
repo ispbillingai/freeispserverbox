@@ -12,7 +12,7 @@
 #       - the PCB itself, on 4 posts matching its M3 holes (106mm square)
 #       - the WIRE-IN modules that never touch the PCB
 #         (LM2596 buck, TP4056 charger, 5V boost, horn relay)
-#       - the 18650 holder
+#       - the BARE lithium cell, in a printed half-round saddle
 #   The modules go UNDERNEATH the PCB, not beside it. They need only 26% of
 #   the area under a 115x115 board, so spreading them out sideways was pure
 #   waste - the first draft came out 150x180. Raising the PCB on 26mm posts
@@ -26,6 +26,7 @@
 #   correct MODULES before printing - especially the heights, which are set
 #   by the trimpots, not the board.
 
+import math
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
 # ---------------- TRAY ----------------
@@ -58,9 +59,9 @@ POST_D, POST_H, POST_PILOT = 7.0, 30.0, 2.5
 # Heights include the trimpot; set the buck to 5.4V and the boost to 5.0V
 # BEFORE the board goes on - reaching them after means pulling 4 screws.
 MODULES = [
-    # 18650 holder vernier'd 2026-08-13: 59 x 18. NOTE the cell itself is
-    # 65mm - it overhangs the open (wire) end of the cradle, which is fine.
-    ('18650 holder', 18.0, 59.0, 20.0, -35.0,   0.0, 'flat'),
+    # BARE CELL, no plastic holder (Francis, 2026-08-13): 59 long x 18 dia.
+    # So it gets a curved SADDLE, not a rectangular pocket - see cell_trough.
+    ('battery cell', 18.0, 59.0, 18.0, -35.0,   0.0, 'flat'),
     ('LM2596 buck',  43.0, 21.0, 14.0,  20.0,  38.0, 'screws'),
     ('5V boost',     17.0, 36.0, 14.0,   5.0, -25.0, 'corners'),
     ('TP4056',       26.0, 17.0,  6.0,  35.0, -25.0, 'corners'),
@@ -69,6 +70,21 @@ MODULES = [
     # stand under x 37..49 near y 11). Holes are on the 34 x 26 board.
     ('relay',        34.0, 26.0, 19.0,  20.0,  11.0, 'screws'),
 ]
+# ---------------- the bare cell ----------------
+# ⚠️ A standard 18650 is 65mm. Francis measured 59 - if that was a slip, the
+# saddle is 6mm short, so re-check before printing. Length is the only
+# dimension that matters here: both ends are OPEN, so a longer cell simply
+# overhangs, but the tie slots want to land on the cell, not past its ends.
+CELL_D, CELL_L = 18.0, 59.0
+CELL_CLR   = 0.6      # total diametral slack - it drops in, never squeezed
+TROUGH_W   = 2.5      # saddle wall either side of the channel
+# Slices approximating the half-round. 32 keeps the worst step at 0.67mm,
+# and that worst case is the bottom-most slice where the circle is nearly
+# vertical - the cell beds on the flanks either side of it, so it does not
+# matter. More slices barely help (48 only reaches 0.55mm) and cost features.
+TROUGH_SLI = 32
+CELL_TIE_Y = (18.0, -18.0)   # where the two hold-down ties cross the cell
+
 RAISE  = 5.0                              # wire tunnel under every module
 BOSS_D = 7.0                              # screw boss diameter
 PED_SZ = 7.0                              # corner pedestal square
@@ -107,7 +123,7 @@ SHOW_PARTS = False        # True = draw the PCB and modules to check the fit
 
 # shown in a popup EVERY run: if you see an older version, the deployed copy
 # under %APPDATA% is stale - re-copy the folder (the 28 Jun lesson)
-VERSION = 'rev C 2026-08-13: real relay/18650 dims, battery cradle, loose-fit brackets'
+VERSION = 'rev D 2026-08-13: bare-cell half-round saddle (no holder), open both ends'
 
 CM = 0.1
 
@@ -200,19 +216,34 @@ def corner_pedestals(comp, body, cx, cy, w, l):
                 PLATE_TOP, PED_SZ, PED_SZ, RAISE, JOIN, [body])
 
 
-def battery_cradle(comp, body, cx, cy, w, l):
-    """A snug three-sided pocket for the 18650 holder: two full-length walls
-    and a closed end, the wire end left OPEN so the leads run straight out.
-    0.3mm per side - it snuggles in but never needs force. The walls stop
-    it sliding; the two zip ties over the cell stop anything falling."""
-    t, hgt = 2.5, 12.0
-    iw, il = w / 2.0 + 0.3, l / 2.0 + 0.3
-    for sx in (-1, 1):                     # side walls, lapping the end wall
-        box(comp, cx + sx * (iw + t / 2.0), cy + t / 2.0,
-            PLATE_TOP, t, l + 0.6 + t, hgt, JOIN, [body])
-    # closed end on +Y; -Y stays open for the wires
-    box(comp, cx, cy + il + t / 2.0, PLATE_TOP,
-        w + 0.6 + 2 * t, t, hgt, JOIN, [body])
+def cell_trough(comp, body, cx, cy):
+    """A half-round SADDLE for the bare cell - no plastic holder involved.
+
+    A rectangular pocket would touch a round cell on two edges only; this
+    beds it along its whole length instead, which is what stops it drumming
+    against the plate every time the box is knocked.
+
+    The channel is exactly HALF the cell deep, so the cell drops straight in
+    with nothing to spread or force - the two zip ties across it are what
+    hold it down. BOTH ENDS ARE OPEN: on a bare cell the + button is at one
+    end and the can (negative) at the other, so leads must leave both ways.
+
+    The half-round is cut as stacked slices, each sized at its WIDER edge,
+    so the removed volume always contains the true cylinder and the cell can
+    never bind. The steps that leaves are irrelevant on a printed part.
+
+    Returns the outer width, so the tie slots know where to sit.
+    """
+    r = (CELL_D + CELL_CLR) / 2.0
+    outer_w = CELL_D + CELL_CLR + 2 * TROUGH_W
+    box(comp, cx, cy, PLATE_TOP, outer_w, CELL_L, r, JOIN, [body])
+    for i in range(TROUGH_SLI):
+        z_lo = i * r / TROUGH_SLI
+        z_hi = (i + 1) * r / TROUGH_SLI
+        half = math.sqrt(max(r * r - (r - z_hi) ** 2, 0.0))
+        box(comp, cx, cy, PLATE_TOP + z_lo, 2 * half, CELL_L + 2,
+            z_hi - z_lo + 0.01, CUT, [body])
+    return outer_w
 
 
 def screw_bosses(comp, body, cx, cy, holes):
@@ -261,12 +292,12 @@ def build_plate(comp):
             corner_brackets(comp, plate, cx, cy, w, l, wall,
                             z0=PLATE_TOP + RAISE)
             tie_slots(comp, plate, cx, cy, w)
-        else:                                   # 'flat' - the 18650 holder
-            battery_cradle(comp, plate, cx, cy, w, l)
-            # two ties OVER THE CELL: a jolt hard enough to raise the
-            # motion alarm must not be able to pop the cell off its clips
-            tie_slots(comp, plate, cx, cy, w, dy=16.0)
-            tie_slots(comp, plate, cx, cy, w, dy=-16.0)
+        else:                                   # 'flat' - the bare cell
+            ow = cell_trough(comp, plate, cx, cy)
+            # the ties ARE the retention here: a jolt hard enough to raise
+            # the motion alarm must not be able to lift the cell out
+            for ty in CELL_TIE_Y:
+                tie_slots(comp, plate, cx, cy, ow, dy=ty)
 
     # ---- tray -> box ----
     for (x, y) in TRAY_MOUNT:
