@@ -59,6 +59,7 @@
 #include <ArduinoOTA.h>
 #include <HTTPUpdate.h>      // pull OTA: the box fetches its own firmware
 #include <esp_task_wdt.h>    // a wedged loop() must reboot, not hang armed
+#include <esp_ota_ops.h>     // so a bad update can walk itself back
 #include "secrets.h"
 
 // secrets.h from an older build may not have these yet — keep compiling.
@@ -522,6 +523,23 @@ void motionLearn(const char* why);
 void startSiren(const char* reason);
 bool alarmRaised();
 
+// The three headline features are DEFINED further down, next to the
+// drawing helpers they use. Everything above them still needs to see
+// their state, so it is declared here and defined once, there.
+extern bool     otaPending;      // this boot is an unproven new build
+extern uint8_t  otaTries;
+extern bool     stolen;          // hot property mode
+extern String   signBrand, signPrice, signTill, signNote;   // shop sign
+extern bool     clockOk;         // NTP has landed
+void  setStolen(bool v, const char* why);
+void  otaConfirm();
+bool  signOn();
+bool  isNight();
+bool  highAlert();
+const char* alertWhy();
+String clockNow();
+void  nvsPutSign();
+
 // ================================================================
 //  NVS — the handful of things that must outlive a power cut.
 //  Every write is a flash write, so these are only ever called when
@@ -544,6 +562,13 @@ void nvsLoadState() {
   scrMask   = store.getUChar("smask", 0b11111);
   scrRotMs  = store.getULong("srot",  PAGE_MS);
   scrBright = store.getUChar("sbri",  100);
+  otaPending = store.getBool ("otapend", false);
+  otaTries   = store.getUChar("otatry",  0);
+  stolen     = store.getBool ("stolen",  false);
+  signBrand  = store.getString("sgbrand", "");
+  signPrice  = store.getString("sgprice", "");
+  signTill   = store.getString("sgtill",  "");
+  signNote   = store.getString("sgnote",  "");
   if (scrRotMs < 2000 || scrRotMs > 60000) scrRotMs = PAGE_MS;
   if ((scrMask & 0b11111) == 0) scrMask = 0b11111;   // never all-off
   store.end();
@@ -1038,6 +1063,13 @@ void onDoorChange(bool open) {
       horn(false);
       logInfo("ALARM", "door OPEN but a card bought quiet (" +
                        String(quietSecsLeft() / 60) + " min left) - staying quiet");
+    } else if (highAlert()) {
+      // NIGHT SENTRY / BLACKOUT SENTRY: no polite chirp at 3am, on
+      // battery, or with the link cut. Whoever is opening it now is not
+      // the shopkeeper doing a routine job.
+      startSiren("DOOR");
+      logErr("ALARM", String("door OPEN (") + alertWhy() +
+                      ") - NO GRACE, siren NOW");
     } else if (GRACE_MS > 0) {          // chirp first, siren after the grace
       alarmReason = "DOOR";
       alarmState = AS_GRACE;
@@ -1166,8 +1198,10 @@ void pollMotion() {
   // but one paired card is a tappable card, so one card = armed.
   if (inQuietPeriod() || unprotected()) return;
 
-  // 1) JOLT - a real impact. Instant, no grace.
-  if (fabsf(m - 1.0f) > MOTION_JOLT_G) {
+  // 1) JOLT - a real impact. Instant, no grace. At night / on battery /
+  // with the link cut, a lighter knock is enough to count.
+  float joltG = highAlert() ? MOTION_JOLT_G * 0.6f : MOTION_JOLT_G;
+  if (fabsf(m - 1.0f) > joltG) {
     motionAlarm = true;
     startSiren("MOTION");
     logErr("MOTION", "IMPACT " + String(m, 2) + "g - siren NOW (no grace)");
@@ -1355,6 +1389,9 @@ void pollCards() {
       if (!enrolling()) logOK("CARD", ">> BOX IS PAIRED AND ARMED. Ship it.");
     }
   } else if (knownCard(uid)) {
+    // a paired card is the only thing at the box that can end hot
+    // property mode — the thief does not have one, by definition
+    if (stolen) setStolen(false, "a paired card was tapped");
     startQuiet(("card " + uid).c_str());
     buzzHz = TONE_SIREN_B_HZ;
     buzz(true); delay(70); buzz(false); delay(60);
@@ -1567,6 +1604,8 @@ void doPullUpdate(const String& url) {
   }
   if (!url.startsWith("http")) { logErr("OTA", "bad update url: " + url); return; }
   logOK("OTA", "pull update from " + url);
+  // Arm the safety net BEFORE the flash: the new build boots on trial.
+  nvsPutOta(true, 0);
   buzz(false);
   horn(false);
   esp_task_wdt_delete(NULL);     // the download takes longer than 30s
@@ -1580,7 +1619,9 @@ void doPullUpdate(const String& url) {
     WiFiClient plain;
     r = httpUpdate.update(plain, url);
   }
-  // success never returns (it reboots). Getting here = failure.
+  // success never returns (it reboots). Getting here = failure, and the
+  // running build is untouched — so disarm the net we just armed.
+  nvsPutOta(false, 0);
   logErr("OTA", "update failed (" + String((int)r) + "): " +
                 httpUpdate.getLastErrorString());
   esp_task_wdt_add(NULL);        // back on watch
@@ -1610,6 +1651,25 @@ void runCommand(const String& cmdRaw) {
   else if (cmd.indexOf("cards=clear")  >= 0) {
     if (doorOpen) forgetCards();
     else logErr("CMD", "cards=clear refused - open the door first");
+  }
+  // ---- hot property ----
+  else if (cmd.indexOf("stolen=yes")   >= 0) setStolen(true,  "owner reported it stolen");
+  else if (cmd.indexOf("stolen=clear") >= 0) setStolen(false, "owner says it is recovered");
+  // ---- shop sign: strings come from cmdRaw, case and spaces intact ----
+  else if (cmd.indexOf("brand=") >= 0 || cmd.indexOf("price=") >= 0 ||
+           cmd.indexOf("till=")  >= 0 || cmd.indexOf("note=")  >= 0) {
+    String low = cmdRaw; low.toLowerCase();
+    int eq = low.indexOf('=');
+    String key = low.substring(0, eq);
+    String val = cmdRaw.substring(eq + 1); val.trim();
+    if (val == "-") val = "";                  // "-" clears a line
+    if      (key.endsWith("brand")) signBrand = val;
+    else if (key.endsWith("price")) signPrice = val;
+    else if (key.endsWith("till"))  signTill  = val;
+    else                            signNote  = val;
+    nvsPutSign();
+    logOK("SIGN", key + " set: " + (val.length() ? val : "(cleared)"));
+    if (screenOn) drawStatic();
   }
   // ---- screen remote control (the panel's "android" mode) ----
   else if (cmd.indexOf("page=auto")    >= 0) {
@@ -1696,7 +1756,7 @@ void sendHeartbeat(bool urgent) {
   JsonDocument d;
   d["key"]     = SRV_KEY;
   d["box"]     = BOX_ID;
-  d["fw"]      = "live-3.4";   // bump on every release: the panel watches
+  d["fw"]      = "live-4.0";   // bump on every release: the panel watches
                                // this field change to confirm a rollout
   d["door"]    = doorOpen ? "OPEN" : "CLOSED";
   d["opens"]   = openCount;
@@ -1734,6 +1794,14 @@ void sendHeartbeat(bool urgent) {
   d["sbri"]   = scrBright;
   d["scron"]  = screenOn;
   d["fast"]   = fastPolling();
+  // the three headline features, so the panel can show and drive them
+  d["stolen"] = stolen;
+  d["night"]  = isNight();
+  d["alert"]  = highAlert() ? alertWhy() : "";
+  d["clock"]  = clockOk ? clockNow() : "";
+  d["sign"]   = signOn();
+  d["brand"]  = signBrand;
+  d["otapend"]= otaPending;
   d["reset"]   = resetText;
   d["boots"]   = bootCount;
   d["crashes"] = crashCount;
@@ -1787,6 +1855,7 @@ void sendHeartbeat(bool urgent) {
                                    String(srvFailStreak) + " failure(s)");
   srvFailStreak = 0;
   srvNextTryAt  = 0;
+  otaConfirm();          // a beat the server ACCEPTED is the proof of life
   String resp = http.getString();
   http.end();
 
@@ -1976,8 +2045,344 @@ void bar(int x, int y, int w, int h, float frac, uint16_t color) {
   tft.fillRect(x + 1 + fill, y + 1, w - 2 - fill, h - 2, C_BG);
 }
 
+// ================================================================
+//  OTA SELF-VERIFY — the update that cannot brick the box.
+//
+//  ESP32 flash holds TWO app slots. A pull update writes the spare one
+//  and reboots into it, leaving the old build intact in the other. That
+//  is the safety net; this is the code that uses it.
+//
+//  Before flashing we set "pending" in NVS. The new build boots with
+//  pending still set and must EARN it: WiFi up, a heartbeat the server
+//  actually accepted, and the alarm hardware answering. Do that inside
+//  OTA_PROVE_MS and the flag clears and the build is confirmed.
+//
+//  Fail — no WiFi, server unreachable, or a crash loop that never gets
+//  that far — and the box flips the boot partition back to the build it
+//  came from and reboots into it. A firmware that cannot phone home is
+//  indistinguishable from a bricked box to the person who owns it, so
+//  it is treated as one, automatically, with nobody driving out.
+// ================================================================
+const uint32_t OTA_PROVE_MS  = 180000;   // 3 min to prove itself
+const uint8_t  OTA_MAX_TRIES = 3;        // then give the old build back
+
+bool     otaPending  = false;   // this boot is an unproven new build
+uint8_t  otaTries    = 0;
+uint32_t otaProveAt  = 0;       // deadline, set at boot
+bool     otaProved   = false;   // cleared the bar this boot
+
+void nvsPutOta(bool pending, uint8_t tries) {
+#if REMEMBER_STATE
+  store.begin("freeisp", false);
+  store.putBool ("otapend", pending);
+  store.putUChar("otatry",  tries);
+  store.end();
+#endif
+}
+
+// Called the moment a heartbeat is ACCEPTED by the server. That single
+// fact proves the radio, the TLS stack, the JSON, the credentials and
+// the server are all working in this build.
+void otaConfirm() {
+  if (!otaPending || otaProved) return;
+  otaProved  = true;
+  otaPending = false;
+  nvsPutOta(false, 0);
+  const esp_partition_t* run = esp_ota_get_running_partition();
+  esp_ota_mark_app_valid_cancel_rollback();      // no-op if not enabled
+  logOK("OTA", String("new build CONFIRMED on ") + (run ? run->label : "?") +
+               " - server accepted a heartbeat");
+}
+
+// Give the previous build back. esp_ota_set_boot_partition on the OTHER
+// app slot works whether or not bootloader rollback is compiled in.
+void otaRollback(const char* why) {
+  const esp_partition_t* run  = esp_ota_get_running_partition();
+  const esp_partition_t* prev = esp_ota_get_next_update_partition(NULL);
+  logErr("OTA", String("ROLLING BACK: ") + why);
+  nvsPutOta(false, 0);                    // the old build is not on trial
+  if (prev && prev != run && esp_ota_set_boot_partition(prev) == ESP_OK) {
+    logErr("OTA", String("booting the previous build in ") + prev->label);
+    delay(400);
+    ESP.restart();
+  }
+  // No other slot to go back to (first-ever flash): stay put rather than
+  // reboot-loop. The box still guards the door; only reporting is broken.
+  logErr("OTA", "no previous build to return to - staying on this one");
+}
+
+// ================================================================
+//  NIGHT SENTRY (Francis, 2026-08-13) + BLACKOUT SENTRY
+//
+//  One idea: the box's ALERT LEVEL. Nobody legitimately opens a kiosk
+//  box at 3am, and nobody legitimately cuts its power. So at night, or
+//  on battery, or with the WiFi gone, the box stops being polite:
+//     - no grace period, the siren is immediate
+//     - the motion threshold tightens
+//     - the 15W horn is engaged from the first second
+//  By day, on mains, it stays gentle: chirp first, so a fumbled card tap
+//  in a busy shop does not deafen paying customers.
+//
+//  Marketing calls it Night Sentry. The firmware calls it high alert.
+// ================================================================
+extern bool mainsOk;        // power state, defined with the rest below
+
+#define NIGHT_FROM 22       // 22:00 local
+#define NIGHT_TO    6       // 06:00 local
+const long  TZ_OFFSET_S = 3 * 3600;    // EAT, no DST
+bool  clockOk = false;      // NTP has actually given us a real time (declared above)
+
+void clockBegin() {
+  configTime(TZ_OFFSET_S, 0, "pool.ntp.org", "time.google.com");
+  // Deliberately NOT blocking: the alarm must not wait on the internet.
+  // pollClock() notices when the time arrives.
+}
+
+void pollClock() {
+  if (clockOk) return;
+  time_t t = time(nullptr);
+  if (t > 1700000000) {                 // anything past 2023 is real
+    clockOk = true;
+    struct tm lt; localtime_r(&t, &lt);
+    char b[32]; strftime(b, sizeof(b), "%Y-%m-%d %H:%M:%S", &lt);
+    logOK("TIME", String("clock set: ") + b + " (events are now datable)");
+  }
+}
+
+bool isNight() {
+  if (!clockOk) return false;           // never guess; unknown = day
+  struct tm lt; time_t t = time(nullptr); localtime_r(&t, &lt);
+  return (NIGHT_FROM > NIGHT_TO)        // window crosses midnight
+       ? (lt.tm_hour >= NIGHT_FROM || lt.tm_hour < NIGHT_TO)
+       : (lt.tm_hour >= NIGHT_FROM && lt.tm_hour < NIGHT_TO);
+}
+
+// the one question the alarm asks before deciding how hard to react
+bool highAlert() {
+  return isNight() || (POWER_WIRED && !mainsOk) ||
+         (WiFi.status() != WL_CONNECTED);
+}
+
+const char* alertWhy() {
+  if (isNight())                        return "NIGHT";
+  if (POWER_WIRED && !mainsOk)          return "ON BATTERY";
+  if (WiFi.status() != WL_CONNECTED)    return "NO LINK";
+  return "";
+}
+
+String clockNow() {
+  if (!clockOk) return "";
+  struct tm lt; time_t t = time(nullptr); localtime_r(&t, &lt);
+  char b[20]; strftime(b, sizeof(b), "%H:%M", &lt);
+  return String(b);
+}
+
+// ================================================================
+//  HOT PROPERTY — what a stolen box does at the thief's house.
+//
+//  The sticker on the lid is worth more than the siren: "steal this and
+//  it screams until you throw it away." This is the code that makes the
+//  sticker true.
+//
+//  The signature is deliberately narrow, because a blackout must NEVER
+//  look like a theft: motion alarm AND mains gone AND WiFi gone, all
+//  three, sustained for STOLEN_AFTER_MS. A power cut alone does not do
+//  it. A knock alone does not do it. Being carried away, unplugged, out
+//  of range of its own AP — that does.
+//
+//  Then the flag lives in NVS, so pulling the battery does not clear it:
+//  every boot from then on comes up shouting. Only a paired card, or the
+//  owner from the panel, ends it.
+// ================================================================
+const uint32_t STOLEN_AFTER_MS = 120000;   // 2 min of all three together
+const uint32_t STOLEN_BURST_MS = 8000;     // horn on, per burst
+const uint32_t STOLEN_GAP_MS   = 240000;   // 4 min between bursts
+const float    STOLEN_MIN_BATT = 3.35f;    // stop shouting before it dies
+
+bool     stolen        = false;
+uint32_t stolenSince   = 0;    // when the signature started
+uint32_t stolenNextAt  = 0;    // next burst
+bool     stolenHornOn  = false;
+
+void nvsPutStolen(bool v) {
+#if REMEMBER_STATE
+  store.begin("freeisp", false);
+  store.putBool("stolen", v);
+  store.end();
+#endif
+}
+
+void setStolen(bool v, const char* why) {
+  if (v == stolen) return;
+  stolen = v;
+  nvsPutStolen(v);
+  beatPending = true;
+  if (v) {
+    logErr("STOLEN", String("HOT PROPERTY MODE: ") + why +
+                     " - this box is now useless to whoever took it");
+    stolenNextAt = millis();          // shout immediately
+  } else {
+    horn(false);
+    stolenHornOn = false;
+    logOK("STOLEN", String("hot property mode cleared: ") + why);
+    if (screenOn) drawStatic();
+  }
+}
+
+// the full-screen "this thing is stolen" page, with the owner's number
+void drawStolen() {
+  int w = tft.width(), h = tft.height();
+  tft.fillScreen(C_BAD);
+  tft.fillRect(0, 0, w, 18, 0x8000);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE, 0x8000);
+  tft.setCursor(6, 5);
+  tft.print("REPORTED STOLEN");
+
+  tft.setTextSize(2);
+  tft.setTextColor(ST77XX_WHITE, C_BAD);
+  tft.setCursor((w - 7 * 12) / 2, 34);
+  tft.print("STOLEN");
+
+  tft.setTextSize(1);
+  tft.setCursor(6, 66);   tft.print("PROPERTY OF");
+  tft.setCursor(6, 80);   tft.print(OWNER_NAME);
+  tft.setCursor(6, 94);   tft.print(OWNER_PHONE);
+  tft.setCursor(6, 114);  tft.print("SERIAL");
+  tft.setCursor(6, 126);  tft.print(BOX_ID);
+  tft.fillRect(0, h - 20, w, 20, 0x8000);
+  tft.setCursor(6, h - 14);
+  tft.print("LOCKED - NO RESALE");
+}
+
+// battery-budgeted shouting: short bursts, long gaps, and it shuts up
+// before it flattens the cell so the box still reports when found.
+void pollStolen() {
+  if (!stolen) return;
+  uint32_t now = millis();
+
+  if (stolenHornOn && now - stolenNextAt >= STOLEN_BURST_MS) {
+    horn(false); buzz(false);
+    stolenHornOn = false;
+    stolenNextAt = now + STOLEN_GAP_MS;
+    return;
+  }
+  if (!stolenHornOn && (int32_t)(now - stolenNextAt) >= 0) {
+    if (POWER_WIRED && powerOk && !mainsOk && battV > 0 && battV < STOLEN_MIN_BATT) {
+      stolenNextAt = now + STOLEN_GAP_MS;      // too flat to shout again
+      return;
+    }
+    horn(true);
+    buzzHz = TONE_SIREN_A_HZ; buzz(true);
+    stolenHornOn = true;
+    stolenNextAt = now;
+    logErr("STOLEN", "burst - still in the wrong hands");
+  }
+}
+
+// watch for the signature. Called from loop().
+void watchForTheft() {
+  if (stolen || !alarmArmed) return;
+  bool sig = motionAlarm && POWER_WIRED && powerOk && !mainsOk &&
+             WiFi.status() != WL_CONNECTED;
+  if (!sig) { stolenSince = 0; return; }
+  if (!stolenSince) { stolenSince = millis(); return; }
+  if (millis() - stolenSince >= STOLEN_AFTER_MS)
+    setStolen(true, "moved, unplugged and off the air together");
+}
+
+// ================================================================
+//  SHOP SIGN — the screen's day job once the box hangs in a shop.
+//
+//  Five admin pages are for the owner. The people standing in front of
+//  the box are CUSTOMERS: they want the WiFi name, the price of a
+//  voucher, and the till to pay it into. All four strings are pushed
+//  from the panel and cached in NVS, so they survive a reboot and still
+//  show during an outage — which is exactly when someone is staring at
+//  the box wondering what to do.
+//
+//  A card tap flips back to the admin pages (a technician is standing
+//  there), and the sign returns when the quiet period ends.
+// ================================================================
+String signBrand = "";     // "JAMBONET WIFI"
+String signPrice = "";     // "1hr 10/-  Day 50/-"
+String signTill  = "";     // "PAYBILL 522533"
+String signNote  = "";     // "Fundi anakuja kesho 10am"
+
+void nvsPutSign() {
+#if REMEMBER_STATE
+  store.begin("freeisp", false);
+  store.putString("sgbrand", signBrand);
+  store.putString("sgprice", signPrice);
+  store.putString("sgtill",  signTill);
+  store.putString("sgnote",  signNote);
+  store.end();
+#endif
+}
+
+bool signOn() { return signBrand.length() > 0; }
+
+// Drawn full-frame, so it is the whole screen a customer sees.
+void drawSign() {
+  int w = tft.width(), h = tft.height();
+  tft.fillScreen(C_BG);
+  tft.fillRect(0, 0, w, 22, C_GOOD);          // the operator's own band
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_BLACK, C_GOOD);
+  tft.setCursor(5, 8);
+  tft.print(signBrand.substring(0, (w - 10) / 6));
+
+  int y = 32;
+  if (WiFi.status() == WL_CONNECTED) {
+    label(6, y, "WIFI");
+    tft.setTextSize(1);
+    tft.setTextColor(C_VALUE, C_BG);
+    tft.setCursor(6, y + 12);
+    tft.print(String(WIFI_SSID).substring(0, (w - 12) / 6));
+    y += 32;
+  }
+  if (signPrice.length()) {
+    label(6, y, "VOUCHERS");
+    tft.setTextColor(C_ACCENT, C_BG);
+    tft.setCursor(6, y + 12);
+    tft.print(signPrice.substring(0, (w - 12) / 6));
+    y += 32;
+  }
+  if (signTill.length()) {
+    cardBox(4, y, w - 8, 30);
+    labelCd(10, y + 5, "PAY HERE");
+    tft.setTextSize(1);
+    tft.setTextColor(C_GOOD, C_CARD);
+    tft.setCursor(10, y + 17);
+    tft.print(signTill.substring(0, (w - 20) / 6));
+    y += 38;
+  }
+  if (signNote.length()) {
+    tft.setTextSize(1);
+    tft.setTextColor(C_WARN, C_BG);
+    tft.setCursor(6, h - 26);
+    tft.print(signNote.substring(0, (w - 12) / 6));
+  }
+  // a quiet honest footer: the box is watching even while it advertises
+  tft.setTextColor(C_LABEL, C_BG);
+  tft.setCursor(6, h - 12);
+  tft.print(clockOk ? clockNow() : "");
+  tft.setCursor(w - 46, h - 12);
+  tft.print(alarmArmed ? "PROTECTED" : "");
+}
+
 // ---- pages ----
 void drawStatic() {
+  // A stolen box shows one thing and nothing else. It outranks every
+  // other page, including the alarm banner: this IS the alarm now.
+  if (stolen) { drawStolen(); return; }
+  // Shop Sign is the day job: it replaces the admin pages for customers,
+  // and steps aside while a technician is here (card quiet) or while
+  // anything is wrong — the owner's pages matter more than the advert.
+  if (signOn() && !alarmRaised() && !inQuietPeriod() && scrHold > NUM_PAGES) {
+    drawSign();
+    return;
+  }
   if (page >= NUM_PAGES) {             // the ALARM banner page
     if (alarmRaised()) { drawAlarmBanner(); return; }
     page = NUM_PAGES - 1;              // alarm over — land on SECURITY
@@ -2032,6 +2437,10 @@ void drawStatic() {
 }
 
 void drawLive() {
+  // the stolen page and the shop sign are whole-frame and static —
+  // nothing may paint admin values on top of them
+  if (stolen) return;
+  if (signOn() && !alarmRaised() && !inQuietPeriod() && scrHold > NUM_PAGES) return;
   if (page >= NUM_PAGES) {             // ALARM banner: live state + timer,
     uint32_t s = (millis() - openedAt) / 1000;   // so it's not a frozen page
     char b[24];
@@ -2363,6 +2772,22 @@ void setup() {
   bootCount++;
   nvsPut("boots", bootCount);
   applyBright();                     // the remembered brightness, now
+
+  // Is this boot an unproven new build? Decide the deadline now; the
+  // verdict is passed in loop() once it has had its chance.
+  if (otaPending) {
+    otaTries++;
+    if (otaTries > OTA_MAX_TRIES) {
+      Serial.printf("[BOOT] new build failed to prove itself %u times\n", otaTries - 1);
+      otaRollback("crash-looped or never reached the server");
+    }
+    nvsPutOta(true, otaTries);
+    otaProveAt = millis() + OTA_PROVE_MS;
+    Serial.printf("[BOOT] NEW BUILD ON TRIAL (attempt %u/%u) - it has %lus "
+                  "to get a heartbeat accepted or the old one comes back\n",
+                  otaTries, OTA_MAX_TRIES, (unsigned long)(OTA_PROVE_MS / 1000));
+  }
+
   bool crashed = (esp_reset_reason() == ESP_RST_PANIC   ||
                   esp_reset_reason() == ESP_RST_TASK_WDT ||
                   esp_reset_reason() == ESP_RST_INT_WDT  ||
@@ -2465,6 +2890,7 @@ void setup() {
   powerBegin();
 
   connectWiFi();
+  clockBegin();      // NTP, non-blocking: night hours + datable events
   otaBegin();
 
   // first data before the first page shows
@@ -2506,6 +2932,9 @@ void loop() {
   pollCards();       // a card tap must land even while the siren is going
   pollQuiet();       // ...and the hour it buys has to be able to run out
   pollPower();       // mains/battery, cheap: two ADC reads every 2s
+  pollClock();       // notices when NTP finally lands (Night Sentry)
+  watchForTheft();   // the moved + unplugged + off-air signature
+  pollStolen();      // and the bursts, if it has already been taken
 
   static uint32_t lastWifiTry = 0;
   if (WiFi.status() != WL_CONNECTED && now - lastWifiTry > 15000) {
@@ -2532,6 +2961,12 @@ void loop() {
   uint32_t heartGap = fastPolling() ? 2000 : HEART_MS;
   if (beatPending) { beatPending = false; lastBeat = now; sendHeartbeat(true); }
   else if (now - lastBeat >= heartGap) { lastBeat = now; sendHeartbeat(false); }
+
+  // The trial's verdict. Signed compare so a rollover cannot hang it.
+  if (otaPending && !otaProved && otaProveAt &&
+      (int32_t)(now - otaProveAt) >= 0) {
+    otaRollback("could not get a heartbeat accepted within the trial window");
+  }
 
   if (now - lastStatus >= STATUS_MS) { lastStatus = now; printStatus(); }
 
