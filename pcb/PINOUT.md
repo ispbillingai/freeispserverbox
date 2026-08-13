@@ -90,14 +90,17 @@ vernier on the new paper print before ordering.
 ## Power chain (top of board, left to right)
 
 ```
- mains 12V ──[INLINE FUSE]── J1 ── D3 ──+12V──┬── U1 BUCK ──5.4V──┬── D1 ─┐
-                                              │                   │       │
-                                              └── R5/R6 → GPIO34  │       ├── 5V_SYS
-                                                     U2 CHARGER ──┘       │   ESP32 VIN,
-                                                         │                │   TFT, buzzer,
-                                                      battery ── J13 BOOST ── D2 ─┘  relay,
+ mains 12V ──[INLINE FUSE]── J1 ── D3 ──+12V──┬── U1 BUCK ──5.4V──┬─/──D1 ─┐
+                                              │                   │  ^    │
+                                              └── R5/R6 → GPIO34  │  |    ├── 5V_SYS
+                                                     U2 CHARGER ──┘  |    │   ESP32 VIN,
+                                                         │      MASTER    │   TFT, buzzer,
+                                                      battery ── J13 BOOST ─/─ D2 ─┘  relay,
                                                                           HORN (J11), C1 470µ
 ```
+
+The two `/` marks are the master switch — one DPST breaking both OUT+ leads.
+See **MASTER SWITCH** below; one pole alone cannot turn this box off.
 
 | Ref | Terminal | Pin order (left → right / top → bottom) | Wire to |
 |---|---|---|---|
@@ -119,6 +122,43 @@ would charge itself through its own boost.
 **Mains sensing is internal now.** There is NO terminal for it and none is
 needed: GPIO34 watches the 12 V rail through the on-board R5/R6 divider.
 Nothing above 3.3 V can ever be wired to a GPIO by mistake.
+
+---
+
+## MASTER SWITCH — a DPST in the two OUT+ leads
+
+The box has **two** power sources that merge at the diode-OR, so one pole
+cannot turn it off. Breaking the 12 V only looks like a mains cut and the
+battery takes over — which is the whole design working correctly, and is
+exactly NOT what a master switch should do.
+
+So the switch is **double-pole**, and it breaks both feeds into 5V_SYS:
+
+```
+pole 1:   buck module OUT+  ──/ ──►  U1  "OUT+"     (kills the mains path)
+pole 2:   boost module OUT+ ──/ ──►  J13 "OUT+"     (kills the battery path)
+```
+
+Both are wires you are already running into screw terminals, so this needs
+**no board change**. Downstream of the two diodes nothing is left alive:
+ESP32, TFT, buzzer, relay, horn and the charger's own input all go dark.
+The cell stays wired to the TP4056's B+/B− and simply sits idle.
+
+Rate it for the whole load including the horn — **≥3 A**, so an ordinary
+6 A rocker is plenty. The battery is NOT disconnected by this switch, so it
+neither charges nor discharges while off; a box left switched off for months
+self-discharges normally and should be checked before it ships.
+
+⚠️ **MOUNT IT INSIDE, behind the alarmed door.** A master switch reachable
+from outside hands a thief the off button for the alarm, defeating the
+battery backup, the horn and the reporting in one flick. Behind the door it
+is safe: opening the door raises the alarm *before* the switch can be
+reached, and that alarm is already on the air by then.
+
+For bench work there is also a **zero-wiring alternative**: a switch across
+**J14 pins 9 (EN) and 10 (GND)** holds the ESP32 in reset — the brain stops
+but the peripherals stay powered. Useful for reflashing and testing, not a
+substitute for the DPST.
 
 ---
 
