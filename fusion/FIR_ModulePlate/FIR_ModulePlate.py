@@ -167,10 +167,27 @@ TIE_AXIS = {'TP4056': 'y'}
 
 SHOW_PARTS = False        # True = draw the PCB and modules to check the fit
 
+# ENGRAVED LABELS. Two modules' bosses look identical in a render - you
+# cannot tell the buck's four from the relay's four by eye, and getting it
+# wrong is discovered at assembly with a soldering iron in your hand. So the
+# plate says which is which, and carries the two set-points as well, exactly
+# like the PCB silkscreen does. Each label sits INSIDE its own module's
+# footprint, so it is readable right up until the module covers it.
+ENGRAVE_D = 0.6           # depth cut into the plate top
+LABELS = [
+    ('BUCK',   20.0,  41.5, 5.0),
+    ('5.4V',   20.0,  34.5, 5.0),
+    ('RELAY',  20.0,  11.0, 5.0),
+    ('BOOST',   5.0, -21.0, 3.5),
+    ('5.0V',    5.0, -30.0, 3.5),
+    ('TP4056', 40.0, -25.0, 3.5),
+    ('CELL',  -35.0,  36.0, 5.0),
+]
+
 # shown in a popup EVERY run: if you see an older version, the deployed copy
 # under %APPDATA% is stale - re-copy the folder (the 28 Jun lesson)
-VERSION = ('rev G 2026-08-13: audit fixes - brackets rooted on the plate, '
-           'post pilots opened, finger relief lowered, tie slots separated')
+VERSION = ('rev H 2026-08-14: module names + set-points engraved into the '
+           'plate, so the buck and the relay can never be confused')
 
 CM = 0.1
 
@@ -557,6 +574,32 @@ def validate():
     return bad, info
 
 
+def engrave(comp, body, txt, cx, cy, size):
+    """Cut a name into the plate top. Text features fail on some Fusion
+    builds, so every label is independently guarded - a missing label must
+    never cost you the whole tray."""
+    try:
+        sk = comp.sketches.add(comp.xYConstructionPlane)
+        ti = sk.sketchTexts.createInput2(txt, mm(size))
+        half_w = size * 0.75 * len(txt) / 2.0
+        ti.setAsMultiLine(
+            adsk.core.Point3D.create(mm(cx - half_w), mm(cy - size), 0),
+            adsk.core.Point3D.create(mm(cx + half_w), mm(cy + size), 0),
+            adsk.core.HorizontalAlignments.CenterHorizontalAlignment,
+            adsk.core.VerticalAlignments.MiddleVerticalAlignment, 0)
+        t = sk.sketchTexts.add(ti)
+        f = comp.features.extrudeFeatures
+        ei = f.createInput(t, CUT)
+        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
+            adsk.core.ValueInput.createByReal(mm(PLATE_TOP)))
+        ei.setDistanceExtent(
+            False, adsk.core.ValueInput.createByReal(mm(-ENGRAVE_D)))
+        ei.participantBodies = [body]
+        f.add(ei)
+    except Exception as e:
+        SKIPPED.append('label "%s": %s' % (txt, e))
+
+
 def build_plate(comp):
     plate = box(comp, 0, 0, 0, PLATE_W, PLATE_H, PLATE_TH, NEW).bodies.item(0)
     plate.name = 'FIR Electronics Tray'
@@ -605,6 +648,10 @@ def build_plate(comp):
     for (x, y) in HARNESS_TIE:
         box(comp, x, y, -1, HARNESS_SLOT[0], HARNESS_SLOT[1],
             PLATE_TH + 2, CUT, [plate])
+
+    # ---- names engraved last, so they cut into finished plate ----
+    for (txt, lx, ly, sz) in LABELS:
+        engrave(comp, plate, txt, lx, ly, sz)
 
     return plate
 
