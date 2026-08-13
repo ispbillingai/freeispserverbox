@@ -357,6 +357,7 @@ Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 //  that is coming inherits all of this.)
 // ================================================================
 extern bool screenOn;              // defined with the rest of the state below
+extern bool beepOn;                // the buzzer is mid-tone (see applyBright)
 extern Preferences store;          // the NVS handle, defined below
 
 uint8_t  scrHold   = 255;          // 255 = auto-rotate, else page to hold
@@ -374,6 +375,11 @@ void blkWrite(uint8_t duty) {
 }
 
 void applyBright() {
+  // Deliberately does NOT run while the buzzer is sounding: touching the
+  // LEDC peripheral in the middle of a tone is the one thing that could
+  // put the siren and the screen in the same place at the same time.
+  // The next call after the noise stops sets it right.
+  if (beepOn) return;
   // screen off = backlight hard off, whatever the setting says
   blkWrite(screenOn ? map(scrBright, 0, 100, 0, 255) : 0);
 }
@@ -2788,8 +2794,15 @@ void setup() {
 
   // Backlight is PWM from day one: brightness is a remote setting.
   // Core 3.x dropped the channel-based LEDC calls for pin-based ones.
+  //
+  // ledcAttachChannel, not ledcAttach: tone() (which drives the buzzer)
+  // ALSO allocates LEDC channels, and it re-allocates on every call --
+  // a motion siren calls it every 120 ms. Letting the two pick channels
+  // dynamically means they can land on the same one. Pinning the
+  // backlight to channel 7 keeps the siren and the screen out of each
+  // other's way.
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcAttach(TFT_BLK, 5000, 8);
+  ledcAttachChannel(TFT_BLK, 5000, 8, BLK_LEDC_CH);
 #else
   ledcSetup(BLK_LEDC_CH, 5000, 8);
   ledcAttachPin(TFT_BLK, BLK_LEDC_CH);
