@@ -57,6 +57,8 @@
 #include <Preferences.h>
 #include <MFRC522.h>
 #include <ArduinoOTA.h>
+#include <HTTPUpdate.h>      // pull OTA: the box fetches its own firmware
+#include <esp_task_wdt.h>    // a wedged loop() must reboot, not hang armed
 #include "secrets.h"
 
 // secrets.h from an older build may not have these yet — keep compiling.
@@ -126,7 +128,7 @@ const uint16_t TONE_SIREN_B_HZ = 4250;   // siren, high note = loudest
 //  HORN — the LOUD one, on the relay (board K1 / J11, GPIO13).
 //  The little buzzer does the RHYTHM; the horn does the VOLUME.
 // ================================================================
-#define HORN_WIRED 1          // 0 = relay pin never touched
+#define HORN_WIRED 0          // 0 = relay pin never touched
 
 #define PIN_RELAY 13          // K1 "IN" via R7 1k — board rev E
 
@@ -374,6 +376,10 @@ uint32_t   beepAt        = 0;
 bool       beepOn        = false;
 uint32_t   openCount     = 0;
 uint32_t   disarmCount   = 0;   // times someone silenced/disarmed it, ever
+uint8_t    bootRaisedWhy = 0;   // NVS: alarm raised at power-off? 1=DOOR 2=MOTION
+uint32_t   bootCount     = 0;   // NVS: total boots — a crash-looping box shows here
+uint32_t   crashCount    = 0;   // NVS: boots caused by brownout/panic/watchdog
+const char* resetText    = "?"; // why THIS boot happened, for the heartbeat
 uint16_t   buzzHz        = TONE_SIREN_A_HZ;  // pitch the next buzz() will use
 bool       sirenAlt      = false;            // flips the two siren notes
 String     alarmReason   = "";               // "DOOR" / "MOTION" - why it rang
@@ -469,6 +475,12 @@ void nvsLoadState() {
   alarmArmed  = store.getBool ("armed",   ALARM_ARMED_AT_BOOT);
   openCount   = store.getULong("opens",   0);
   disarmCount = store.getULong("disarms", 0);
+  // was an alarm RAISED when power died? 0 = no, 1 = DOOR, 2 = MOTION.
+  // Without this a thief who trips the siren and yanks power (or pokes
+  // the exposed EN button) reboots into a fresh polite grace period.
+  bootRaisedWhy = store.getUChar("raised", 0);
+  bootCount   = store.getULong("boots",   0);
+  crashCount  = store.getULong("crashes", 0);
   store.end();
   logOK("NVS", String("remembered: ") + (alarmArmed ? "ARMED" : "DISARMED") +
                ", " + String(openCount) + " opens, " +
@@ -490,6 +502,16 @@ void nvsPutArmed(bool v) {
 #if REMEMBER_STATE
   store.begin("freeisp", false);
   store.putBool("armed", v);
+  store.end();
+#endif
+}
+
+// 0 = all clear, 1 = DOOR raised, 2 = MOTION raised. NVS skips writes of
+// an unchanged value, so re-fires during one long alarm cost no flash wear.
+void nvsPutRaised(uint8_t why) {
+#if REMEMBER_STATE
+  store.begin("freeisp", false);
+  store.putUChar("raised", why);
   store.end();
 #endif
 }
@@ -519,6 +541,20 @@ bool enrolling() {
   return cardCount < CARDS_PER_BOX;
 #else
   return false;                          // no reader = nothing to enrol
+#endif
+}
+
+// The alarm-suppression question is NOT "is it still enrolling" — it is
+// "does the person at the box have anything to tap". With even ONE card
+// paired they do, so the box must arm. Before this split, a rushed install
+// that paired 1 of 2 cards left a box that NEVER alarmed (door and motion
+// both suppressed) while the screen showed ARMED and the heartbeat said
+// armed:true — the "looks armed but is not" state, forever, 200km away.
+bool unprotected() {
+#if RFID_WIRED
+  return cardCount == 0;
+#else
+  return false;                          // no reader = card can't be the gate
 #endif
 }
 
@@ -561,8 +597,24 @@ void pollQuiet() {
     logErr("QUIET", "quiet period OVER and the door is still open - siren");
     startSiren("DOOR");
   } else {
-    logOK("QUIET", "quiet period over - box armed again");
-    if (!alarmRaised()) drawStatic();
+    // Door shut and the quiet ran out: the card has done its job, so
+    // FINISH the clear. Before this, a card-quieted MOTION alarm stayed
+    // AS_SILENT forever (red LED, ALARM banner, heartbeat stuck) because
+    // only a door-close or a remote clearAlarm() ever reset the state —
+    // and a motion alarm's door was never open in the first place.
+    if (alarmState == AS_SILENT) {
+      alarmState  = AS_SECURE;
+      alarmReason = "";
+      motionAlarm = false;
+      nvsPutRaised(0);
+      digitalWrite(PIN_LED_R, LOW);
+      digitalWrite(PIN_LED_G, HIGH);
+      logOK("QUIET", "quiet period over, door shut - alarm cleared, box secure");
+      drawStatic();
+    } else {
+      logOK("QUIET", "quiet period over - box armed again");
+      if (!alarmRaised()) drawStatic();
+    }
   }
   beatPending = true;
 }
@@ -764,6 +816,15 @@ void fetchCommand() {
   JsonDocument doc;
   if (!restGet("CMD", "/rest/system/note", doc)) return;
   String note = (const char*)(doc["note"] | "");
+  // Execute a note ONCE, on change — not every 3s forever. Before this,
+  // an owner who set note="siren=off" after a false alarm and never
+  // cleared it had silently killed every future alarm: each new siren
+  // was silenced within 3s of raising (and bumped disarmCount, poisoning
+  // the counter meant to reveal exactly that). A note that is deleted
+  // and re-set re-arms once, which is also the intuitive behaviour.
+  static String lastNote = "\x01unset";   // never equals a real note
+  if (note == lastNote) return;
+  lastNote = note;
   // only treat the note as a command if it looks like one ("thing=value"),
   // so a normal note left on the router doesn't spam the log
   if (note.indexOf('=') >= 0) runCommand(note);   // same list as the server
@@ -852,6 +913,7 @@ uint32_t sirenMaxMs() {
 void startSiren(const char* reason) {
   alarmReason = reason;
   alarmState  = AS_SIREN;
+  nvsPutRaised(alarmReason == "MOTION" ? 2 : 1);  // survive a power yank
   openedAt    = millis();
   beepAt      = millis();
   nextSirenNote();
@@ -880,7 +942,7 @@ void onDoorChange(bool open) {
       buzz(false);
       horn(false);
       logInfo("ALARM", "door OPEN but alarm is DISARMED - staying quiet");
-    } else if (enrolling()) {           // no cards paired = nothing to stop it
+    } else if (unprotected()) {         // ZERO cards paired = nothing to stop it
       alarmState = AS_SILENT;
       buzz(false);
       horn(false);
@@ -894,6 +956,7 @@ void onDoorChange(bool open) {
     } else if (GRACE_MS > 0) {          // chirp first, siren after the grace
       alarmReason = "DOOR";
       alarmState = AS_GRACE;
+      nvsPutRaised(1);                  // a reboot resumes, not restarts
       buzzHz = TONE_CHIRP_HZ;
       buzz(true);
       if (!screenOn) setScreen(true);   // alarm overrides screen-off
@@ -908,6 +971,7 @@ void onDoorChange(bool open) {
     alarmState  = AS_SECURE;
     alarmReason = "";
     motionAlarm = false;
+    nvsPutRaised(0);
     buzz(false);
     horn(false);
     quietUntil = 0;              // lid shut ends a card's quiet early
@@ -999,7 +1063,9 @@ void pollMotion() {
   lastG = m;
   if (fabsf(m - 1.0f) > 0.08f) lastMotionAt = now;   // anything but resting
 
-  if (now < motionReadyAt) return;        // still settling after boot/learn
+  // signed diff like lines 529/622 — a raw "now < deadline" dies at the
+  // 49.7-day millis() rollover and silently disables jolt+tilt for weeks
+  if ((int32_t)(now - motionReadyAt) < 0) return;  // still settling
 
   // angle between where it hangs now and the learned baseline
   float dot = (m > 0.1f) ? (x * baseX + y * baseY + z * baseZ) / m : 1.0f;
@@ -1011,8 +1077,9 @@ void pollMotion() {
   if (alarmState == AS_SIREN) return;     // already screaming
   // A card tap quiets MOTION as well as the door. Someone who tapped is
   // about to handle the box, and a siren the moment they lean on it would
-  // make the card look broken. Same for a box that has no cards yet.
-  if (inQuietPeriod() || enrolling()) return;
+  // make the card look broken. Same for a box that has ZERO cards yet —
+  // but one paired card is a tappable card, so one card = armed.
+  if (inQuietPeriod() || unprotected()) return;
 
   // 1) JOLT - a real impact. Instant, no grace.
   if (fabsf(m - 1.0f) > MOTION_JOLT_G) {
@@ -1088,6 +1155,7 @@ void forgetCards() {
   cardCount = 0;
   logOK("CARD", "all cards forgotten - box is back in ENROL mode, tap " +
                 String(CARDS_PER_BOX) + " card(s) to pair it");
+  beatPending = true;   // the fleet must SEE cards drop to 0, immediately
 }
 
 bool knownCard(const String& uid) {
@@ -1181,6 +1249,12 @@ void pollCards() {
   if (enrolling()) {
     if (knownCard(uid)) {
       logInfo("CARD", uid + " is already paired to this box");
+    } else if (!doorOpen) {
+      // Pairing needs PHYSICAL authority: the lid off. Otherwise whoever
+      // taps first at first boot — through the closed lid, reader by the
+      // wall — owns one of the box's 2 card slots.
+      logErr("CARD", uid + " wants to pair - OPEN THE DOOR first (lid off = "
+                     "you have the key, a passer-by does not)");
     } else {
       saveCard(uid);
       logOK("CARD", "PAIRED card " + String(cardCount) + " of " +
@@ -1298,6 +1372,10 @@ void pollBuzzer() {
         horn(false);
         logErr("ALARM", "siren timed out after " + String(maxMs / 1000) +
                         "s - still raised, screen + server stay red");
+        // A box that was genuinely knocked to a new angle would otherwise
+        // re-fire off the stale baseline every ~2 minutes forever. The
+        // raised state is already persisted — the record is safe.
+        if (motionAlarm && mpuOk) motionLearn("motion siren timed out");
         break;
       }
       if (now - beepAt >= BEEP_MS) {
@@ -1338,10 +1416,11 @@ void setArmed(bool on) {
   if (!on) {
     alarmState = doorOpen ? AS_SILENT : AS_SECURE;
     if (alarmState == AS_SECURE) { alarmReason = ""; motionAlarm = false; }
+    nvsPutRaised(0);                      // a disarmed box resumes nothing
     buzz(false);
     horn(false);
     drawStatic();
-  } else if (doorOpen && !inQuietPeriod() && !enrolling()) {
+  } else if (doorOpen && !inQuietPeriod() && !unprotected()) {
     startSiren("DOOR");                   // arming onto an open door = alarm now
   }
   alarmBeat();
@@ -1367,6 +1446,7 @@ void clearAlarm() {
   alarmState  = AS_SECURE;
   alarmReason = "";
   motionAlarm = false;
+  nvsPutRaised(0);
   buzz(false);
   horn(false);
   digitalWrite(PIN_LED_R, LOW);
@@ -1377,9 +1457,41 @@ void clearAlarm() {
   alarmBeat();
 }
 
+// PULL OTA — the box fetches its own firmware from a URL the server sends.
+// ArduinoOTA is push-from-the-IDE on the box's own LAN: useless for a box
+// behind a customer's MikroTik 200km away. This rides the heartbeat command
+// channel instead: the panel replies {"cmd":"update=https://.../fw.bin"},
+// the box downloads, flashes the other OTA slot, reboots, and the next
+// heartbeat's fw field proves the rollout landed.
+void doPullUpdate(const String& url) {
+  if (alarmRaised()) {           // never take the alarm down mid-incident
+    logErr("OTA", "update refused - alarm is raised, try again when secure");
+    return;
+  }
+  if (!url.startsWith("http")) { logErr("OTA", "bad update url: " + url); return; }
+  logOK("OTA", "pull update from " + url);
+  buzz(false);
+  horn(false);
+  esp_task_wdt_delete(NULL);     // the download takes longer than 30s
+  httpUpdate.rebootOnUpdate(true);
+  t_httpUpdate_return r;
+  if (url.startsWith("https")) {
+    WiFiClientSecure tls;
+    tls.setInsecure();           // matches the heartbeat's ship-time posture
+    r = httpUpdate.update(tls, url);
+  } else {
+    WiFiClient plain;
+    r = httpUpdate.update(plain, url);
+  }
+  // success never returns (it reboots). Getting here = failure.
+  logErr("OTA", "update failed (" + String((int)r) + "): " +
+                httpUpdate.getLastErrorString());
+  esp_task_wdt_add(NULL);        // back on watch
+}
+
 // run a command no matter where it came from (router note or server)
 //   screen=on|off   alarm=arm|disarm|clear   siren=off|test
-//   motion=learn    quiet=off    cards=clear
+//   motion=learn    quiet=off    cards=clear   update=<url>
 void runCommand(const String& cmdRaw) {
   String cmd = cmdRaw; cmd.toLowerCase(); cmd.trim();
   if (cmd.length() == 0) return;
@@ -1394,8 +1506,22 @@ void runCommand(const String& cmdRaw) {
     if (quietUntil) { quietUntil = 1; logOK("CMD", "quiet period cancelled"); }
     else            logInfo("CMD", "quiet=off but the box was not quiet");
   }
-  // a customer who lost BOTH cards: forget them so replacements can pair
-  else if (cmd.indexOf("cards=clear")  >= 0) forgetCards();
+  // a customer who lost BOTH cards: forget them so replacements can pair.
+  // Door-gated like clearAlarm(): a remote command (router note travels
+  // over HTTP with router creds — default MikroTik passwords are endemic)
+  // must not be able to turn an armed box into a silent shell from afar.
+  else if (cmd.indexOf("cards=clear")  >= 0) {
+    if (doorOpen) forgetCards();
+    else logErr("CMD", "cards=clear refused - open the door first");
+  }
+  else if (cmd.indexOf("update=")      >= 0) {
+    // the URL must come from cmdRaw — cmd was lowercased and URLs care.
+    // (cmd is also trimmed, so its indexes don't map back to cmdRaw.)
+    String low = cmdRaw; low.toLowerCase();
+    String url = cmdRaw.substring(low.indexOf("update=") + 7);
+    url.trim();
+    doPullUpdate(url);
+  }
   else if (cmd.indexOf("siren=off")    >= 0) silenceSiren();
   else if (cmd.indexOf("siren=test")   >= 0) {
     logOK("CMD", "siren test - two notes");
@@ -1408,14 +1534,26 @@ void runCommand(const String& cmdRaw) {
 
 // HEARTBEAT: report to Francis's server + collect any queued command.
 // Works with http and https (setInsecure for now, tighten at ship).
-void sendHeartbeat() {
+// The same fail-streak backoff restGet() has, for the server. Without it,
+// the moment SRV_URL points at a server that is down (WiFi up, WAN cut —
+// the normal failure at a hotspot site) every 20s heartbeat on a SECURE
+// box would block the loop for seconds: eaten card taps and missed jolts
+// through the heartbeat door this time. Urgent beats (alarm events, set
+// via beatPending) bypass the gate once — tamper still reports instantly.
+uint32_t srvFailStreak = 0;
+uint32_t srvNextTryAt  = 0;
+
+void sendHeartbeat(bool urgent) {
   if (strlen(SRV_URL) == 0) return;              // feature off until URL set
   if (WiFi.status() != WL_CONNECTED) return;
+  if (!urgent && srvNextTryAt &&
+      (int32_t)(millis() - srvNextTryAt) < 0) return;   // backing off
 
   JsonDocument d;
   d["key"]     = SRV_KEY;
   d["box"]     = BOX_ID;
-  d["fw"]      = "live-3.1";
+  d["fw"]      = "live-3.2";   // bump on every release: the panel watches
+                               // this field change to confirm a rollout
   d["door"]    = doorOpen ? "OPEN" : "CLOSED";
   d["opens"]   = openCount;
   d["armed"]   = alarmArmed;
@@ -1440,6 +1578,15 @@ void sendHeartbeat() {
   d["mains"]   = POWER_WIRED ? (mainsOk ? 1 : 0) : -1;
   d["rail"]    = powerOk ? railV : -1;
   d["batt"]    = powerOk ? battV : -1;
+  // fleet telemetry: the fields that make a sick box visible from 200km.
+  // Same -1 convention as mains: "not fitted" is different from "dead".
+  d["reset"]   = resetText;
+  d["boots"]   = bootCount;
+  d["crashes"] = crashCount;
+  d["heap"]    = ESP.getFreeHeap();
+  d["enrol"]   = enrolling();              // half-paired boxes must show
+  d["mpu"]     = MOTION_WIRED ? (mpuOk ? 1 : 0) : -1;
+  d["rc522"]   = RFID_WIRED ? (rc522Ok ? 1 : 0) : -1;
   String body;
   serializeJson(d, body);
 
@@ -1448,19 +1595,32 @@ void sendHeartbeat() {
   bool isHttps = String(SRV_URL).startsWith("https");
   if (isHttps) { tls.setInsecure(); http.begin(tls, SRV_URL); }
   else         { http.begin(SRV_URL); }
-  // While an alarm is running the loop must come back fast — the siren's
-  // rhythm is driven from loop() and a dead server would otherwise hold it
-  // on one note for twelve seconds. Sound first, reporting second.
-  if (alarmRaised()) { http.setConnectTimeout(1500); http.setTimeout(2500); }
-  else               { http.setConnectTimeout(4000); http.setTimeout(8000); }
+  // Short timeouts ALWAYS — this shares the loop with the reed, the card
+  // reader and the siren rhythm. A server that needs more than 2.5s is
+  // down as far as this box is concerned. (Same reasoning as restGet.)
+  http.setConnectTimeout(1500);
+  http.setTimeout(2500);
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
 
   if (code != 200) {
-    logErr("BEAT", "heartbeat failed: " + httpExplain(code));
+    srvFailStreak++;
+    if (srvFailStreak >= 3) {            // widen: 15s, 30s, 60s ... 5min cap
+      uint32_t gap = (srvFailStreak - 3 >= 5) ? 300000UL
+                                              : (15000UL << (srvFailStreak - 3));
+      srvNextTryAt = millis() + gap;
+      if (srvNextTryAt == 0) srvNextTryAt = 1;
+    }
+    if (srvFailStreak <= 3)              // say it, then stop repeating it
+      logErr("BEAT", "heartbeat failed: " + httpExplain(code) +
+                     (srvFailStreak == 3 ? "  (backing off now)" : ""));
     http.end();
     return;
   }
+  if (srvFailStreak) logOK("BEAT", "server answering again after " +
+                                   String(srvFailStreak) + " failure(s)");
+  srvFailStreak = 0;
+  srvNextTryAt  = 0;
   String resp = http.getString();
   http.end();
 
@@ -1812,6 +1972,7 @@ void otaBegin() {
   ArduinoOTA.onStart([]() {
     buzz(false);
     horn(false);
+    esp_task_wdt_delete(NULL);   // a slow upload must not trip the watchdog
     logOK("OTA", "update starting - alarm outputs released");
   });
   ArduinoOTA.onEnd([]()  { logOK("OTA", "update done, rebooting"); });
@@ -1927,10 +2088,36 @@ void setup() {
   pinMode(TFT_BLK, OUTPUT);
   digitalWrite(TFT_BLK, HIGH);
 
+  // WHY did this boot happen? A box that brownouts on every siren, or
+  // crash-loops on heap exhaustion, otherwise looks perfectly healthy —
+  // small uptime is the only clue and nobody is watching for it.
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   resetText = "POWERON";  break;
+    case ESP_RST_SW:        resetText = "SW";       break;
+    case ESP_RST_PANIC:     resetText = "PANIC";    break;
+    case ESP_RST_TASK_WDT:  resetText = "TASK_WDT"; break;
+    case ESP_RST_INT_WDT:   resetText = "INT_WDT";  break;
+    case ESP_RST_WDT:       resetText = "WDT";      break;
+    case ESP_RST_BROWNOUT:  resetText = "BROWNOUT"; break;
+    case ESP_RST_DEEPSLEEP: resetText = "SLEEP";    break;
+    default:                resetText = "OTHER";    break;
+  }
+  Serial.printf("[BOOT] reset reason: %s\n", resetText);
+
   // What the box remembers comes FIRST: everything below (including the
   // boot self-test and the door's opening state) depends on whether this
   // box is supposed to be armed at all.
   nvsLoadState();
+  bootCount++;
+  nvsPut("boots", bootCount);
+  bool crashed = (esp_reset_reason() == ESP_RST_PANIC   ||
+                  esp_reset_reason() == ESP_RST_TASK_WDT ||
+                  esp_reset_reason() == ESP_RST_INT_WDT  ||
+                  esp_reset_reason() == ESP_RST_WDT      ||
+                  esp_reset_reason() == ESP_RST_BROWNOUT);
+  if (crashed) { crashCount++; nvsPut("crashes", crashCount); }
+  Serial.printf("[BOOT] boot #%lu, %lu crash-boots ever\n",
+                (unsigned long)bootCount, (unsigned long)crashCount);
 #if RFID_WIRED
   loadCards();          // needed before the door's boot state is decided
 #endif
@@ -1983,14 +2170,34 @@ void setup() {
   lastReedRaw = raw;
   reedChangedAt = millis();
   openedAt = millis();
-  // A box with no cards paired must NOT boot into a siren — whoever is
-  // setting it up has nothing to tap to stop it.
-  alarmState = (doorOpen && alarmArmed && !enrolling())
+  // A box with ZERO cards paired must NOT boot into a siren — whoever is
+  // setting it up has nothing to tap to stop it. One card IS tappable.
+  alarmState = (doorOpen && alarmArmed && !unprotected())
                  ? (GRACE_MS > 0 ? AS_GRACE : AS_SIREN)
                  : (doorOpen ? AS_SILENT : AS_SECURE);
   if (doorOpen) alarmReason = "DOOR";
-  digitalWrite(PIN_LED_R, doorOpen ? HIGH : LOW);
-  digitalWrite(PIN_LED_G, doorOpen ? LOW : HIGH);
+  // RESUME a raised alarm across a power cut. Yanking the battery or
+  // poking the exposed EN button used to convert a screaming box into a
+  // politely chirping one with a fresh grace — the grace was already
+  // spent, so a raised flag in NVS means straight back to the siren.
+  if (bootRaisedWhy && alarmArmed && !unprotected()) {
+    alarmReason = (bootRaisedWhy == 2) ? "MOTION" : "DOOR";
+    if (doorOpen || bootRaisedWhy == 2) {
+      alarmState = AS_SIREN;             // no second grace
+      openedAt = millis(); beepAt = millis();
+      nextSirenNote(); buzz(true); horn(true);
+      Serial.println("[BOOT] alarm was RAISED when power died - siren RESUMES");
+    } else {
+      alarmState = AS_SILENT;            // door shut again: silent but red
+      Serial.println("[BOOT] alarm was RAISED when power died - staying red");
+    }
+    digitalWrite(PIN_LED_R, HIGH);
+    digitalWrite(PIN_LED_G, LOW);
+    beatPending = true;                  // the fleet hears about it at once
+  } else {
+    digitalWrite(PIN_LED_R, doorOpen ? HIGH : LOW);
+    digitalWrite(PIN_LED_G, doorOpen ? LOW : HIGH);
+  }
 #else
   Serial.println("[BOOT] ALARM_WIRED=0 - dashboard only, alarm parts ignored");
 #endif
@@ -2014,9 +2221,25 @@ void setup() {
   printStatus();                   // one full picture before the pages start
   if (alarmRaised()) { showAlarmBanner(); }
   else               { drawStatic(); }
+
+  // WATCHDOG last, after all the blocking boot work (WiFi scan, first
+  // fetches). If loop() ever wedges — a trickling HTTP server, an I2C
+  // lockup, heap exhaustion — the box reboots in 30s instead of hanging
+  // forever as a dead alarm that still looks armed on the wall. The
+  // reboot is loud in the heartbeat: reset=TASK_WDT, crashes+1.
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  { esp_task_wdt_config_t wcfg = { .timeout_ms = 30000,
+      .idle_core_mask = 0, .trigger_panic = true };
+    esp_task_wdt_reconfigure(&wcfg); }
+#else
+  esp_task_wdt_init(30, true);
+#endif
+  esp_task_wdt_add(NULL);
+  Serial.println("[BOOT] task watchdog armed: 30s, panic = reboot");
 }
 
 void loop() {
+  esp_task_wdt_reset();     // fed once per pass; a wedge anywhere = reboot
   uint32_t now = millis();
 
 #if ALARM_WIRED
@@ -2050,8 +2273,9 @@ void loop() {
   // An alarm asked for an instant report. Send it HERE, not from inside
   // the alarm code, so the siren has already been running for a full pass
   // of the loop before we go anywhere near the network.
-  if (beatPending) { beatPending = false; lastBeat = now; sendHeartbeat(); }
-  else if (now - lastBeat >= HEART_MS) { lastBeat = now; sendHeartbeat(); }
+  // event beats are urgent: they bypass the server backoff gate once
+  if (beatPending) { beatPending = false; lastBeat = now; sendHeartbeat(true); }
+  else if (now - lastBeat >= HEART_MS) { lastBeat = now; sendHeartbeat(false); }
 
   if (now - lastStatus >= STATUS_MS) { lastStatus = now; printStatus(); }
 
