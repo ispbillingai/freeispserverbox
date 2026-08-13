@@ -76,8 +76,17 @@ MODULES = [
 # dimension that matters here: both ends are OPEN, so a longer cell simply
 # overhangs, but the tie slots want to land on the cell, not past its ends.
 CELL_D, CELL_L = 18.0, 59.0
-CELL_CLR   = 0.6      # total diametral slack - it drops in, never squeezed
+CELL_CLR   = 0.6      # diametral slack once the cell is seated
 TROUGH_W   = 2.5      # saddle wall either side of the channel
+# How far the walls reach PAST the cell's centre line. This is what makes it
+# CLIP IN instead of resting in an open half-pipe it can lift straight out
+# of. 3.0mm narrows the mouth to 17.6mm against an 18.0mm cell = 0.4mm of
+# interference: a light push, not a fight. Above the centre line the walls
+# are thinned (see cell_trough) so they can actually give that 0.4mm.
+CELL_WRAP  = 3.0
+LEAD_H     = 1.5      # flared funnel above the mouth, guides the cell in
+LEAD_FLARE = 1.2      # how much wider the funnel is at its top, per side
+WALL_THIN  = 1.0      # taken off the OUTSIDE of each wall above the centre
 # Slices approximating the half-round. 32 keeps the worst step at 0.67mm,
 # and that worst case is the bottom-most slice where the circle is nearly
 # vertical - the cell beds on the flanks either side of it, so it does not
@@ -123,7 +132,7 @@ SHOW_PARTS = False        # True = draw the PCB and modules to check the fit
 
 # shown in a popup EVERY run: if you see an older version, the deployed copy
 # under %APPDATA% is stale - re-copy the folder (the 28 Jun lesson)
-VERSION = 'rev D 2026-08-13: bare-cell half-round saddle (no holder), open both ends'
+VERSION = 'rev E 2026-08-13: cell CLIPS in - walls wrap past centre, flexy top, funnel'
 
 CM = 0.1
 
@@ -223,26 +232,63 @@ def cell_trough(comp, body, cx, cy):
     beds it along its whole length instead, which is what stops it drumming
     against the plate every time the box is knocked.
 
-    The channel is exactly HALF the cell deep, so the cell drops straight in
-    with nothing to spread or force - the two zip ties across it are what
-    hold it down. BOTH ENDS ARE OPEN: on a bare cell the + button is at one
-    end and the can (negative) at the other, so leads must leave both ways.
+    The walls carry on CELL_WRAP past the cell's centre line, so the mouth
+    is narrower than the cell and it CLIPS IN. A plain half-deep channel
+    (rev D) held nothing until the ties went on - the cell could lift
+    straight out, which is what Francis caught on the render.
 
-    The half-round is cut as stacked slices, each sized at its WIDER edge,
-    so the removed volume always contains the true cylinder and the cell can
-    never bind. The steps that leaves are irrelevant on a printed part.
+    Three things make that clip a push rather than a fight: the channel is
+    oversize once seated, the walls are thinned above the centre line so
+    they can flex the 0.2mm each that the mouth needs, and a flared funnel
+    on top guides the cell in instead of catching its edge.
+
+    BOTH ENDS ARE OPEN: on a bare cell the + button is at one end and the
+    can (negative) at the other, so leads must leave both ways.
+
+    The round is cut as stacked slices, each sized at its WIDER edge, so the
+    removed volume always contains the true cylinder and the seated cell
+    never binds. The steps that leaves are irrelevant on a printed part.
 
     Returns the outer width, so the tie slots know where to sit.
     """
     r = (CELL_D + CELL_CLR) / 2.0
+    wall_h = r + CELL_WRAP
     outer_w = CELL_D + CELL_CLR + 2 * TROUGH_W
-    box(comp, cx, cy, PLATE_TOP, outer_w, CELL_L, r, JOIN, [body])
+
+    def hw(z):                         # half-width of the bore at height z
+        return math.sqrt(max(r * r - (z - r) ** 2, 0.0))
+
+    box(comp, cx, cy, PLATE_TOP, outer_w, CELL_L, wall_h + LEAD_H, JOIN,
+        [body])
+
+    # ---- the bore, up past the centre line to the clip mouth ----
     for i in range(TROUGH_SLI):
-        z_lo = i * r / TROUGH_SLI
-        z_hi = (i + 1) * r / TROUGH_SLI
-        half = math.sqrt(max(r * r - (r - z_hi) ** 2, 0.0))
+        z_lo = i * wall_h / TROUGH_SLI
+        z_hi = (i + 1) * wall_h / TROUGH_SLI
+        if z_hi <= r:
+            half = hw(z_hi)            # below centre: widest at the top
+        elif z_lo >= r:
+            half = hw(z_lo)            # above centre: widest at the bottom
+        else:
+            half = r                   # slice straddles the centre
         box(comp, cx, cy, PLATE_TOP + z_lo, 2 * half, CELL_L + 2,
             z_hi - z_lo + 0.01, CUT, [body])
+
+    # ---- funnel above the mouth: catches the cell and walks it in ----
+    mouth = hw(wall_h)
+    for i in range(4):
+        z_lo = wall_h + i * LEAD_H / 4.0
+        z_hi = wall_h + (i + 1) * LEAD_H / 4.0
+        half = mouth + LEAD_FLARE * (i + 1) / 4.0
+        box(comp, cx, cy, PLATE_TOP + z_lo, 2 * half, CELL_L + 2,
+            z_hi - z_lo + 0.01, CUT, [body])
+
+    # ---- thin the walls above the centre line so they can actually give ----
+    for sx in (-1, 1):
+        box(comp, cx + sx * (outer_w / 2.0 - WALL_THIN / 2.0), cy,
+            PLATE_TOP + r, WALL_THIN, CELL_L + 2,
+            wall_h + LEAD_H - r + 1.0, CUT, [body])
+
     return outer_w
 
 
