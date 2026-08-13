@@ -414,6 +414,12 @@ uint8_t  cardCount  = 0;
 bool     rc522Ok    = false;
 String   lastUid    = "";
 uint32_t lastCardAt = 0;
+// what the fleet needs to answer "who opened my box, and when": the tap
+// itself, whether the box accepted it, and how long ago.
+String   lastTapUid = "";
+bool     lastTapOk  = false;
+uint32_t lastTapAt  = 0;      // 0 = no tap since boot
+uint32_t rejectCount = 0;     // strangers' cards, ever (NVS)
 
 const char* alarmStateName() {
   switch (alarmState) {
@@ -481,6 +487,7 @@ void nvsLoadState() {
   bootRaisedWhy = store.getUChar("raised", 0);
   bootCount   = store.getULong("boots",   0);
   crashCount  = store.getULong("crashes", 0);
+  rejectCount = store.getULong("rejects", 0);
   store.end();
   logOK("NVS", String("remembered: ") + (alarmArmed ? "ARMED" : "DISARMED") +
                ", " + String(openCount) + " opens, " +
@@ -1245,6 +1252,13 @@ void pollCards() {
   }
   lastUid    = uid;
   lastCardAt = now;
+  // Every tap is reported, accepted or not. "Box 12 was opened Tuesday
+  // 21:40 with card 2" is only possible if the box says WHICH card, and a
+  // stranger standing at the pad trying cards is worth knowing about too.
+  lastTapUid  = uid;
+  lastTapOk   = knownCard(uid);
+  lastTapAt   = now;
+  beatPending = true;
 
   if (enrolling()) {
     if (knownCard(uid)) {
@@ -1270,7 +1284,12 @@ void pollCards() {
     if (!alarmRaised()) drawStatic();
   } else {
     // deliberately no reassuring beep for a stranger's card
+    rejectCount++;
+    nvsPut("rejects", rejectCount);
     logErr("CARD", "REJECTED " + uid + " - not this box's card, alarm continues");
+    // Tapping strangers' cards at a screaming box must not run the clock
+    // down: every rejected tap restarts the siren timer instead.
+    if (alarmState == AS_SIREN) openedAt = millis();
   }
 
   rfid.PICC_HaltA();
@@ -1552,7 +1571,7 @@ void sendHeartbeat(bool urgent) {
   JsonDocument d;
   d["key"]     = SRV_KEY;
   d["box"]     = BOX_ID;
-  d["fw"]      = "live-3.2";   // bump on every release: the panel watches
+  d["fw"]      = "live-3.3";   // bump on every release: the panel watches
                                // this field change to confirm a rollout
   d["door"]    = doorOpen ? "OPEN" : "CLOSED";
   d["opens"]   = openCount;
@@ -1587,6 +1606,18 @@ void sendHeartbeat(bool urgent) {
   d["enrol"]   = enrolling();              // half-paired boxes must show
   d["mpu"]     = MOTION_WIRED ? (mpuOk ? 1 : 0) : -1;
   d["rc522"]   = RFID_WIRED ? (rc522Ok ? 1 : 0) : -1;
+#if RFID_WIRED
+  // WHICH cards this box obeys, so the panel can name them and say who
+  // opened it — a count alone cannot tell card 1 from card 2.
+  JsonArray uids = d["uids"].to<JsonArray>();
+  for (uint8_t i = 0; i < cardCount; i++) uids.add(cards[i]);
+  d["rejects"] = rejectCount;
+  if (lastTapAt) {
+    d["tap"]    = lastTapUid;
+    d["tapok"]  = lastTapOk;
+    d["tapago"] = (millis() - lastTapAt) / 1000;   // seconds ago
+  }
+#endif
   String body;
   serializeJson(d, body);
 
