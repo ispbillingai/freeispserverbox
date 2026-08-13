@@ -78,15 +78,22 @@ MODULES = [
 CELL_D, CELL_L = 18.0, 59.0
 CELL_CLR   = 0.6      # diametral slack once the cell is seated
 TROUGH_W   = 2.5      # saddle wall either side of the channel
-# How far the walls reach PAST the cell's centre line. This is what makes it
-# CLIP IN instead of resting in an open half-pipe it can lift straight out
-# of. 3.0mm narrows the mouth to 17.6mm against an 18.0mm cell = 0.4mm of
-# interference: a light push, not a fight. Above the centre line the walls
-# are thinned (see cell_trough) so they can actually give that 0.4mm.
-CELL_WRAP  = 3.0
+# How far the walls reach PAST the cell's centre line - this is the "curve
+# round until it closes" that stops the cell lifting out. 4.0mm brings the
+# mouth down to 16.8mm against an 18.0mm cell, so the walls visibly hug it.
+#
+# That is 1.2mm of interference, far too much for a solid wall to give. It
+# is only a light push because the walls are SLOTTED into fingers (below):
+# a 12mm-long finger bending 0.6mm works at well under 1% strain, whereas
+# the same deflection on a short stiff lip would crack it. Deep wrap and
+# easy insertion are not in conflict once the wall can actually flex.
+CELL_WRAP  = 4.0
 LEAD_H     = 1.5      # flared funnel above the mouth, guides the cell in
-LEAD_FLARE = 1.2      # how much wider the funnel is at its top, per side
-WALL_THIN  = 1.0      # taken off the OUTSIDE of each wall above the centre
+LEAD_FLARE = 1.5      # how much wider the funnel is at its top, per side
+WALL_THIN  = 1.3      # taken off the OUTSIDE of each wall above the centre
+SLOT_W     = 2.0      # relief slots that turn the walls into fingers
+SLOT_Y     = (-14.75, 0.0, 14.75)
+SLOT_FLOOR = 2.0      # slots stop this far up, so the bed stays continuous
 # Slices approximating the half-round. 32 keeps the worst step at 0.67mm,
 # and that worst case is the bottom-most slice where the circle is nearly
 # vertical - the cell beds on the flanks either side of it, so it does not
@@ -101,13 +108,20 @@ PED_SZ = 7.0                              # corner pedestal square
 # at the brackets, and the zip tie - not friction - is what holds them.
 SLACK  = 0.7
 
-# ⚠️ VERNIER THE HOLES before printing - these two are GUESSES.
-# For each: hole-to-hole spacing, distance from the module edges, hole dia.
 # Offsets are from the module's centre, +x along its w, +y along its l.
-# Buck: Francis says 2 holes stacked "vertically" (across the 21mm side) -
-# measured spacing/end-inset REQUIRED. Relay: 4 corner holes, ~M2.5.
+#
+# BUCK (Francis, 2026-08-13): the two holes are DIAGONALLY OPPOSITE, ~35-36mm
+# apart - NOT stacked on one side as the first draft had them. On a 43x21
+# board a 4.5mm inset puts them at (+-17.0, +-5.5): diagonal 35.7mm, which
+# is the measurement. FOUR bosses are drawn, not two, because which diagonal
+# the holes sit on cannot be told from a distance alone - a 180-degree turn
+# maps each diagonal onto ITSELF, so guessing wrong is unfixable. With all
+# four there, two take the screws and the other two just support the board.
+#
+# RELAY: 4 corner holes on the 34x26 board. Spacing still a GUESS - vernier.
 HOLES = {
-    'LM2596 buck': {'at': [(-15.0, 5.5), (-15.0, -5.5)], 'pilot': 2.5},
+    'LM2596 buck': {'at': [(-17.0, -5.5), (-17.0, 5.5),
+                           (17.0, -5.5), (17.0, 5.5)], 'pilot': 2.5},
     'relay':       {'at': [(-14.2, -10.2), (-14.2, 10.2),
                            (14.2, -10.2), (14.2, 10.2)], 'pilot': 2.0},
 }
@@ -132,7 +146,7 @@ SHOW_PARTS = False        # True = draw the PCB and modules to check the fit
 
 # shown in a popup EVERY run: if you see an older version, the deployed copy
 # under %APPDATA% is stale - re-copy the folder (the 28 Jun lesson)
-VERSION = 'rev E 2026-08-13: cell CLIPS in - walls wrap past centre, flexy top, funnel'
+VERSION = 'rev F 2026-08-13: deeper wrap (74% closed) on slotted fingers; buck bolts diagonal'
 
 CM = 0.1
 
@@ -288,6 +302,14 @@ def cell_trough(comp, body, cx, cy):
         box(comp, cx + sx * (outer_w / 2.0 - WALL_THIN / 2.0), cy,
             PLATE_TOP + r, WALL_THIN, CELL_L + 2,
             wall_h + LEAD_H - r + 1.0, CUT, [body])
+
+    # ---- relief slots: the walls become fingers, which is what lets a wrap
+    # this deep still be a push rather than a fight. They stop SLOT_FLOOR
+    # above the plate so the cell still beds on one continuous bottom.
+    # A full-width cut is safe: everything between the walls is bore already.
+    for sy in SLOT_Y:
+        box(comp, cx, cy + sy, PLATE_TOP + SLOT_FLOOR, outer_w + 2, SLOT_W,
+            wall_h + LEAD_H - SLOT_FLOOR + 1.0, CUT, [body])
 
     return outer_w
 
