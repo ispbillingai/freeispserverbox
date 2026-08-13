@@ -333,10 +333,14 @@ const uint32_t MOTION_SETTLE_MS = 2000; // ignore everything this long after
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 
 // ---- colors (RGB565) ----
-#define C_BG      ST77XX_BLACK
-#define C_BAR     0x10E4          // near-black header, content stands out
-#define C_CARD    0x18E3          // card panels: a step above the bg
-#define C_EDGE    0x39C7          // card outline
+// A phone's dark theme, not a terminal: the background is a very dark
+// blue-grey rather than pure black, cards sit a measurable step above it,
+// and there is exactly ONE accent colour doing the pointing.
+#define C_BG      0x0861          // #0d1117 — near-black, faintly blue
+#define C_BAR     0x10A2          // status bar, one step up
+#define C_CARD    0x18E3          // #161b22 card fill
+#define C_EDGE    0x2124          // #21262d hairline, barely there
+#define C_DIM     0x4A69          // muted rule / inactive dot
 #define C_TITLE   ST77XX_WHITE
 #define C_LABEL   0x8C71
 #define C_VALUE   ST77XX_WHITE
@@ -1756,7 +1760,7 @@ void sendHeartbeat(bool urgent) {
   JsonDocument d;
   d["key"]     = SRV_KEY;
   d["box"]     = BOX_ID;
-  d["fw"]      = "live-4.0";   // bump on every release: the panel watches
+  d["fw"]      = "live-4.1";   // bump on every release: the panel watches
                                // this field change to confirm a rollout
   d["door"]    = doorOpen ? "OPEN" : "CLOSED";
   d["opens"]   = openCount;
@@ -1786,6 +1790,8 @@ void sendHeartbeat(bool urgent) {
   // Same -1 convention as mains: "not fitted" is different from "dead".
   // screen settings, so the panel's remote mirrors what the box is doing
   d["shold"]  = scrHold;                   // 255 = auto
+  d["page"]   = page;                      // the page ACTUALLY on the glass,
+                                           // so the panel mirrors it exactly
   { char m[NUM_PAGES + 1];
     for (uint8_t i = 0; i < NUM_PAGES; i++) m[i] = (scrMask & (1 << i)) ? '1' : '0';
     m[NUM_PAGES] = 0;
@@ -1861,12 +1867,24 @@ void sendHeartbeat(bool urgent) {
 
   JsonDocument r;
   if (deserializeJson(r, resp) == DeserializationError::Ok) {
-    String cmd = (const char*)(r["cmd"] | "");
-    if (cmd.length()) {
-      logOK("BEAT", "server sent command: " + cmd);
-      runCommand(cmd);
+    // The server may hand back several commands at once. One per beat
+    // meant a two-command tap on the panel took two heartbeats to land,
+    // which is what made the remote feel broken.
+    JsonArray cmds = r["cmds"].as<JsonArray>();
+    if (!cmds.isNull() && cmds.size()) {
+      logOK("BEAT", "server sent " + String(cmds.size()) + " command(s)");
+      for (JsonVariant v : cmds) {
+        String c = v.as<String>();
+        if (c.length()) runCommand(c);
+      }
     } else {
-      logOK("BEAT", "heartbeat delivered");
+      String cmd = (const char*)(r["cmd"] | "");   // older server, one cmd
+      if (cmd.length()) {
+        logOK("BEAT", "server sent command: " + cmd);
+        runCommand(cmd);
+      } else {
+        logOK("BEAT", "heartbeat delivered");
+      }
     }
   }
 }
@@ -1971,45 +1989,72 @@ void statusDot(int x, int y) {
   tft.fillCircle(x, y, 3, c);
 }
 
+// STATUS BAR — the page name is the headline, like a phone's app bar;
+// the chrome that never changes (brand, radio, health) is small and right.
 void titleBar(const char* t) {
   tft.fillScreen(C_BG);
   int w = tft.width();
-  tft.fillRect(0, 0, w, 17, C_BAR);
-  tft.drawFastHLine(0, 17, w, C_EDGE);       // hairline under the bar
+  tft.fillRect(0, 0, w, 18, C_BAR);
+  tft.drawFastHLine(0, 18, w, C_EDGE);
   tft.setTextSize(1);
   tft.setTextColor(C_TITLE, C_BAR);
-  tft.setCursor(4, 5);
-  tft.print("FreeISP");
-  tft.setTextColor(C_ACCENT, C_BAR);
-  tft.setCursor(56, 5);
-  tft.print(t);
-  statusDot(w - 22, 8);
-  wifiBars(w - 15, 4);
+  tft.setCursor(5, 6);
+  tft.print(t);                              // the PAGE leads, not "FreeISP"
+  statusDot(w - 23, 9);
+  wifiBars(w - 16, 5);
+  // a 2px accent rule under the bar: one bright line gives the whole
+  // screen a spine, the way an app bar's shadow does
+  tft.fillRect(0, 19, 34, 2, C_ACCENT);
 }
 
 // the little page indicator dots along the bottom, phone-style
+// PAGE INDICATOR — a phone's dots: the current one is a short bar, the
+// rest are dots, and a page dropped from the rotation is a hollow tick.
 void pageDots() {
-  int n = NUM_PAGES, gap = 10;
+  int n = NUM_PAGES, gap = 11;
   int x0 = (tft.width() - (n - 1) * gap) / 2;
-  int y  = tft.height() - 5;
+  int y  = tft.height() - 6;
+  tft.fillRect(0, y - 4, tft.width(), 9, C_BG);   // clear the strip
   for (int i = 0; i < n; i++) {
+    int x = x0 + i * gap;
     bool inRot = (scrMask & (1 << i)) || scrHold == i;
-    if (i == page)      tft.fillCircle(x0 + i * gap, y, 2, C_ACCENT);
-    else if (inRot)     tft.fillCircle(x0 + i * gap, y, 1, C_LABEL);
-    else                tft.drawPixel (x0 + i * gap, y, C_EDGE);
+    if (i == page)      tft.fillRoundRect(x - 4, y - 1, 9, 3, 1, C_ACCENT);
+    else if (inRot)     tft.fillCircle(x, y, 1, C_DIM);
+    else                tft.drawCircle(x, y, 1, C_EDGE);
   }
-  if (scrHold < NUM_PAGES) {                 // held: say so, small
-    tft.setTextSize(1);
-    tft.setTextColor(C_LABEL, C_BG);
-    tft.setCursor(2, tft.height() - 8);
-    tft.print("*");
+  if (scrHold < NUM_PAGES) {                 // pinned, like a lock glyph
+    tft.fillRect(3, y - 4, 2, 5, C_WARN);
+    tft.drawPixel(4, y - 5, C_WARN);
   }
 }
 
 // a rounded card panel — content sits a step above the background
 void cardBox(int x, int y, int w, int h) {
-  tft.fillRoundRect(x, y, w, h, 5, C_CARD);
-  tft.drawRoundRect(x, y, w, h, 5, C_EDGE);
+  tft.fillRoundRect(x, y, w, h, 6, C_CARD);
+  tft.drawRoundRect(x, y, w, h, 6, C_EDGE);
+}
+
+// STAT TILE — the repeating unit: a caption in grey, a big number in the
+// accent, and a thin coloured spine down the left edge that carries the
+// state. Repetition is what makes a UI read as designed rather than
+// assembled, so every page is built from these.
+void tile(int x, int y, int w, int h, const char* cap, uint16_t spine) {
+  cardBox(x, y, w, h);
+  tft.fillRect(x + 1, y + 4, 2, h - 8, spine);     // the spine
+  tft.setTextSize(1);
+  tft.setTextColor(C_LABEL, C_CARD);
+  tft.setCursor(x + 8, y + 6);
+  tft.print(cap);
+}
+
+// a slim progress/level bar with rounded ends, for battery and signal
+void meter(int x, int y, int w, int h, float frac, uint16_t col) {
+  if (frac < 0) frac = 0;
+  if (frac > 1) frac = 1;
+  tft.fillRoundRect(x, y, w, h, h / 2, C_EDGE);
+  int fill = (int)(frac * w);
+  if (fill > h) tft.fillRoundRect(x, y, fill, h, h / 2, col);
+  else if (fill > 0) tft.fillRect(x, y, fill, h, col);
 }
 
 void label(int x, int y, const char* s) {    // on the plain background
@@ -2391,13 +2436,9 @@ void drawStatic() {
     case 0: {
       titleBar("HOME");
       int w = tft.width();
-      cardBox(4, 23, w / 2 - 7, 52);           // WIFI users
-      cardBox(w / 2 + 3, 23, w / 2 - 7, 52);   // PPPOE users
-      labelCd(10, 29, "WIFI");
-      labelCd(w / 2 + 9, 29, "PPPOE");
-      cardBox(4, 80, w - 8, 34);               // router strip
-      labelCd(10, 86, "ROUTER");
-      labelCd(62, 86, "UPTIME");
+      tile(4, 26, w / 2 - 6, 46, "WIFI",  C_ACCENT);
+      tile(w / 2 + 2, 26, w / 2 - 6, 46, "PPPOE", C_GOOD);
+      tile(4, 78, w - 8, 34, "ROUTER", C_DIM);
       break;
     }
     case 1:
@@ -2421,15 +2462,8 @@ void drawStatic() {
     case 4: {
       titleBar("SECURITY");
       int w = tft.width();
-      cardBox(4, 23, w - 8, 38);               // door + armed
-      labelCd(10, 29, "DOOR");
-      labelCd(84, 29, "ALARM");
-      cardBox(4, 65, w - 8, 36);               // the counters
-      labelCd(10, 71, "OPENS");
-      labelCd(54, 71, "DISARM");
-      labelCd(98, 71, "TILT");
-      label(10, 108, "STATE");
-      label(10, 132, "CARDS");
+      tile(4, 26, w - 8, 36, "DOOR", C_GOOD);
+      tile(4, 68, w - 8, 34, "OPENS   DISARM   TILT", C_DIM);
       break;
     }
   }
@@ -2470,19 +2504,24 @@ void drawLive() {
 
   switch (page) {
     case 0: {
-      // the two numbers customers care about, each on its own card
+      // the two numbers customers care about, big, one per tile
       int w = tft.width();
-      value(10, 41, 3, C_ACCENT,
-            usersOnline < 0 ? "-" : String(usersOnline), w / 2 - 19, C_CARD);
-      value(w / 2 + 9, 41, 3, C_GOOD,
-            pppoeOnline < 0 ? "-" : String(pppoeOnline), w / 2 - 19, C_CARD);
-      value(10, 98, 1, routerOk ? C_GOOD : C_BAD,
-            routerOk ? "UP" : "DOWN", 40, C_CARD);
-      value(62, 98, 1, C_VALUE, rosUptime, w - 72, C_CARD);
+      value(12, 44, 3, C_ACCENT,
+            usersOnline < 0 ? "-" : String(usersOnline), w / 2 - 20, C_CARD);
+      value(w / 2 + 10, 44, 3, C_GOOD,
+            pppoeOnline < 0 ? "-" : String(pppoeOnline), w / 2 - 20, C_CARD);
+      // router row: a state pill, then uptime in muted text
+      uint16_t rc = routerOk ? C_GOOD : C_BAD;
+      tft.fillRoundRect(12, 92, 34, 13, 6, rc);
+      tft.setTextSize(1);
+      tft.setTextColor(C_BG, rc);
+      tft.setCursor(routerOk ? 20 : 16, 96);
+      tft.print(routerOk ? "UP" : "DOWN");
+      value(52, 96, 1, C_VALUE, rosUptime.substring(0, 11), w - 62, C_CARD);
       if (!routerOk && lastErr.length())
-        value(6, 122, 1, C_WARN, lastErr.substring(0, 20), w - 12);
+        value(6, 120, 1, C_WARN, lastErr.substring(0, 20), w - 12);
       else
-        tft.fillRect(6, 122, w - 12, 8, C_BG);
+        tft.fillRect(6, 120, w - 12, 8, C_BG);
       break;
     }
     case 1:
@@ -2565,13 +2604,19 @@ void drawLive() {
       break;
     }
     case 4: {
-      value(10, 41, 2, doorOpen ? C_BAD : C_GOOD,
-            doorOpen ? "OPEN" : "CLOSED", 72, C_CARD);
-      value(84, 44, 1, alarmArmed ? C_GOOD : C_WARN,
-            alarmArmed ? "ARMED" : "OFF", 38, C_CARD);
-      value(10, 83, 2, C_VALUE, String(openCount), 40, C_CARD);
-      value(54, 83, 2, disarmCount ? C_WARN : C_VALUE, String(disarmCount), 40, C_CARD);
-      value(98, 85, 1, mpuOk ? (lastTiltDeg > MOTION_TILT_DEG ? C_BAD : C_VALUE) : C_LABEL,
+      int w = tft.width();
+      value(12, 44, 2, doorOpen ? C_BAD : C_GOOD,
+            doorOpen ? "OPEN" : "SHUT", 52, C_CARD);
+      // armed shown as a pill on the right of the same tile
+      uint16_t ac = alarmArmed ? C_GOOD : C_WARN;
+      tft.fillRoundRect(w - 54, 43, 46, 13, 6, ac);
+      tft.setTextSize(1);
+      tft.setTextColor(C_BG, ac);
+      tft.setCursor(w - (alarmArmed ? 48 : 44), 47);
+      tft.print(alarmArmed ? "ARMED" : "OFF");
+      value(12, 84, 2, C_VALUE, String(openCount), 34, C_CARD);
+      value(58, 84, 2, disarmCount ? C_WARN : C_VALUE, String(disarmCount), 34, C_CARD);
+      value(104, 87, 1, mpuOk ? (lastTiltDeg > MOTION_TILT_DEG ? C_BAD : C_VALUE) : C_LABEL,
             mpuOk ? (String((int)lastTiltDeg) + "d") : "--", 24, C_CARD);
 
       // The bottom line must never let a silenced box look armed. A quiet
@@ -2589,11 +2634,13 @@ void drawLive() {
         else if (alarmState == AS_GRACE)   { st = "grace...";     stc = C_WARN;  }
         else if (alarmState == AS_SILENT)  { st = "silenced";     stc = C_WARN;  }
         else                               { st = "armed, quiet"; stc = C_LABEL; }
-      value(10, 118, 1, stc, st, tft.width() - 20);
-      // cards, because a half-paired box must never look ready
-      value(10, 142, 1, enrolling() ? C_WARN : C_LABEL,
+      // the state line gets a coloured dot and sits on the background,
+      // so it reads as a caption to the whole page rather than a field
+      tft.fillCircle(9, 114, 3, stc);
+      value(17, 111, 1, stc, st, tft.width() - 24);
+      value(17, 127, 1, enrolling() ? C_WARN : C_DIM,
             String(cardCount) + "/" + String(CARDS_PER_BOX) +
-            (enrolling() ? " ENROL" : " paired"), tft.width() - 20);
+            (enrolling() ? " ENROL" : " cards"), tft.width() - 24);
       break;
     }
   }
