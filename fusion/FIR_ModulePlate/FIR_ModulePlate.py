@@ -10,8 +10,8 @@
 #   115x115mm PCB which already carries the ESP32, the MPU and all the
 #   passives, so the tray only has to hold:
 #       - the PCB itself, on 4 posts matching its M3 holes (106mm square)
-#       - the three WIRE-IN modules that never touch the PCB
-#         (LM2596 buck, TP4056 charger, 5V boost)
+#       - the WIRE-IN modules that never touch the PCB
+#         (LM2596 buck, TP4056 charger, 5V boost, horn relay)
 #       - the 18650 holder
 #   The modules go UNDERNEATH the PCB, not beside it. They need only 26% of
 #   the area under a 115x115 board, so spreading them out sideways was pure
@@ -38,23 +38,47 @@ CORNER_R = 6.0
 PCB_W = PCB_H = 115.0
 PCB_HOLE_PITCH = PCB_W - 2 * 4.5          # 106.0 mm square
 PCB_CX, PCB_CY = 0.0, 0.0                 # PCB is centred on the tray
-# 26mm: tall enough to stand the PCB OVER every module. The battery holder
-# is the tallest at 20mm, so its top sits at 23mm and the board underside at
-# 29mm - 6mm of clear air, which also swallows the solder joints underneath.
-POST_D, POST_H, POST_PILOT = 7.0, 26.0, 2.5
+# 30mm (was 26): the relay joined the tray and the wire-tunnel RAISE lifted
+# the modules 5mm, so the tallest top is now the relay at 27mm; the board
+# underside sits at 33mm - 6mm of clear air over it, 10mm over the battery.
+# ⚠️ KNOCK-ON: the box cavity gets 4mm taller than the 26mm-post draft.
+POST_D, POST_H, POST_PILOT = 7.0, 30.0, 2.5
 
-# ---------------- wire-in modules: name, w, l, h, cx, cy ----------------
-# Held by corner brackets + a zip tie, NOT screws: the mounting holes on
-# these cheap modules move between batches, the outline does not.
-# All four live UNDER the PCB. Heights include the trimpot; set the buck to
-# 5.4V and the boost to 5.0V BEFORE the board goes on, because reaching them
-# afterwards means taking the four PCB screws out.
+# ---------------- wire-in modules: name, w, l, h, cx, cy, mount ----------
+# Mounting is now PER MODULE (Francis checked the real boards, 2026-08-13):
+#   'screws'   the module has usable holes -> raised bosses + self-tappers
+#              (buck: 2 holes; relay: 4 holes)
+#   'corners'  NO holes (boost, TP4056) -> four corner pedestals under the
+#              board edge + L-brackets round the outline + one zip tie
+#   'flat'     18650 holder: flat on the plate (it is the tall one), with
+#              brackets, a body tie AND two ties over the cell itself
+# Everything except the holder stands RAISE above the plate so the harness
+# can run UNDER a module instead of being pinched beneath it; above, the
+# PCB underside now sits at 33mm, so over-the-top runs have air too.
+# Heights include the trimpot; set the buck to 5.4V and the boost to 5.0V
+# BEFORE the board goes on - reaching them after means pulling 4 screws.
 MODULES = [
-    ('18650 holder', 20.0, 75.0, 20.0, -35.0,   0.0),
-    ('LM2596 buck',  43.0, 21.0, 14.0,  20.0,  38.0),
-    ('5V boost',     17.0, 36.0, 14.0,   5.0, -25.0),
-    ('TP4056',       26.0, 17.0,  6.0,  35.0, -25.0),
+    ('18650 holder', 20.0, 75.0, 20.0, -35.0,   0.0, 'flat'),
+    ('LM2596 buck',  43.0, 21.0, 14.0,  20.0,  38.0, 'screws'),
+    ('5V boost',     17.0, 36.0, 14.0,   5.0, -25.0, 'corners'),
+    ('TP4056',       26.0, 17.0,  6.0,  35.0, -25.0, 'corners'),
+    ('relay',        50.0, 26.0, 19.0,  20.0,  11.0, 'screws'),
 ]
+RAISE  = 5.0                              # wire tunnel under every module
+BOSS_D = 7.0                              # screw boss diameter
+PED_SZ = 7.0                              # corner pedestal square
+
+# ⚠️ VERNIER THE HOLES before printing - these two are GUESSES.
+# For each: hole-to-hole spacing, distance from the module edges, hole dia.
+# Offsets are from the module's centre, +x along its w, +y along its l.
+# Buck: Francis says 2 holes stacked "vertically" (across the 21mm side) -
+# measured spacing/end-inset REQUIRED. Relay: 4 corner holes, ~M2.5.
+HOLES = {
+    'LM2596 buck': {'at': [(-15.0, 5.5), (-15.0, -5.5)], 'pilot': 2.5},
+    'relay':       {'at': [(-22.2, -10.2), (-22.2, 10.2),
+                           (22.2, -10.2), (22.2, 10.2)], 'pilot': 2.0},
+}
+
 BRACKET_T, BRACKET_L = 2.5, 8.0           # corner bracket thickness / leg length
 TIE_SLOT = (3.0, 10.0)                    # zip-tie slot through the plate
 
@@ -62,14 +86,20 @@ TIE_SLOT = (3.0, 10.0)                    # zip-tie slot through the plate
 TRAY_MOUNT = [(0.0, -58.0), (0.0, 58.0), (-58.0, 0.0), (58.0, 0.0)]
 TRAY_CLEAR, TRAY_CB, TRAY_CB_D = 3.4, 6.0, 1.5
 
-# harness tie-downs: loop a zip tie round each pair
-TIE_POSTS = [(-58.0, 26.0), (-58.0, 36.0), (58.0, 26.0), (58.0, 36.0)]
+# harness tie-downs, ALL on the -X edge: the +X side is the J4/J5 edge
+# (TFT + RC522 ribbons drop past the plate there) and stays completely
+# clear - mount the PCB with its J4/J5 edge facing +X.
+TIE_POSTS = [(-58.0, 26.0), (-58.0, 36.0), (-58.0, -26.0), (-58.0, -36.0)]
 
-# weight savings, kept clear of every post and bracket
-LIGHTEN = [(-8.0, 8.0), (46.0, 12.0), (38.0, -46.0), (-40.0, 50.0)]
+# weight savings, kept clear of every post, boss, bracket and slot
+LIGHTEN = [(-16.0, -48.0), (52.0, 33.0), (38.0, -46.0), (-40.0, 50.0)]
 LIGHTEN_SZ = (14.0, 14.0)
 
 SHOW_PARTS = False        # True = draw the PCB and modules to check the fit
+
+# shown in a popup EVERY run: if you see an older version, the deployed copy
+# under %APPDATA% is stale - re-copy the folder (the 28 Jun lesson)
+VERSION = 'rev B 2026-08-13: screws for buck+relay, wire tunnels, cell ties'
 
 CM = 0.1
 
@@ -130,12 +160,12 @@ def fillet_vertical(comp, body, r):
         SKIPPED.append('corner fillet: {}'.format(e))
 
 
-def corner_brackets(comp, body, cx, cy, w, l, h):
+def corner_brackets(comp, body, cx, cy, w, l, h, z0=PLATE_TOP):
     """Four L-shaped corners that locate a module by its OUTLINE.
 
-    Deliberately not screw posts: hole positions on these modules vary
-    between batches, the outside dimensions do not. 0.4mm of slack per side
-    so a printed part still accepts the board.
+    For the no-hole modules (their hole patterns move between batches, the
+    outside dimensions do not). 0.4mm of slack per side so a printed part
+    still accepts the board. z0 lets the L sit on top of the pedestals.
     """
     hw, hl = w / 2.0 + 0.4, l / 2.0 + 0.4
     for sx in (-1, 1):
@@ -144,16 +174,38 @@ def corner_brackets(comp, body, cx, cy, w, l, h):
             y = cy + sy * (hl + BRACKET_T / 2.0)
             # one leg along X, one along Y -> an L that traps the corner
             box(comp, x - sx * (BRACKET_L - BRACKET_T) / 2.0, y,
-                PLATE_TOP, BRACKET_L, BRACKET_T, h, JOIN, [body])
+                z0, BRACKET_L, BRACKET_T, h, JOIN, [body])
             box(comp, x, y - sy * (BRACKET_L - BRACKET_T) / 2.0,
-                PLATE_TOP, BRACKET_T, BRACKET_L, h, JOIN, [body])
+                z0, BRACKET_T, BRACKET_L, h, JOIN, [body])
 
 
-def tie_slots(comp, body, cx, cy, w):
+def corner_pedestals(comp, body, cx, cy, w, l):
+    """Four small feet just inside the module's corners: the board rests on
+    these, RAISE off the plate, so the harness can pass underneath instead
+    of being crushed under the module. Corners only - the middle of these
+    boards carries solder joints that must touch nothing."""
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            box(comp, cx + sx * (w / 2.0 - PED_SZ / 2.0 + 0.4),
+                cy + sy * (l / 2.0 - PED_SZ / 2.0 + 0.4),
+                PLATE_TOP, PED_SZ, PED_SZ, RAISE, JOIN, [body])
+
+
+def screw_bosses(comp, body, cx, cy, holes):
+    """Raised bosses matching a module's own holes: RAISE tall, so a screwed
+    module gets the same wire tunnel underneath as a bracketed one. The
+    pilot runs through the boss into the plate, stopping 1mm short."""
+    for (dx, dy) in holes['at']:
+        cyl(comp, cx + dx, cy + dy, PLATE_TOP, BOSS_D, RAISE, JOIN, [body])
+        cyl(comp, cx + dx, cy + dy, 1.0, holes['pilot'],
+            PLATE_TH - 1.0 + RAISE, CUT, [body])
+
+
+def tie_slots(comp, body, cx, cy, w, dy=0.0):
     """A pair of slots either side of a module: one zip tie straps it down."""
     sw, sl = TIE_SLOT
     for sx in (-1, 1):
-        box(comp, cx + sx * (w / 2.0 + 5.0), cy, -1, sw, sl,
+        box(comp, cx + sx * (w / 2.0 + 5.0), cy + dy, -1, sw, sl,
             PLATE_TH + 2, CUT, [body])
 
 
@@ -175,11 +227,23 @@ def build_plate(comp):
             # pilot for an M3 self-tapper, stopping short of the underside
             cyl(comp, x, y, PLATE_TOP, POST_PILOT, POST_H - 0.5, CUT, [plate])
 
-    # ---- wire-in modules ----
-    for (name, w, l, h, cx, cy) in MODULES:
+    # ---- wire-in modules, each held its own way ----
+    for (name, w, l, h, cx, cy, mount) in MODULES:
         wall = 5.0 if h > 10 else 3.5
-        corner_brackets(comp, plate, cx, cy, w, l, wall)
-        tie_slots(comp, plate, cx, cy, w)
+        if mount == 'screws':
+            screw_bosses(comp, plate, cx, cy, HOLES[name])
+        elif mount == 'corners':
+            corner_pedestals(comp, plate, cx, cy, w, l)
+            corner_brackets(comp, plate, cx, cy, w, l, wall,
+                            z0=PLATE_TOP + RAISE)
+            tie_slots(comp, plate, cx, cy, w)
+        else:                                   # 'flat' - the 18650 holder
+            corner_brackets(comp, plate, cx, cy, w, l, wall)
+            tie_slots(comp, plate, cx, cy, w)   # body tie
+            # two more ties OVER THE CELL: a jolt hard enough to raise the
+            # motion alarm must not be able to pop the cell off its clips
+            tie_slots(comp, plate, cx, cy, w, dy=16.0)
+            tie_slots(comp, plate, cx, cy, w, dy=-16.0)
 
     # ---- tray -> box ----
     for (x, y) in TRAY_MOUNT:
@@ -202,8 +266,9 @@ def build_parts(comp):
     e = box(comp, PCB_CX, PCB_CY, PLATE_TOP + POST_H + 1.6 + 8.5,
             28.0, 56.0, 13.0, NEW).bodies.item(0)
     e.name = 'PART: ESP32 DevKitC'
-    for (name, w, l, h, cx, cy) in MODULES:
-        m = box(comp, cx, cy, PLATE_TOP, w, l, h, NEW).bodies.item(0)
+    for (name, w, l, h, cx, cy, mount) in MODULES:
+        z = PLATE_TOP if mount == 'flat' else PLATE_TOP + RAISE
+        m = box(comp, cx, cy, z, w, l, h, NEW).bodies.item(0)
         m.name = 'PART: ' + name
 
 
@@ -222,12 +287,21 @@ def run(context):
         except Exception:
             pass
         del SKIPPED[:]
-        build_plate(design.rootComponent)
+        # old bodies from a previous run must go first, or failed geometry
+        # stacks under the new build and the result lies to you
+        root = design.rootComponent
+        for i in range(root.bRepBodies.count - 1, -1, -1):
+            b = root.bRepBodies.item(i)
+            if b.name.startswith(('FIR Electronics Tray', 'PART:')):
+                b.deleteMe()
+        build_plate(root)
         if SHOW_PARTS:
-            build_parts(design.rootComponent)
+            build_parts(root)
         app.activeViewport.fit()
+        msg = VERSION
         if SKIPPED:
-            ui.messageBox('Tray built. Skipped:\n - ' + '\n - '.join(SKIPPED))
+            msg += '\n\nSkipped:\n - ' + '\n - '.join(SKIPPED)
+        ui.messageBox(msg)
     except:  # noqa
         if ui:
             ui.messageBox('FIR_ModulePlate failed:\n{}'.format(
