@@ -58,15 +58,23 @@ POST_D, POST_H, POST_PILOT = 7.0, 30.0, 2.5
 # Heights include the trimpot; set the buck to 5.4V and the boost to 5.0V
 # BEFORE the board goes on - reaching them after means pulling 4 screws.
 MODULES = [
-    ('18650 holder', 20.0, 75.0, 20.0, -35.0,   0.0, 'flat'),
+    # 18650 holder vernier'd 2026-08-13: 59 x 18. NOTE the cell itself is
+    # 65mm - it overhangs the open (wire) end of the cradle, which is fine.
+    ('18650 holder', 18.0, 59.0, 20.0, -35.0,   0.0, 'flat'),
     ('LM2596 buck',  43.0, 21.0, 14.0,  20.0,  38.0, 'screws'),
     ('5V boost',     17.0, 36.0, 14.0,   5.0, -25.0, 'corners'),
     ('TP4056',       26.0, 17.0,  6.0,  35.0, -25.0, 'corners'),
-    ('relay',        50.0, 26.0, 19.0,  20.0,  11.0, 'screws'),
+    # relay vernier'd: board 34 x 26, but the screw-terminal side overhangs
+    # to 46 total - that extra 12mm hangs in free air toward +X (nothing may
+    # stand under x 37..49 near y 11). Holes are on the 34 x 26 board.
+    ('relay',        34.0, 26.0, 19.0,  20.0,  11.0, 'screws'),
 ]
 RAISE  = 5.0                              # wire tunnel under every module
 BOSS_D = 7.0                              # screw boss diameter
 PED_SZ = 7.0                              # corner pedestal square
+# Modules SIT in their spots, they are never forced: 0.7mm of air per side
+# at the brackets, and the zip tie - not friction - is what holds them.
+SLACK  = 0.7
 
 # ⚠️ VERNIER THE HOLES before printing - these two are GUESSES.
 # For each: hole-to-hole spacing, distance from the module edges, hole dia.
@@ -75,8 +83,8 @@ PED_SZ = 7.0                              # corner pedestal square
 # measured spacing/end-inset REQUIRED. Relay: 4 corner holes, ~M2.5.
 HOLES = {
     'LM2596 buck': {'at': [(-15.0, 5.5), (-15.0, -5.5)], 'pilot': 2.5},
-    'relay':       {'at': [(-22.2, -10.2), (-22.2, 10.2),
-                           (22.2, -10.2), (22.2, 10.2)], 'pilot': 2.0},
+    'relay':       {'at': [(-14.2, -10.2), (-14.2, 10.2),
+                           (14.2, -10.2), (14.2, 10.2)], 'pilot': 2.0},
 }
 
 BRACKET_T, BRACKET_L = 2.5, 8.0           # corner bracket thickness / leg length
@@ -99,7 +107,7 @@ SHOW_PARTS = False        # True = draw the PCB and modules to check the fit
 
 # shown in a popup EVERY run: if you see an older version, the deployed copy
 # under %APPDATA% is stale - re-copy the folder (the 28 Jun lesson)
-VERSION = 'rev B 2026-08-13: screws for buck+relay, wire tunnels, cell ties'
+VERSION = 'rev C 2026-08-13: real relay/18650 dims, battery cradle, loose-fit brackets'
 
 CM = 0.1
 
@@ -164,10 +172,11 @@ def corner_brackets(comp, body, cx, cy, w, l, h, z0=PLATE_TOP):
     """Four L-shaped corners that locate a module by its OUTLINE.
 
     For the no-hole modules (their hole patterns move between batches, the
-    outside dimensions do not). 0.4mm of slack per side so a printed part
-    still accepts the board. z0 lets the L sit on top of the pedestals.
+    outside dimensions do not). SLACK per side: the board DROPS in and sits,
+    it is never pressed - the zip tie is what holds it down. z0 lets the L
+    sit on top of the pedestals.
     """
-    hw, hl = w / 2.0 + 0.4, l / 2.0 + 0.4
+    hw, hl = w / 2.0 + SLACK, l / 2.0 + SLACK
     for sx in (-1, 1):
         for sy in (-1, 1):
             x = cx + sx * (hw + BRACKET_T / 2.0)
@@ -186,9 +195,24 @@ def corner_pedestals(comp, body, cx, cy, w, l):
     boards carries solder joints that must touch nothing."""
     for sx in (-1, 1):
         for sy in (-1, 1):
-            box(comp, cx + sx * (w / 2.0 - PED_SZ / 2.0 + 0.4),
-                cy + sy * (l / 2.0 - PED_SZ / 2.0 + 0.4),
+            box(comp, cx + sx * (w / 2.0 - PED_SZ / 2.0 + SLACK),
+                cy + sy * (l / 2.0 - PED_SZ / 2.0 + SLACK),
                 PLATE_TOP, PED_SZ, PED_SZ, RAISE, JOIN, [body])
+
+
+def battery_cradle(comp, body, cx, cy, w, l):
+    """A snug three-sided pocket for the 18650 holder: two full-length walls
+    and a closed end, the wire end left OPEN so the leads run straight out.
+    0.3mm per side - it snuggles in but never needs force. The walls stop
+    it sliding; the two zip ties over the cell stop anything falling."""
+    t, hgt = 2.5, 12.0
+    iw, il = w / 2.0 + 0.3, l / 2.0 + 0.3
+    for sx in (-1, 1):                     # side walls, lapping the end wall
+        box(comp, cx + sx * (iw + t / 2.0), cy + t / 2.0,
+            PLATE_TOP, t, l + 0.6 + t, hgt, JOIN, [body])
+    # closed end on +Y; -Y stays open for the wires
+    box(comp, cx, cy + il + t / 2.0, PLATE_TOP,
+        w + 0.6 + 2 * t, t, hgt, JOIN, [body])
 
 
 def screw_bosses(comp, body, cx, cy, holes):
@@ -238,9 +262,8 @@ def build_plate(comp):
                             z0=PLATE_TOP + RAISE)
             tie_slots(comp, plate, cx, cy, w)
         else:                                   # 'flat' - the 18650 holder
-            corner_brackets(comp, plate, cx, cy, w, l, wall)
-            tie_slots(comp, plate, cx, cy, w)   # body tie
-            # two more ties OVER THE CELL: a jolt hard enough to raise the
+            battery_cradle(comp, plate, cx, cy, w, l)
+            # two ties OVER THE CELL: a jolt hard enough to raise the
             # motion alarm must not be able to pop the cell off its clips
             tie_slots(comp, plate, cx, cy, w, dy=16.0)
             tie_slots(comp, plate, cx, cy, w, dy=-16.0)
