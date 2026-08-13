@@ -126,7 +126,7 @@ const uint16_t TONE_SIREN_B_HZ = 4250;   // siren, high note = loudest
 //  HORN — the LOUD one, on the relay (board K1 / J11, GPIO13).
 //  The little buzzer does the RHYTHM; the horn does the VOLUME.
 // ================================================================
-#define HORN_WIRED 0          // 0 = relay pin never touched
+#define HORN_WIRED 1          // 0 = relay pin never touched
 
 #define PIN_RELAY 13          // K1 "IN" via R7 1k — board rev E
 
