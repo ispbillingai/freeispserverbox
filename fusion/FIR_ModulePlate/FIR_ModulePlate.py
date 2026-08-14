@@ -99,26 +99,28 @@ CELL_CLR   = 0.6      # diametral slack once the cell is seated
 # structure, not a spring. 2.0 leaves 0.7mm there - two extrusions on a
 # 0.4mm nozzle, so it still prints solid, but it gives.
 TROUGH_W   = 2.0
-# THE CLIP THROAT is the design input, because the throat is what Francis
-# actually sees closing: 10.5mm of opening around a 14.5mm cell, so the
-# walls curl 4mm over it. Everything else is derived from it.
+# The saddle visibly CLOSES at its upper edge: the entrance is exactly
+# 13.5mm wide - Francis's number, 2026-08-14, and the whole point of the
+# part. The cell is 14.5mm, so the opening is deliberately 1.0mm NARROWER
+# than what goes into it. Derive the wrap from that entrance rather than
+# hand-tuning a wrap: if the cell, clearance or flare changes, the opening
+# stays 13.5mm.
 #
-# ⚠️ FIXED 2026-08-14 (second pass). The previous revision drove this from
-# a 13.5mm TOP OPENING instead, and that made the part uninsertable: at
-# 13.5 the widest point of the funnel was 1.0mm NARROWER THAN THE CELL, so
-# there was no lead-in at all. The cell landed on the funnel's sharp outer
-# rim and you had to spread each wall 0.5mm before it could even enter.
-# A lead-in that is narrower than the part is not a lead-in.
+# ⚠️ DO NOT "FIX" THIS BY OPENING IT UP. I widened it to 15.5 once, on the
+# reasoning that a lead-in must be wider than the part it guides. That
+# reasoning does not apply here and Francis rejected it: the cell is a
+# ROUND, rigid cylinder, so its own curvature is the wedge - a 14.5mm
+# cylinder pressed onto a 13.5mm gap rides its own radius apart. It needs
+# 0.5mm of spread per wall to enter, against the 2.0mm those same walls
+# already give at the throat. The narrow entrance IS the retention.
 #
-# So the funnel now always opens CELL_LEAD_CLR past the cell, and the
-# throat below it is untouched - the closure Francis asked for is exactly
-# as it was, the cell can simply now find its way into it.
-CELL_THROAT   = 10.5   # the clip: what the walls squeeze down to
-CELL_LEAD_CLR = 1.0    # how much WIDER than the cell the funnel top opens
-LEAD_FLARE    = (CELL_D + CELL_LEAD_CLR - CELL_THROAT) / 2.0   # per side
-LEAD_H        = LEAD_FLARE               # equal rise and run = a 45 deg ramp
-CELL_TOP_OPEN = CELL_THROAT + 2.0 * LEAD_FLARE
-CELL_MOUTH    = CELL_THROAT
+# This makes a deliberately firm PETG clip: the 10.50mm throat flexes 2.0mm
+# per wall around a 14.5mm cell. validate() recomputes the real strain on
+# every build; do not trust this comment by memory.
+CELL_TOP_OPEN = 13.5   # visible opening at the upper rim of the funnel
+LEAD_H        = 1.5    # flared funnel above the clip throat
+LEAD_FLARE    = 1.5    # how much wider the funnel is at its top, per side
+CELL_MOUTH    = CELL_TOP_OPEN - 2.0 * LEAD_FLARE
 CELL_WRAP     = math.sqrt(((CELL_D + CELL_CLR) / 2.0) ** 2
                           - (CELL_MOUTH / 2.0) ** 2)
 WALL_THIN  = 1.3      # taken off the OUTSIDE of each wall above the centre
@@ -280,11 +282,10 @@ LABELS = [
 
 # shown in a popup EVERY run: if you see an older version, the deployed copy
 # under %APPDATA% is stale - re-copy the folder (the 28 Jun lesson)
-VERSION = ('rev Q 2026-08-14: boost doubled to eight wedges, two per side; '
-           'the cell funnel now opens 15.5mm so it CLEARS the 14.5mm cell '
-           '(it was 13.5 - narrower than the cell, so there was no lead-in '
-           'at all) while the 10.5mm clip throat is unchanged. PRINT IN '
-           'PETG.')
+VERSION = ('rev R 2026-08-14: boost doubled to eight wedges, two per side. '
+           'Cell saddle entrance is 13.5mm as specified - narrower than the '
+           '14.5mm cell, which is the retention; do not open it up. '
+           'PRINT IN PETG.')
 
 CM = 0.1
 
