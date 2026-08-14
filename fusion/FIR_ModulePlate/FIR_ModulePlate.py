@@ -306,11 +306,11 @@ def corner_brackets(comp, body, cx, cy, w, l, h, z0=PLATE_TOP, name=None):
 
     For the no-hole modules (their hole patterns move between batches, the
     outside dimensions do not). The LEGS still stand at +SLACK so the board
-    enters the mouth easily; the press fit lives in stepped GRIP BANDS on
-    each leg's inner face. Two steps per leg: a half-reach guide band above
-    the seat, then the full-reach band from the plate to the seated board's
-    top face - a printed wedge. Pushing down squeezes the board in; the zip
-    tie remains the retention of record, the wedge kills the rattle.
+    enters the mouth easily; the press fit lives in a WEDGE on each leg's
+    inner face: a fine staircase that flares open at the top lip and
+    narrows continuously to full reach at the seat, then holds that reach
+    down to the plate. Pushing down squeezes the board into the taper; the
+    zip tie remains the retention of record, the wedge kills the rattle.
 
     SNAP_MODS additionally get an EMBOSS above the board top on the
     length-end legs: the board clicks under it and is locked down before
@@ -332,14 +332,30 @@ def corner_brackets(comp, body, cx, cy, w, l, h, z0=PLATE_TOP, name=None):
             # grip bands, buried 1mm into their leg so they can never
             # float free of it (the rev-F flush-face lesson). Reach is
             # measured from the plain face at +SLACK.
-            for reach, zb, hb in ((px / 2.0, band_h, 2.0), (px, 0.0, band_h)):
+            # THE WEDGE (rebuilt 2026-08-14 after Francis called out that
+            # two offset bands still LOOK like straight walls - they do):
+            # the inner face now tapers CONTINUOUSLY, from the plain face
+            # at the leg's top lip down to full reach at the seat, as a
+            # staircase of thin slices. Each slice is sized at its LOWER
+            # (wider) edge so every step's exposed face points UP - zero
+            # overhang on the flat-printed plate, exactly the cell-trough
+            # trick. Below the seat the full-reach band runs to the plate.
+            ramp_h = max(h - band_h, 0.5)
+            n_sli = max(int(ramp_h / 0.7), 4)
+            for reach, place in (
+                    (px, lambda r, t: (cx + sx * (hw - r + t / 2.0), yleg,
+                                       t, BRACKET_L)),
+                    (py, lambda r, t: (xleg, cy + sy * (hl - r + t / 2.0),
+                                       BRACKET_L, t))):
                 t = reach + 1.0
-                box(comp, cx + sx * (hw - reach + t / 2.0), yleg,
-                    z0 + zb, t, BRACKET_L, hb, JOIN, [body])
-            for reach, zb, hb in ((py / 2.0, band_h, 2.0), (py, 0.0, band_h)):
-                t = reach + 1.0
-                box(comp, xleg, cy + sy * (hl - reach + t / 2.0),
-                    z0 + zb, BRACKET_L, t, hb, JOIN, [body])
+                bx, by, tx, ty = place(reach, t)
+                box(comp, bx, by, z0, tx, ty, band_h, JOIN, [body])
+                for i in range(n_sli):
+                    r_i = reach * (n_sli - i) / n_sli
+                    t_i = r_i + 1.0
+                    bx, by, tx, ty = place(r_i, t_i)
+                    box(comp, bx, by, z0 + band_h + i * ramp_h / n_sli,
+                        tx, ty, ramp_h / n_sli + 0.01, JOIN, [body])
             # the self-locking emboss, length-end legs only
             if name in SNAP_MODS:
                 t = py + SNAP_B + 1.0
