@@ -92,19 +92,27 @@ MODULES = [
 # cell can't slide out along its length either.
 CELL_D, CELL_L = 14.5, 52.0
 CELL_CLR   = 0.6      # diametral slack once the cell is seated
-TROUGH_W   = 2.5      # saddle wall either side of the channel
+# Saddle wall either side of the channel. Cut 2.5 -> 2.0 (2026-08-14):
+# Francis on the render, "the thickness is big making it rigid, you can't
+# even push something in - make it lighter". At 2.5 the wall was still
+# 1.2mm thick at the centre line AFTER the outside relief, which is a
+# structure, not a spring. 2.0 leaves 0.7mm there - two extrusions on a
+# 0.4mm nozzle, so it still prints solid, but it gives.
+TROUGH_W   = 2.0
 # How far the walls reach PAST the cell's centre line - this is the "curve
-# round until it closes" that stops the cell lifting out. Against the real
-# 14.5mm cell (corrected 2026-08-14), 3.0mm brings the mouth to 13.86mm -
-# 0.64mm of interference, a real press fit rather than the loose bore the
-# old 18mm-cell numbers left behind.
+# round until it closes" that stops the cell lifting out. Raised 3.0 -> 4.0
+# (2026-08-14) because Francis wanted the saddle to visibly CLOSE on the
+# cell, not just cradle it: against the real 14.5mm cell the mouth now
+# comes in to 12.81mm, so the walls curl 1.69mm over it and you can see
+# them hugging. That is a firm push, not a drop-in.
 #
-# The walls are SLOTTED into fingers (below) AND relieved from the slot
-# floor up, so it is only a light push despite that interference - the
-# whole span flexes rather than just the tip. Tapered-beam peak strain is
-# 1.14% (PLA cracks ~2%, PETG ~5%): a real margin on both.
+# It only stays a push because the walls are SLOTTED into fingers (below),
+# relieved from the slot floor up, AND thinner since TROUGH_W dropped to
+# 2.0 - the whole span flexes rather than just the tip. Tapered-beam peak
+# strain is 1.84% (PLA cracks ~2%, PETG ~5%), so this plate wants PETG -
+# which the snap fingers demand anyway.
 # validate() recomputes this on every build; do not trust it by memory.
-CELL_WRAP  = 3.0
+CELL_WRAP  = 4.0
 LEAD_H     = 1.5      # flared funnel above the mouth, guides the cell in
 LEAD_FLARE = 1.5      # how much wider the funnel is at its top, per side
 WALL_THIN  = 1.3      # taken off the OUTSIDE of each wall above the centre
@@ -161,30 +169,36 @@ HOLES = {
                            (14.7, -10.7), (14.7, 10.7)], 'pilot': 2.0},
 }
 
-BRACKET_T, BRACKET_L = 2.5, 8.0           # corner bracket thickness / leg length
+# BRACKET_T/BRACKET_L deleted with the L-corners they described.
 
-# PRESS FIT (2026-08-14, Francis): apart from the cell, nothing gripped -
-# every board sat loose until its zip tie went on ("just hanging"). His
-# idea, built literally: the bracket mouth stays wide at the top and the
-# inner face steps INWARD toward the seat like a wedge, so a forceful
-# push jams the board into the taper and it stays. Steps rather than a
-# true taper because the plate prints flat, and a step protruding lower
-# down has no overhang at all.
-BOARD_T  = 1.6      # module PCB thickness - the grip band tops out here
-GRIP_DEF = 0.85     # band reach past the PLAIN leg face (SLACK 0.7 + 0.15
-                    # squeeze/side at the seat) - the default wedge
-# Per-module, per-axis reach override. BOOST (Francis): the VIN+/VOUT+
-# ends - its l axis - have visible space; close them by 1.5mm TOTAL,
-# 0.75/side, landing the face 0.05 past the board edge: a snug press,
-# not a fight.
-GRIP_P   = {'5V boost': {'l': 0.75}}
-# CHARGER self-lock (his emboss idea): a bump just above the seated
-# board's top face, on the length-end legs, that the board CLICKS under
-# as it is pressed home - locked down before it rests. One firm push;
-# the click-over is ~3% momentary leg strain, so print the plate in
-# PETG, not PLA, if this snap is kept.
-SNAP_MODS = {'TP4056'}
-SNAP_B, SNAP_H = 0.3, 1.2   # emboss protrusion past the grip face / height
+# SNAP FINGERS (2026-08-14 v2, after Francis reviewed the render: "those
+# walls are straight... the thickness is big making it rigid, you can't
+# even push something in, make it lighter"). He was right twice over: the
+# 2.5mm L-corners were rigid BY CONSTRUCTION - a right angle cannot flex -
+# and the wedge cut into them was a 0.2mm staircase invisible at any
+# scale. Both gone. Each 'corners' module now gets what the cell saddle
+# already has: THIN, FREE-STANDING FLEX FINGERS, one centred on each of
+# the four sides, shaped like a proper wedge - a mouth that flares WIDE
+# open at the top, funnels the board down, and an EMBOSS bump just above
+# the seated board's top face that the board CLICKS under as it is
+# pressed home. Self-locking before it rests; the zip tie stays as the
+# retention of record.
+BOARD_T    = 1.6   # module PCB thickness - the emboss sits just above this
+SNAP_T     = 1.3   # finger thickness - thin enough to actually flex
+SNAP_W     = 9.0   # finger width along the board edge
+SNAP_GAP   = 0.25  # side clearance at the seat (the bump holds it DOWN)
+SNAP_B     = 0.55  # emboss overhang past the board edge - the click
+SNAP_H     = 1.2   # emboss height
+SNAP_FLARE = 1.8   # how far the mouth opens past the emboss tip
+SNAP_LEAD  = 2.6   # height of the flared wedge mouth above the emboss
+SNAP_SLI   = 4     # staircase slices in the flare (up-facing steps only)
+# Per-module, per-axis override of the SEAT-level face offset from the
+# board edge (+ = clearance, - = pinch). BOOST (Francis): the VIN+/VOUT+
+# ends - its l axis - had visible space; compressed 1.5mm total from the
+# old 0.7/side slack, landing the faces 0.05 INTO the board: a snug press.
+GRIP_P = {'5V boost': {'l': -0.05}}
+# Click-over deflection is SNAP_B on a ~6.7mm finger: ~2.4% momentary
+# strain. Fine in PETG (~5%), marginal in PLA - print the plate in PETG.
 TIE_SLOT = (3.0, 10.0)                    # zip-tie slot through the plate
 # How far a tie slot sits outside its module. 5.0 left only a 0.30mm web
 # between the slot and the bracket foot beside it - the brackets now grow
@@ -235,8 +249,9 @@ LABELS = [
 
 # shown in a popup EVERY run: if you see an older version, the deployed copy
 # under %APPDATA% is stale - re-copy the folder (the 28 Jun lesson)
-VERSION = ('rev H 2026-08-14: module names + set-points engraved into the '
-           'plate, so the buck and the relay can never be confused')
+VERSION = ('rev J 2026-08-14: the L-corners are gone. Thin snap fingers '
+           'with a flared mouth and a click emboss hold every board, and '
+           'the cell saddle closes 1.69mm over the cell. PRINT IN PETG.')
 
 CM = 0.1
 
@@ -300,74 +315,65 @@ def fillet_vertical(comp, body, r):
         SKIPPED.append('corner fillet: {}'.format(e))
 
 
-def corner_brackets(comp, body, cx, cy, w, l, h, z0=PLATE_TOP, name=None):
-    """Four L-shaped corners that locate a module by its OUTLINE - and,
-    since the press-fit round (2026-08-14), GRIP it.
+def snap_fingers(comp, body, cx, cy, w, l, name=None):
+    """FOUR THIN FLEX FINGERS - one centred on each side - that the board
+    is PRESSED into and clicks under. Replaces the L-corner brackets.
 
-    For the no-hole modules (their hole patterns move between batches, the
-    outside dimensions do not). The LEGS still stand at +SLACK so the board
-    enters the mouth easily; the press fit lives in a WEDGE on each leg's
-    inner face: a fine staircase that flares open at the top lip and
-    narrows continuously to full reach at the seat, then holds that reach
-    down to the plate. Pushing down squeezes the board into the taper; the
-    zip tie remains the retention of record, the wedge kills the rattle.
+    Why the L-corners had to go (Francis, on the rev-I render): a right
+    angle is a stiffener. Two 2.5mm walls meeting at 90 degrees cannot
+    flex in either direction, so no amount of taper cut into them would
+    ever let a board push in - "you can't even push something in". And
+    the taper itself was a 0.2mm staircase, invisible at any scale.
 
-    SNAP_MODS additionally get an EMBOSS above the board top on the
-    length-end legs: the board clicks under it and is locked down before
-    it rests (the self-locking charger idea).
+    Each finger is a free-standing 1.3mm wall, rooted on the plate, in
+    three parts up its height - this is the actual wedge profile:
+
+        \\        <- FLARE: mouth opens SNAP_FLARE wide, guides the board
+         \\          in. Stepped, every ledge facing UP, so a flat-printed
+          |         plate needs no support (the cell-trough trick).
+          >       <- EMBOSS: juts SNAP_B PAST the board edge. The board
+          |          shoves it aside going down and it springs back OVER
+          |          the top face. That is the click, and the lock.
+          |       <- STEM: plain, SNAP_GAP off the board edge, down to
+          |          the plate. Locates the board; does not grip it.
+
+    The fingers sit at the side CENTRES, so the corner pedestals (which
+    carry the board's weight) and the zip-tie slots are untouched. The
+    tie is still the retention of record; the fingers stop the rattle and
+    hold the board captive while the tie goes on.
     """
-    hw, hl = w / 2.0 + SLACK, l / 2.0 + SLACK
-    px = (GRIP_P.get(name) or {}).get('w', GRIP_DEF)
-    py = (GRIP_P.get(name) or {}).get('l', GRIP_DEF)
-    band_h = RAISE + BOARD_T       # plate -> flush with the seated board top
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            x = cx + sx * (hw + BRACKET_T / 2.0)
-            y = cy + sy * (hl + BRACKET_T / 2.0)
-            xleg = x - sx * (BRACKET_L - BRACKET_T) / 2.0  # leg along X
-            yleg = y - sy * (BRACKET_L - BRACKET_T) / 2.0  # leg along Y
-            # one leg along X, one along Y -> an L that traps the corner
-            box(comp, xleg, y, z0, BRACKET_L, BRACKET_T, h, JOIN, [body])
-            box(comp, x, yleg, z0, BRACKET_T, BRACKET_L, h, JOIN, [body])
-            # grip bands, buried 1mm into their leg so they can never
-            # float free of it (the rev-F flush-face lesson). Reach is
-            # measured from the plain face at +SLACK.
-            # THE WEDGE (rebuilt 2026-08-14 after Francis called out that
-            # two offset bands still LOOK like straight walls - they do):
-            # the inner face now tapers CONTINUOUSLY, from the plain face
-            # at the leg's top lip down to full reach at the seat, as a
-            # staircase of thin slices. Each slice is sized at its LOWER
-            # (wider) edge so every step's exposed face points UP - zero
-            # overhang on the flat-printed plate, exactly the cell-trough
-            # trick. Below the seat the full-reach band runs to the plate.
-            ramp_h = max(h - band_h, 0.5)
-            n_sli = max(int(ramp_h / 0.7), 4)
-            for reach, place in (
-                    (px, lambda r, t: (cx + sx * (hw - r + t / 2.0), yleg,
-                                       t, BRACKET_L)),
-                    (py, lambda r, t: (xleg, cy + sy * (hl - r + t / 2.0),
-                                       BRACKET_L, t))):
-                t = reach + 1.0
-                bx, by, tx, ty = place(reach, t)
-                box(comp, bx, by, z0, tx, ty, band_h, JOIN, [body])
-                for i in range(n_sli):
-                    r_i = reach * (n_sli - i) / n_sli
-                    t_i = r_i + 1.0
-                    bx, by, tx, ty = place(r_i, t_i)
-                    box(comp, bx, by, z0 + band_h + i * ramp_h / n_sli,
-                        tx, ty, ramp_h / n_sli + 0.01, JOIN, [body])
-            # the self-locking emboss, length-end legs only
-            if name in SNAP_MODS:
-                t = py + SNAP_B + 1.0
-                box(comp, xleg,
-                    cy + sy * (hl - py - SNAP_B + t / 2.0),
-                    z0 + band_h + 0.1, BRACKET_L, t, SNAP_H, JOIN, [body])
-    # NOTE: callers must pass z0=PLATE_TOP. Rev F started these at
-    # PLATE_TOP+RAISE so they would "sit on the pedestals" - but the
-    # pedestal's outer face and the bracket's inner face both land at
-    # cx +- (w/2 + SLACK), flush to the micron. Zero shared volume AND zero
-    # shared area, so the JOIN had nothing to fuse to and every L came out
-    # floating 5mm above bare plate. They now grow from the plate itself.
+    board_top = RAISE + BOARD_T          # top face of the seated board
+    ov = GRIP_P.get(name) or {}
+
+    def slab(axis, s, face, z, hgt, thick):
+        """One slab of one finger. `face` = the slab's INNER face, as a
+        distance from the module centre-line along `axis`."""
+        if axis == 'w':
+            box(comp, cx + s * (face + thick / 2.0), cy,
+                PLATE_TOP + z, thick, SNAP_W, hgt, JOIN, [body])
+        else:
+            box(comp, cx, cy + s * (face + thick / 2.0),
+                PLATE_TOP + z, SNAP_W, thick, hgt, JOIN, [body])
+
+    for axis, half in (('w', w / 2.0), ('l', l / 2.0)):
+        seat = half + ov.get(axis, SNAP_GAP)   # stem face: clear of the board
+        tip = half - SNAP_B                    # emboss tip: INSIDE that edge
+        outer = seat + SNAP_T                  # the finger's back face
+        for s in (-1, 1):
+            # 1. stem - plate up to the board's top face
+            slab(axis, s, seat, 0.0, board_top, SNAP_T)
+            # 2. emboss - reaches back in over the board. Its underside is
+            #    the retaining face; it overhangs the stem by under 0.8mm,
+            #    which FDM bridges without support.
+            slab(axis, s, tip, board_top, SNAP_H, outer - tip)
+            # 3. flare - the mouth. Sliced so each step's exposed ledge
+            #    faces UP: going up the face only ever moves OUTWARD, so
+            #    every slice lands squarely on the one beneath it.
+            for i in range(SNAP_SLI):
+                f = tip + SNAP_FLARE * i / SNAP_SLI
+                slab(axis, s, f,
+                     board_top + SNAP_H + i * SNAP_LEAD / SNAP_SLI,
+                     SNAP_LEAD / SNAP_SLI + 0.01, outer - f)
 
 
 def corner_pedestals(comp, body, cx, cy, w, l):
@@ -544,14 +550,22 @@ def _feature_rects():
                                    cx + sx * (w / 2 - PED_SZ / 2 + SLACK),
                                    cy + sy * (l / 2 - PED_SZ / 2 + SLACK),
                                    PED_SZ, PED_SZ))
-                    bx = cx + sx * (w / 2 + SLACK + BRACKET_T / 2)
-                    by = cy + sy * (l / 2 + SLACK + BRACKET_T / 2)
-                    F.append(_rect(name, name + ' bracket',
-                                   bx - sx * (BRACKET_L - BRACKET_T) / 2, by,
-                                   BRACKET_L, BRACKET_T))
-                    F.append(_rect(name, name + ' bracket', bx,
-                                   by - sy * (BRACKET_L - BRACKET_T) / 2,
-                                   BRACKET_T, BRACKET_L))
+            # the four snap fingers, at the side CENTRES. Modelled from the
+            # emboss tip (innermost) to the back face (outermost), which is
+            # the full plan footprint the finger can ever occupy.
+            ov = GRIP_P.get(name) or {}
+            for axis, half, sz in (('w', w / 2, 'x'), ('l', l / 2, 'y')):
+                seat = half + ov.get(axis, SNAP_GAP)
+                tip, outer = half - SNAP_B, half + ov.get(axis,
+                                                          SNAP_GAP) + SNAP_T
+                mid, thick = (tip + outer) / 2, outer - tip
+                for s in (-1, 1):
+                    if sz == 'x':
+                        F.append(_rect(name, name + ' finger',
+                                       cx + s * mid, cy, thick, SNAP_W))
+                    else:
+                        F.append(_rect(name, name + ' finger',
+                                       cx, cy + s * mid, SNAP_W, thick))
             sw, sl = TIE_SLOT
             if TIE_AXIS.get(name, 'x') == 'y':
                 for sy in (-1, 1):
@@ -622,13 +636,37 @@ def validate():
         if a[2] < -half or a[3] > half or a[4] < -half or a[5] > half:
             bad.append('off the plate: %s' % a[1])
 
-    # ---- Z: brackets must be rooted on the plate and reach past the seat ----
+    # ---- the snap fingers: do they CLICK, and do they survive it? ----
+    # The old check here compared RAISE+wall against RAISE, which is true
+    # for any positive wall - it could never fail and proved nothing. This
+    # one asks the two questions that decide whether the part works.
+    #
+    # Click-over deflection is the emboss reach measured from the STEM
+    # face, since that is where the wall starts from: the board pushes the
+    # finger out by (seat - tip). Cantilever root is the plate, the load
+    # lands at the emboss mid-height.
+    snap_len = RAISE + BOARD_T + SNAP_H / 2.0
     for (name, w, l, h, cx, cy, mount) in MODULES:
         if mount != 'corners':
             continue
-        wall = 5.0 if h > 10 else 3.5
-        if RAISE + wall <= RAISE:
-            bad.append('%s brackets do not clear the seated board' % name)
+        ov = GRIP_P.get(name) or {}
+        for axis, half in (('w', w / 2.0), ('l', l / 2.0)):
+            seat = half + ov.get(axis, SNAP_GAP)
+            over = half - (half - SNAP_B)      # emboss past the board edge
+            defl_s = seat - (half - SNAP_B)    # stem face -> emboss tip
+            if over <= 0.15:
+                bad.append('%s %s emboss only %.2fmm over the board - no '
+                           'click' % (name, axis, over))
+            # straight cantilever, uniform section: e = 3*t*d / (2*L^2)
+            st = 3.0 * SNAP_T * defl_s / (2.0 * snap_len ** 2)
+            if st > 0.045:
+                bad.append('%s %s finger strain %.2f%% - snaps even in PETG'
+                           % (name, axis, st * 100))
+    snap_worst = max(
+        3.0 * SNAP_T * ((half + (GRIP_P.get(n) or {}).get(a, SNAP_GAP))
+                        - (half - SNAP_B)) / (2.0 * snap_len ** 2)
+        for (n, w, l, h, cx, cy, mt) in MODULES if mt == 'corners'
+        for a, half in (('w', w / 2.0), ('l', l / 2.0)))
 
     # ---- the post pilot must break out of the post top ----
     if PLATE_TOP + 1.0 + (POST_H - 1.0) < PLATE_TOP + POST_H - 1e-9:
@@ -670,11 +708,14 @@ def validate():
                    % interf)
     if strain > 0.02:
         bad.append('finger strain %.2f%% - cracks PLA (~2%%)' % (strain * 100))
-    info = ('mouth %.2fmm vs cell %.1f -> %.2fmm interference (%.2fmm per '
-            'wall); %d fingers/side %.1fmm wide, %.1fmm free, TAPERED strain '
-            '%.2f%% (PETG ~5%%, PLA ~2%%)'
+    info = ('CELL: mouth %.2fmm vs cell %.1f -> %.2fmm interference (%.2fmm '
+            'per wall); %d fingers/side %.1fmm wide, %.1fmm free, TAPERED '
+            'strain %.2f%% (PETG ~5%%, PLA ~2%%)\n'
+            'SNAP: %.1fmm wall, %.2fmm emboss over the board, %.1fmm mouth '
+            'flare, worst click strain %.2f%% (PETG ~5%%, PLA ~2%%)'
             % (mouth, CELL_D, interf, defl, len(SLOT_Y) + 1, width, span,
-               strain * 100))
+               strain * 100,
+               SNAP_T, SNAP_B, SNAP_FLARE, snap_worst * 100))
     return bad, info
 
 
@@ -732,9 +773,7 @@ def build_plate(comp):
             screw_bosses(comp, plate, cx, cy, HOLES[name])
         elif mount == 'corners':
             corner_pedestals(comp, plate, cx, cy, w, l)
-            # from the PLATE, tall enough to clear the seated board by `wall`
-            corner_brackets(comp, plate, cx, cy, w, l, RAISE + wall,
-                            z0=PLATE_TOP, name=name)
+            snap_fingers(comp, plate, cx, cy, w, l, name=name)
             tie_slots(comp, plate, cx, cy, w, l, axis=TIE_AXIS.get(name, 'x'))
         else:                                   # 'flat' - the bare cell
             ow = cell_trough(comp, plate, cx, cy)
