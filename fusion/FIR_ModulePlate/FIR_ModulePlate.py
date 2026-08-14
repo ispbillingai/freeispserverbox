@@ -64,38 +64,47 @@ POST_D, POST_H, POST_PILOT = 7.0, 30.0, 2.5
 # Heights include the trimpot; set the buck to 5.4V and the boost to 5.0V
 # BEFORE the board goes on - reaching them after means pulling 4 screws.
 MODULES = [
-    # BARE CELL, no plastic holder (Francis, 2026-08-13): 59 long x 18 dia.
-    # So it gets a curved SADDLE, not a rectangular pocket - see cell_trough.
-    ('battery cell', 18.0, 59.0, 18.0, -35.0,   0.0, 'flat'),
-    ('LM2596 buck',  43.0, 21.0, 14.0,  20.0,  38.0, 'screws'),
+    # BARE CELL, no plastic holder: a 14500, 52 long x 14.5 dia (corrected
+    # 2026-08-14 - see CELL_D/CELL_L). Gets a curved SADDLE with an end
+    # stop, not a rectangular pocket - see cell_trough.
+    ('battery cell', 14.5, 52.0, 14.5, -35.0,   0.0, 'flat'),
+    # buck vernier'd 2026-08-14: 43.2 x 21.4 (was 43 x 21 from the datasheet)
+    ('LM2596 buck',  43.2, 21.4, 14.0,  20.0,  38.0, 'screws'),
     ('5V boost',     17.0, 36.0, 14.0,   5.0, -26.0, 'corners'),
     # moved out to x=40: at 35 its bracket foot sat 1.2mm INSIDE the boost's
-    # zip-tie slot, and the two modules' facing slots merged into one hole
-    ('TP4056',       26.0, 17.0,  6.0,  40.0, -25.0, 'corners'),
+    # zip-tie slot, and the two modules' facing slots merged into one hole.
+    # LENGTH 28.2 (Francis, 2026-08-14) - was 26; there is also a ~1mm
+    # extrusion overhanging one length side, and 28.2 is the real envelope
+    # the brackets must clear. The grip bands sit at the CORNERS (8mm
+    # legs), so a mid-edge extrusion is untouched - verify which side.
+    ('TP4056',       28.2, 17.0,  6.0,  40.0, -25.0, 'corners'),
     # relay vernier'd: board 34 x 26, but the screw-terminal side overhangs
     # to 46 total - that extra 12mm hangs in free air toward +X (nothing may
     # stand under x 37..49 near y 11). Holes are on the 34 x 26 board.
     ('relay',        34.0, 26.0, 19.0,  20.0,  11.0, 'screws'),
 ]
 # ---------------- the bare cell ----------------
-# ⚠️ A standard 18650 is 65mm. Francis measured 59 - if that was a slip, the
-# saddle is 6mm short, so re-check before printing. Length is the only
-# dimension that matters here: both ends are OPEN, so a longer cell simply
-# overhangs, but the tie slots want to land on the cell, not past its ends.
-CELL_D, CELL_L = 18.0, 59.0
+# CORRECTED (2026-08-14, Francis re-measured): the cell is 14.5 dia x 52mm -
+# a 14500, not an 18650. The old 18/59 saddle was cut for a fatter, longer
+# cell than what's actually seated, so the bore sat oversize and the cell
+# had play instead of a press fit ("just hanging"). Both ends stay OPEN so
+# leads can leave either way; ONE end now gets a stop block (below) so the
+# cell can't slide out along its length either.
+CELL_D, CELL_L = 14.5, 52.0
 CELL_CLR   = 0.6      # diametral slack once the cell is seated
 TROUGH_W   = 2.5      # saddle wall either side of the channel
 # How far the walls reach PAST the cell's centre line - this is the "curve
-# round until it closes" that stops the cell lifting out. 4.0mm brings the
-# mouth down to 16.8mm against an 18.0mm cell, so the walls visibly hug it.
+# round until it closes" that stops the cell lifting out. Against the real
+# 14.5mm cell (corrected 2026-08-14), 3.0mm brings the mouth to 13.86mm -
+# 0.64mm of interference, a real press fit rather than the loose bore the
+# old 18mm-cell numbers left behind.
 #
-# That is 1.2mm of interference, far too much for a solid wall to give. It
-# is only a light push because the walls are SLOTTED into fingers (below)
-# AND relieved from the slot floor up, so the whole 11.3mm flexes rather
-# than just the top 5.5mm. Integrated over the real taper that is 1.46%
-# peak strain - safe in PETG (3.4x margin) and even in PLA (1.4x).
+# The walls are SLOTTED into fingers (below) AND relieved from the slot
+# floor up, so it is only a light push despite that interference - the
+# whole span flexes rather than just the tip. Tapered-beam peak strain is
+# 1.14% (PLA cracks ~2%, PETG ~5%): a real margin on both.
 # validate() recomputes this on every build; do not trust it by memory.
-CELL_WRAP  = 4.0
+CELL_WRAP  = 3.0
 LEAD_H     = 1.5      # flared funnel above the mouth, guides the cell in
 LEAD_FLARE = 1.5      # how much wider the funnel is at its top, per side
 WALL_THIN  = 1.3      # taken off the OUTSIDE of each wall above the centre
@@ -103,6 +112,13 @@ SLOT_W     = 2.0      # relief slots that turn the walls into fingers
 SLOT_Y     = (-14.75, 0.0, 14.75)
 SLOT_FLOOR = 2.0      # slots stop this far up, so the bed stays continuous
 LIP_H      = 0.8      # height of the constant-width retention lip at the mouth
+# END STOP (2026-08-14, Francis): a bought cell holder has a closed end you
+# push the cell against; ours had neither end closed, so the cell could also
+# slide lengthwise. Wall goes across the -Y mouth of the saddle - the +Y end
+# stays fully open so the leads still have one clear way out. A narrow notch
+# through the stop lets the -Y-side lead escape too, instead of trapping it.
+END_STOP_T    = 3.0    # stop wall thickness, along the cell's length
+END_STOP_NOTCH = 4.0   # width of the lead-wire notch through the stop
 # Slices approximating the half-round. 32 keeps the worst step at 0.67mm,
 # and that worst case is the bottom-most slice where the circle is nearly
 # vertical - the cell beds on the flanks either side of it, so it does not
@@ -128,14 +144,47 @@ SLACK  = 0.7
 # four there, two take the screws and the other two just support the board.
 #
 # RELAY: 4 corner holes on the 34x26 board. Spacing still a GUESS - vernier.
+# BUCK holes re-measured 2026-08-14 as EDGE-TO-CIRCUMFERENCE distances:
+# 1.2mm from the LONG (43.2) side to the hole, 4.8mm from the SHORT (21.4)
+# side. Converting to centres assumes the board hole is Ø3.0 (r=1.5,
+# standard on LM2596 modules - VERIFY): from long edge 1.2+1.5=2.7 ->
+# y = 21.4/2-2.7 = 8.0; from short edge 4.8+1.5=6.3 -> x = 43.2/2-6.3
+# = 15.3. Diagonal 34.5mm, consistent with the earlier ~35mm measurement.
+# All four positions still drawn (holes are on ONE diagonal - see above).
+#
+# RELAY holes were ~0.5mm tight both ways (Francis, 2026-08-14): spread
+# outward 0.5mm on width and length. Was (+-14.2, +-10.2).
 HOLES = {
-    'LM2596 buck': {'at': [(-17.0, -5.5), (-17.0, 5.5),
-                           (17.0, -5.5), (17.0, 5.5)], 'pilot': 2.5},
-    'relay':       {'at': [(-14.2, -10.2), (-14.2, 10.2),
-                           (14.2, -10.2), (14.2, 10.2)], 'pilot': 2.0},
+    'LM2596 buck': {'at': [(-15.3, -8.0), (-15.3, 8.0),
+                           (15.3, -8.0), (15.3, 8.0)], 'pilot': 2.5},
+    'relay':       {'at': [(-14.7, -10.7), (-14.7, 10.7),
+                           (14.7, -10.7), (14.7, 10.7)], 'pilot': 2.0},
 }
 
 BRACKET_T, BRACKET_L = 2.5, 8.0           # corner bracket thickness / leg length
+
+# PRESS FIT (2026-08-14, Francis): apart from the cell, nothing gripped -
+# every board sat loose until its zip tie went on ("just hanging"). His
+# idea, built literally: the bracket mouth stays wide at the top and the
+# inner face steps INWARD toward the seat like a wedge, so a forceful
+# push jams the board into the taper and it stays. Steps rather than a
+# true taper because the plate prints flat, and a step protruding lower
+# down has no overhang at all.
+BOARD_T  = 1.6      # module PCB thickness - the grip band tops out here
+GRIP_DEF = 0.85     # band reach past the PLAIN leg face (SLACK 0.7 + 0.15
+                    # squeeze/side at the seat) - the default wedge
+# Per-module, per-axis reach override. BOOST (Francis): the VIN+/VOUT+
+# ends - its l axis - have visible space; close them by 1.5mm TOTAL,
+# 0.75/side, landing the face 0.05 past the board edge: a snug press,
+# not a fight.
+GRIP_P   = {'5V boost': {'l': 0.75}}
+# CHARGER self-lock (his emboss idea): a bump just above the seated
+# board's top face, on the length-end legs, that the board CLICKS under
+# as it is pressed home - locked down before it rests. One firm push;
+# the click-over is ~3% momentary leg strain, so print the plate in
+# PETG, not PLA, if this snap is kept.
+SNAP_MODS = {'TP4056'}
+SNAP_B, SNAP_H = 0.3, 1.2   # emboss protrusion past the grip face / height
 TIE_SLOT = (3.0, 10.0)                    # zip-tie slot through the plate
 # How far a tie slot sits outside its module. 5.0 left only a 0.30mm web
 # between the slot and the bracket foot beside it - the brackets now grow
@@ -251,24 +300,52 @@ def fillet_vertical(comp, body, r):
         SKIPPED.append('corner fillet: {}'.format(e))
 
 
-def corner_brackets(comp, body, cx, cy, w, l, h, z0=PLATE_TOP):
-    """Four L-shaped corners that locate a module by its OUTLINE.
+def corner_brackets(comp, body, cx, cy, w, l, h, z0=PLATE_TOP, name=None):
+    """Four L-shaped corners that locate a module by its OUTLINE - and,
+    since the press-fit round (2026-08-14), GRIP it.
 
     For the no-hole modules (their hole patterns move between batches, the
-    outside dimensions do not). SLACK per side: the board DROPS in and sits,
-    it is never pressed - the zip tie is what holds it down. z0 lets the L
-    sit on top of the pedestals.
+    outside dimensions do not). The LEGS still stand at +SLACK so the board
+    enters the mouth easily; the press fit lives in stepped GRIP BANDS on
+    each leg's inner face. Two steps per leg: a half-reach guide band above
+    the seat, then the full-reach band from the plate to the seated board's
+    top face - a printed wedge. Pushing down squeezes the board in; the zip
+    tie remains the retention of record, the wedge kills the rattle.
+
+    SNAP_MODS additionally get an EMBOSS above the board top on the
+    length-end legs: the board clicks under it and is locked down before
+    it rests (the self-locking charger idea).
     """
     hw, hl = w / 2.0 + SLACK, l / 2.0 + SLACK
+    px = (GRIP_P.get(name) or {}).get('w', GRIP_DEF)
+    py = (GRIP_P.get(name) or {}).get('l', GRIP_DEF)
+    band_h = RAISE + BOARD_T       # plate -> flush with the seated board top
     for sx in (-1, 1):
         for sy in (-1, 1):
             x = cx + sx * (hw + BRACKET_T / 2.0)
             y = cy + sy * (hl + BRACKET_T / 2.0)
+            xleg = x - sx * (BRACKET_L - BRACKET_T) / 2.0  # leg along X
+            yleg = y - sy * (BRACKET_L - BRACKET_T) / 2.0  # leg along Y
             # one leg along X, one along Y -> an L that traps the corner
-            box(comp, x - sx * (BRACKET_L - BRACKET_T) / 2.0, y,
-                z0, BRACKET_L, BRACKET_T, h, JOIN, [body])
-            box(comp, x, y - sy * (BRACKET_L - BRACKET_T) / 2.0,
-                z0, BRACKET_T, BRACKET_L, h, JOIN, [body])
+            box(comp, xleg, y, z0, BRACKET_L, BRACKET_T, h, JOIN, [body])
+            box(comp, x, yleg, z0, BRACKET_T, BRACKET_L, h, JOIN, [body])
+            # grip bands, buried 1mm into their leg so they can never
+            # float free of it (the rev-F flush-face lesson). Reach is
+            # measured from the plain face at +SLACK.
+            for reach, zb, hb in ((px / 2.0, band_h, 2.0), (px, 0.0, band_h)):
+                t = reach + 1.0
+                box(comp, cx + sx * (hw - reach + t / 2.0), yleg,
+                    z0 + zb, t, BRACKET_L, hb, JOIN, [body])
+            for reach, zb, hb in ((py / 2.0, band_h, 2.0), (py, 0.0, band_h)):
+                t = reach + 1.0
+                box(comp, xleg, cy + sy * (hl - reach + t / 2.0),
+                    z0 + zb, BRACKET_L, t, hb, JOIN, [body])
+            # the self-locking emboss, length-end legs only
+            if name in SNAP_MODS:
+                t = py + SNAP_B + 1.0
+                box(comp, xleg,
+                    cy + sy * (hl - py - SNAP_B + t / 2.0),
+                    z0 + band_h + 0.1, BRACKET_L, t, SNAP_H, JOIN, [body])
     # NOTE: callers must pass z0=PLATE_TOP. Rev F started these at
     # PLATE_TOP+RAISE so they would "sit on the pedestals" - but the
     # pedestal's outer face and the bracket's inner face both land at
@@ -372,6 +449,17 @@ def cell_trough(comp, body, cx, cy):
     for sy in SLOT_Y:
         box(comp, cx, cy + sy, PLATE_TOP + SLOT_FLOOR, outer_w + 2, SLOT_W,
             wall_h + LEAD_H - SLOT_FLOOR + 1.0, CUT, [body])
+
+    # ---- end stop: closes the -Y mouth so the cell has a positive length-
+    # wise stop, like a bought holder's end contact. Re-fills the bore over
+    # END_STOP_T at that end, up through the true bore height (not the relief
+    # slots or the funnel, which stay clear of it). A notch through the
+    # middle keeps that end's lead free to leave.
+    stop_y = cy - CELL_L / 2.0 + END_STOP_T / 2.0
+    box(comp, cx, stop_y, PLATE_TOP, outer_w, END_STOP_T, wall_h, JOIN,
+        [body])
+    box(comp, cx, stop_y, PLATE_TOP, END_STOP_NOTCH, END_STOP_T + 2,
+        wall_h, CUT, [body])
 
     return outer_w
 
@@ -630,7 +718,7 @@ def build_plate(comp):
             corner_pedestals(comp, plate, cx, cy, w, l)
             # from the PLATE, tall enough to clear the seated board by `wall`
             corner_brackets(comp, plate, cx, cy, w, l, RAISE + wall,
-                            z0=PLATE_TOP)
+                            z0=PLATE_TOP, name=name)
             tie_slots(comp, plate, cx, cy, w, l, axis=TIE_AXIS.get(name, 'x'))
         else:                                   # 'flat' - the bare cell
             ow = cell_trough(comp, plate, cx, cy)
