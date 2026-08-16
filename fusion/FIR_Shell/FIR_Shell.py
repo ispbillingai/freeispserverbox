@@ -623,8 +623,9 @@ def horn_floor_mount(comp, sh):
     more headroom than the 114mm cavity has - so the sound leaves through the
     slotted window both front parts carry above the switch.
 
-    The pads raise the foot clear of the floor's corner fillets and give an M4
-    self-tapper 8mm of material without breaking through the 3mm floor.
+    The pads raise the foot clear of the floor's corner fillets.  Pad 6mm +
+    pilot 7mm: an M4 x 10 bottoms exactly at the pilot floor with 2mm of tub
+    floor under it.  Never use longer than M4 x 10 here.
     """
     for px, py in INTERFACE.horn_mount_points():
         cyl(comp, px, py, FLOOR, HORN_PAD_D, HORN_PAD_H, JOIN, [sh])

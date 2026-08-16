@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-16.5'
+INTERFACE_VERSION = '2026-08-16.6'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -139,7 +139,10 @@ POE_PLUG_MIN_AIR = POE_PLUG_RIGHT_ANGLE_L + 1.0
 HORN_W, HORN_L, HORN_H = 102.0, 105.0, 102.0
 HORN_BOLT_TAIL = 15.0             # tightening bolts standing off the back
 HORN_CX = -73.0                   # body centre; -124..-22 clears the wall bosses
-HORN_MOUTH_Y = 79.5               # mouth face, 2 mm behind the switch cradle
+# 4 mm behind the switch cradle's back wall: the cradle's rear snap hooks need
+# ~3 mm of backward flex to click the switch in or out, so the switch stays
+# serviceable without unbolting the horn.  Was 79.5 (2 mm), which trapped it.
+HORN_MOUTH_Y = 77.5
 HORN_FOOT_D = 69.0                # circular bracket foot, measured
 HORN_HOLE_D = 6.0                 # measured holes in that foot
 HORN_BASE_C2C, HORN_SIDE_C2C = 38.5, 50.0
@@ -147,10 +150,12 @@ HORN_BASE_C2C, HORN_SIDE_C2C = 38.5, 50.0
 # three floor pads move with this one number, so it is worth a tape measure.
 HORN_FOOT_FROM_MOUTH = 99.0
 HORN_FOOT_MEASURED = False
-# Floor mounting: three pads raise the foot clear of the floor fillets and give
-# an M4 self-tapper 8 mm of material without breaking through the 3 mm floor.
-HORN_PAD_D, HORN_PAD_H = 14.0, 5.0
-HORN_PILOT_D, HORN_PILOT_DEPTH = 3.4, 6.0
+# Floor mounting: three pads raise the foot clear of the floor fillets.  Pad
+# 6 mm + pilot 7 mm is sized so an M4 x 10 (3 mm foot plate + 7 mm of thread)
+# bottoms exactly at the pilot floor with 2 mm of tub floor still under it;
+# M4 x 8 also works.  Do not use longer than M4 x 10.
+HORN_PAD_D, HORN_PAD_H = 14.0, 6.0
+HORN_PILOT_D, HORN_PILOT_DEPTH = 3.4, 7.0
 # NO SOUND VENTS, by owner decision (16 Aug 2026): this siren is loud enough
 # that a plastic box will not meaningfully muffle it, so the front panel and the
 # lid both stay closed.  Do not re-add a grille to FIR_BottomLid, FIR_CurvedLid
