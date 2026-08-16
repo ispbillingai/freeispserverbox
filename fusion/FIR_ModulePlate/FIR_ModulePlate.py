@@ -16,7 +16,9 @@
 #   The modules go UNDERNEATH the PCB, not beside it. They need only 26% of
 #   the area under a 115x115 board, so spreading them out sideways was pure
 #   waste - the first draft came out 150x180. Raising the PCB on 26mm posts
-#   puts all four in space that was empty anyway, and the tray is 125x125.
+#   puts all four in space that was empty anyway.  The tray outer outline is
+#   now a shared snug fit for the ModuleGadget pocket; its component layout
+#   remains centred and unchanged.
 #
 # ⚠️ KNOCK-ON: the box-side mounting for this tray must be redrawn to match
 #   TRAY_MOUNT below. The old FIR_ModuleGadget shell (130x115 cavity) can no
@@ -26,29 +28,90 @@
 #   correct MODULES before printing - especially the heights, which are set
 #   by the trimpots, not the board.
 
+import importlib.util
 import math
+import os
 import sys
 try:
     import adsk.core, adsk.fusion, adsk.cam, traceback
 except ImportError:                      # running under plain python --check
     adsk = None
 
-# ---------------- TRAY ----------------
-PLATE_W, PLATE_H, PLATE_TH = 125.0, 125.0, 3.0
+
+def _load_shared_interface():
+    """Load the one mechanical-interface contract in workspace or Fusion."""
+    script_file = globals().get('__file__', '')
+    script_dir = (os.path.dirname(os.path.abspath(script_file))
+                  if script_file else os.getcwd())
+    candidates = []
+    override = os.environ.get('FIR_INTERFACE_PATH')
+    if override:
+        candidates.append(override if override.lower().endswith('.py')
+                          else os.path.join(override, 'FIR_Interface.py'))
+    # The deployed ModulePlate launcher executes this workspace source with
+    # ``_workspace_source`` still in globals.  Prefer that true source path
+    # when it is available, rather than accidentally mixing two interfaces.
+    workspace_source = globals().get('_workspace_source')
+    if workspace_source:
+        candidates.append(os.path.join(
+            os.path.dirname(os.path.abspath(workspace_source)), '..',
+            '_shared', 'FIR_Interface.py'))
+    # In a normal workspace/deployed layout, _shared is a sibling of each
+    # script folder.  The first entry also supports a deliberately co-located
+    # copy for a portable one-script Fusion deployment.
+    candidates.extend((
+        os.path.join(script_dir, 'FIR_Interface.py'),
+        os.path.join(script_dir, '..', '_shared', 'FIR_Interface.py'),
+    ))
+
+    seen = set()
+    for candidate in candidates:
+        path = os.path.realpath(os.path.abspath(candidate))
+        if path in seen or not os.path.isfile(path):
+            continue
+        seen.add(path)
+        # Fusion can retain modules between Runs.  Always reload this shared
+        # mechanical contract so the plate cannot silently use stale fit data.
+        sys.modules.pop('_freeisp_shared_interface', None)
+        spec = importlib.util.spec_from_file_location(
+            '_freeisp_shared_interface', path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules['_freeisp_shared_interface'] = module
+            spec.loader.exec_module(module)
+            return module
+    raise ImportError(
+        'FIR_Interface.py not found. Deploy fusion/_shared beside the '
+        'Fusion script folders, or set FIR_INTERFACE_PATH.')
+
+
+INTERFACE = _load_shared_interface()
+
+# ---------------- shared tray / PCB interface ----------------
+PLATE_W, PLATE_H, PLATE_TH = INTERFACE.TRAY_W, INTERFACE.TRAY_H, INTERFACE.TRAY_TH
 PLATE_TOP = PLATE_TH
-CORNER_R = 6.0
+CORNER_R = INTERFACE.TRAY_CORNER_R
+# A small underside chamfer leads the snug plate past normal FDM elephant-foot
+# material as it is pushed up through the Gadget's open bottom.
+TRAY_ENTRY_CHAMFER = 0.50
 
 # ---------------- the PCB ----------------
-# freeisp_brain rev H: 115x115, M3 holes 4.5mm in from each corner
-PCB_W = PCB_H = 115.0
-PCB_HOLE_PITCH = PCB_W - 2 * 4.5          # 106.0 mm square
-# cross-checked against pcb/build.py: BW=BH=115.0, H1..H4 at 4.5mm in.
-PCB_CX, PCB_CY = 0.0, 0.0                 # PCB is centred on the tray
+# freeisp_brain rev H: 115x115, M3 holes 4.5mm in from each corner.
+# These dimensions are owned by fusion/_shared/FIR_Interface.py so this tray
+# cannot silently diverge from the case and cap it mates with.
+PCB_W, PCB_H, PCB_TH = INTERFACE.PCB_W, INTERFACE.PCB_H, INTERFACE.PCB_TH
+PCB_HOLE_PITCH = INTERFACE.PCB_HOLE_PITCH
+PCB_CX, PCB_CY = INTERFACE.PCB_CX, INTERFACE.PCB_CY
 # 30mm (was 26): the relay joined the tray and the wire-tunnel RAISE lifted
 # the modules 5mm, so the tallest top is now the relay at 27mm; the board
 # underside sits at 33mm - 6mm of clear air over it, 12mm over the cell.
 # ⚠️ KNOCK-ON: the box cavity gets 4mm taller than the 26mm-post draft.
 POST_D, POST_H, POST_PILOT = 7.0, 30.0, 2.5
+# The four tall brain-PCB posts are not needed for the current test print.
+# Keep their dimensions here for a future PCB-mount revision, but omit them
+# now: they cost print time and their tall, unfilleted roots snap under a
+# sideways knock before they are useful.
+PCB_POSTS = False
 
 # ---------------- wire-in modules: name, w, l, h, cx, cy, mount ----------
 # Mounting is now PER MODULE (Francis checked the real boards, 2026-08-13):
@@ -89,16 +152,15 @@ MODULES = [
 # cell than what's actually seated, so the bore sat oversize and the cell
 # had play instead of a press fit ("just hanging"). Both ends stay OPEN so
 # leads can leave either way; ONE end now gets a stop block (below) so the
-# cell can't slide out along its length either.
+# cell cannot slide lengthwise.  The two stops sit immediately OUTSIDE the
+# 52mm cell envelope, leaving the full saddle clear for the casing.
 CELL_D, CELL_L = 14.5, 52.0
 CELL_CLR   = 0.6      # diametral slack once the cell is seated
-# Saddle wall either side of the channel. Cut 2.5 -> 2.0 (2026-08-14):
-# Francis on the render, "the thickness is big making it rigid, you can't
-# even push something in - make it lighter". At 2.5 the wall was still
-# 1.2mm thick at the centre line AFTER the outside relief, which is a
-# structure, not a spring. 2.0 leaves 0.7mm there - two extrusions on a
-# 0.4mm nozzle, so it still prints solid, but it gives.
-TROUGH_W   = 2.0
+# Saddle wall either side of the channel. The 2.0mm revision printed too
+# fragile when supports were removed.  This is added ONLY OUTSIDE the true
+# cell bore: the cell fit, 13.5mm mouth and seated position do not move.
+# 2.6mm plus 1.4mm outer relief leaves a stronger 1.2mm upper lip.
+TROUGH_W   = 2.6
 # The saddle visibly CLOSES at its upper edge: the entrance is exactly
 # 13.5mm wide - Francis's number, 2026-08-14, and the whole point of the
 # part. The cell is 14.5mm, so the opening is deliberately 1.0mm NARROWER
@@ -123,14 +185,14 @@ LEAD_FLARE    = 1.5    # how much wider the funnel is at its top, per side
 CELL_MOUTH    = CELL_TOP_OPEN - 2.0 * LEAD_FLARE
 CELL_WRAP     = math.sqrt(((CELL_D + CELL_CLR) / 2.0) ** 2
                           - (CELL_MOUTH / 2.0) ** 2)
-WALL_THIN  = 1.3      # taken off the OUTSIDE of each wall above the centre
+WALL_THIN  = 1.4      # taken off the OUTSIDE of each wall above the centre
 SLOT_W     = 2.0      # relief slots that turn the walls into fingers
 SLOT_Y     = (-14.75, 0.0, 14.75)
 SLOT_FLOOR = 2.0      # slots stop this far up, so the bed stays continuous
 LIP_H      = 0.8      # height of the constant-width retention lip at the mouth
-# CELL STOP: a single small block at the +Y end (the end marked beside CELL
-# in the render) stops the cell sliding lengthwise.  It is deliberately only
-# 8 x 3 x 6mm, not a wall across the cradle: leads can still leave around it.
+# CELL STOPS: two small blocks, one immediately beyond each end of the cell.
+# They are deliberately only 8 x 3 x 6mm, not walls across the cradle: the
+# cell's seating area stays unobstructed and leads can still leave around them.
 END_STOP_W = 8.0         # transverse width of the small stop block
 END_STOP_T = 3.0         # stop thickness, along the cell's length
 END_STOP_H = 6.0         # requested stop height above the plate
@@ -160,16 +222,18 @@ BOSS_D = 7.0                              # screw boss diameter
 # side. Converting to centres assumes the board hole is Ø3.0 (r=1.5,
 # standard on LM2596 modules - VERIFY): from long edge 1.2+1.5=2.7 ->
 # y = 21.4/2-2.7 = 8.0; from short edge 4.8+1.5=6.3 -> x = 43.2/2-6.3
-# = 15.3. Diagonal 34.5mm, consistent with the earlier ~35mm measurement.
-# All four positions still drawn (holes are on ONE diagonal - see above).
+# = 15.3. The measured fit then needed the holes shifted 0.5mm outward toward
+# the two SHORTER left/right board edges, so final X is +-15.8; Y remains
+# +-8.0.  This is the buck-only correction - do not alter the fitted relay.
+# All four positions are still drawn (holes are on ONE diagonal - see above).
 #
-# RELAY holes were ~0.5mm tight both ways (Francis, 2026-08-14): spread
-# outward 0.5mm on width and length. Was (+-14.2, +-10.2).
+# RELAY holes are already physically fitted: retain its existing +-14.7,
+# +-10.7 centres unchanged.
 HOLES = {
-    'LM2596 buck': {'at': [(-15.3, -8.0), (-15.3, 8.0),
-                           (15.3, -8.0), (15.3, 8.0)], 'pilot': 2.5},
+    'LM2596 buck': {'at': [(-15.8, -8.0), (-15.8, 8.0),
+                           (15.8, -8.0), (15.8, 8.0)], 'pilot': 2.5},
     'relay':       {'at': [(-14.7, -10.7), (-14.7, 10.7),
-                           (14.7, -10.7), (14.7, 10.7)], 'pilot': 2.0},
+                           (14.7, -10.7), (14.7, 10.7)], 'pilot': 2.5},
 }
 
 # BRACKET_T/BRACKET_L deleted with the L-corners they described.
@@ -190,14 +254,25 @@ BOARD_T    = 1.6   # module PCB thickness - the emboss sits just above this
 # These are actual cantilevers, not bracket walls: thin the root in the
 # bending direction AND narrow the band across the board.  The little head
 # above the board is wider only where it has to bridge in to form the click.
-SNAP_T     = 1.1   # thin flexing stem (was 1.3); PETG prints as 3 walls
+SNAP_T     = 1.4   # stronger full-height flexing stem, grown OUTWARD only
+SNAP_HEAD_T = 1.8  # stronger top wedge/click head, grown OUTWARD only
 SNAP_W     = 7.0   # narrow band across the board edge (was 9.0)
 SNAP_GAP   = 0.25  # side clearance at the seat (the bump holds it DOWN)
 SNAP_B     = 0.55  # emboss overhang past the board edge - the click
+# The Boost fitted well but needs a little more hold. Its outside (-Y) edge
+# is open for slide-in, so this applies only to its remaining inside (+Y)
+# wedge: 0.30mm more inward click engagement, not a change of board position.
+SNAP_B_P   = {'5V boost': {'l': 0.85}}
 SNAP_H     = 1.2   # emboss height
 SNAP_FLARE = 1.8   # full outward travel of BOTH wedge faces above the emboss
 SNAP_LEAD  = 2.6   # height of the flared wedge mouth above the emboss
 SNAP_ROOT_FLARE = 1.8  # lower wedge tapers this far IN from its plate root
+# A low, wide foot makes each wedge part of the plate rather than a thin wall
+# merely standing on it.  It reinforces the first 2.0mm; the 1.4mm arm
+# above remains the flexible spring that provides the click.
+SNAP_ROOT_FOOT_T = 3.0
+SNAP_ROOT_FOOT_W = 8.0
+SNAP_ROOT_FOOT_H = 2.0
 # The board stays RAISE above the plate for its wire tunnel, but no longer
 # sits on four rigid corner cubes.  These small ledges are part of the four
 # flex wedges, not separate brackets.
@@ -214,14 +289,14 @@ TIE_SLOT = (3.0, 10.0)                    # zip-tie slot through the plate
 # How far a tie slot sits outside its module. 5.0 left only a 0.30mm web
 # between the slot and the bracket foot beside it - the brackets now grow
 # from the plate, so that web is load-bearing and 0.3mm would simply snap.
-TIE_OFF = 6.5
+TIE_OFF = 6.4
 
 
 def finger_offsets(name, axis):
     """Centre locations along one board edge for the flex wedges.
 
     TP4056 is wide (28.2mm), so its long edges get two wedges each, 14mm
-    apart: six in total, without crowding the USB/terminal end areas.
+    apart. Its outside USB edge is subsequently omitted.
 
     BOOST doubled up 2026-08-14 ("on the boost add more wedges, like one
     extra on each side"): EIGHT wedges, two per side. A single 7mm band was
@@ -238,8 +313,28 @@ def finger_offsets(name, axis):
         return (-9.0, 9.0) if axis == 'w' else (-4.5, 4.5)
     return (0.0,)
 
+
+def finger_side_enabled(name, axis, side):
+    """Whether a board edge may receive a flex finger.
+
+    The TP4056 sits at +X. Its +X edge faces the outside of the tray and is
+    reserved for its USB cable/plug, so that edge must remain completely open.
+    The boost sits at -Y, so its -Y edge is left open to slide the board in
+    from the outside of the tray; the remaining six wedges retain it.
+    """
+    if name == 'TP4056' and axis == 'w' and side > 0:
+        return False
+    if name == '5V boost' and axis == 'l' and side < 0:
+        return False
+    return True
+
+
+def snap_emboss(name, axis):
+    """Click overhang for one module edge; Boost +Y receives +0.30mm."""
+    return (SNAP_B_P.get(name) or {}).get(axis, SNAP_B)
+
 # tray -> box.  ⚠️ the box side must be redrawn to match these.
-TRAY_MOUNT = [(0.0, -58.0), (0.0, 58.0), (-58.0, 0.0), (58.0, 0.0)]
+TRAY_MOUNT = INTERFACE.TRAY_MOUNT
 TRAY_CLEAR, TRAY_CB, TRAY_CB_D = 3.4, 6.0, 1.5
 
 # Harness tie-downs, ALL on the -X edge: the +X side is the J4/J5 edge
@@ -263,12 +358,10 @@ TIE_AXIS = {'TP4056': 'y'}
 
 SHOW_PARTS = False        # True = draw the PCB and modules to check the fit
 
-# ENGRAVED LABELS. Two modules' bosses look identical in a render - you
-# cannot tell the buck's four from the relay's four by eye, and getting it
-# wrong is discovered at assembly with a soldering iron in your hand. So the
-# plate says which is which, and carries the two set-points as well, exactly
-# like the PCB silkscreen does. Each label sits INSIDE its own module's
-# footprint, so it is readable right up until the module covers it.
+# Engraved labels cost extra small print moves and are not wanted on the
+# current production plate. Keep their definitions for a future marked plate,
+# but do not generate them now.
+PRINT_LABELS = False
 ENGRAVE_D = 0.6           # depth cut into the plate top
 LABELS = [
     ('BUCK',   20.0,  41.5, 5.0),
@@ -282,7 +375,21 @@ LABELS = [
 
 # shown in a popup EVERY run: if you see an older version, the deployed copy
 # under %APPDATA% is stale - re-copy the folder (the 28 Jun lesson)
-VERSION = ('rev R 2026-08-14: boost doubled to eight wedges, two per side. '
+VERSION = ('rev AD 2026-08-16: outer tray changed to a shared 128.3mm snug '
+           'ModuleGadget push-fit with R9.15 corners and a 0.5mm entry chamfer; '
+           'all PCB, module and tray-screw coordinates remain unchanged. '
+           'Boost inside emboss extended 0.30mm for a '
+           'tighter fit; wedges reinforced at both plate roots and '
+           'their full upright length, outward only; battery upper walls '
+           'thickened outward only; all inside fits retained; '
+           'TP4056 USB edge and boost outside slide-in edge left open; '
+           'engraved labels disabled; two 6mm cell stops moved outside the '
+           'cell ends; '
+           'buck hole size restored; relay holes enlarged '
+           'to the same 2.5mm diameter; buck centres moved 0.5mm toward '
+           'short edges; fitted relay centres retained; '
+           'unused tall PCB posts removed. '
+           'Boost has six wedges, with its outside edge open for slide-in. '
            'Cell saddle entrance is 13.5mm as specified - narrower than the '
            '14.5mm cell, which is the retention; do not open it up. '
            'PRINT IN PETG.')
@@ -390,6 +497,34 @@ def fillet_vertical(comp, body, r):
         SKIPPED.append('corner fillet: {}'.format(e))
 
 
+def chamfer_bottom(comp, body, c):
+    """Give the tray's insertion edge a small, non-functional lead-in."""
+    try:
+        face, best = None, -1.0
+        for candidate in body.faces:
+            geometry = candidate.geometry
+            if isinstance(geometry, adsk.core.Plane) and geometry.normal.z < -0.99:
+                bb = candidate.boundingBox
+                if abs((bb.minPoint.z + bb.maxPoint.z) / 2.0) < mm(0.05) and \
+                        candidate.area > best:
+                    face, best = candidate, candidate.area
+        if not face:
+            return
+        coll = adsk.core.ObjectCollection.create()
+        for loop in face.loops:
+            if loop.isOuter:
+                for edge in loop.edges:
+                    coll.add(edge)
+        if coll.count:
+            chamfers = comp.features.chamferFeatures
+            chamfer_input = chamfers.createInput2()
+            chamfer_input.chamferEdgeSets.addEqualDistanceChamferEdgeSet(
+                coll, adsk.core.ValueInput.createByReal(mm(c)), False)
+            chamfers.add(chamfer_input)
+    except Exception as e:
+        SKIPPED.append('tray entry chamfer: {}'.format(e))
+
+
 def snap_fingers(comp, body, cx, cy, w, l, name=None):
     """THIN FLEX FINGERS - one or more on each side - that the board
     is PRESSED into and clicks under. Replaces the L-corner brackets.
@@ -409,28 +544,32 @@ def snap_fingers(comp, body, cx, cy, w, l, name=None):
     the board edge.  Pressing a board down bends the thin finger outward, then
     it springs back with the lip over the board's top face.
 
-    BOOST has four fingers.  TP4056 has six: two on each long edge and one
-    on each short edge.  The tie remains the retention of record; the fingers
-    stop rattle and hold the board captive while the tie goes on.
+    BOOST has six fingers: its outside (-Y) edge is open for slide-in.
+    TP4056 has five: two on each long edge and one
+    on its inside short edge. Its outside (+X) short edge remains completely
+    clear for the USB cable. The tie remains the retention of record; the
+    fingers stop rattle and hold the board captive while the tie goes on.
     """
     board_top = RAISE + BOARD_T          # top face of the seated board
     ov = GRIP_P.get(name) or {}
 
-    def slab(axis, s, face, z, hgt, thick, along):
+    def slab(axis, s, face, z, hgt, thick, along, width=SNAP_W):
         """One slab of one finger. `face` = the slab's INNER face, as a
         distance from the module centre-line along `axis`."""
         if axis == 'w':
             box(comp, cx + s * (face + thick / 2.0), cy + along,
-                PLATE_TOP + z, thick, SNAP_W, hgt, JOIN, [body])
+                PLATE_TOP + z, thick, width, hgt, JOIN, [body])
         else:
             box(comp, cx + along, cy + s * (face + thick / 2.0),
-                PLATE_TOP + z, SNAP_W, thick, hgt, JOIN, [body])
+                PLATE_TOP + z, width, thick, hgt, JOIN, [body])
 
     for axis, half in (('w', w / 2.0), ('l', l / 2.0)):
         seat = half + ov.get(axis, SNAP_GAP)   # stem face: clear of the board
-        tip = half - SNAP_B                    # emboss tip: INSIDE that edge
+        tip = half - snap_emboss(name, axis)   # emboss tip: INSIDE board edge
         for along in finger_offsets(name, axis):
             for s in (-1, 1):
+                if not finger_side_enabled(name, axis, s):
+                    continue
                 finger_cx = cx + (along if axis == 'l' else 0.0)
                 finger_cy = cy + (along if axis == 'w' else 0.0)
                 # 1. LOWER WEDGE / SPRING.  No upright stem: a single loft
@@ -439,6 +578,15 @@ def snap_fingers(comp, body, cx, cy, w, l, name=None):
                 lofted_slab(comp, body, finger_cx, finger_cy, axis, s,
                             seat + SNAP_ROOT_FLARE, seat,
                             -0.01, board_top + 0.01, SNAP_T, SNAP_W)
+                # Low, wide root foot: far stronger plate bond than the old
+                # 1.1mm wall sitting directly on the flat plate, without
+                # making the long spring section rigid.
+                root_face = seat + SNAP_ROOT_FLARE
+                # Widen the foot INWARD only.  Its outside stays flush with
+                # the thin arm, preserving clearance to the boost tie slot.
+                foot_face = root_face - (SNAP_ROOT_FOOT_T - SNAP_T)
+                slab(axis, s, foot_face, 0.0, SNAP_ROOT_FOOT_H,
+                     SNAP_ROOT_FOOT_T, along, SNAP_ROOT_FOOT_W)
                 # The board is held 5mm off the plate by a SMALL shelf built
                 # into this same wedge - no four rigid corner pedestals.
                 shelf_tip = half - SNAP_SEAT_IN
@@ -447,13 +595,16 @@ def snap_fingers(comp, body, cx, cy, w, l, name=None):
                      shelf_outer - shelf_tip, along)
                 # 2. CLICK LIP.  The board pushes this inside overhang aside,
                 #    then it springs back over the board's top face.
-                slab(axis, s, tip, board_top, SNAP_H, SNAP_T, along)
+                # Make the part that breaks during support removal thicker
+                # OUTWARD only: `tip` remains the inner face against the
+                # board, so the board's measured fit cannot shrink.
+                slab(axis, s, tip, board_top, SNAP_H, SNAP_HEAD_T, along)
                 # 3. UPPER WEDGE / LEAD-IN.  A continuous loft shifts BOTH
                 #    faces out from the lip and gives an obvious funnel.
                 lofted_slab(comp, body, finger_cx, finger_cy, axis, s,
                             tip, tip + SNAP_FLARE,
                             board_top + SNAP_H - 0.01, SNAP_LEAD + 0.01,
-                            SNAP_T, SNAP_W)
+                            SNAP_HEAD_T, SNAP_W)
 
 
 def cell_trough(comp, body, cx, cy):
@@ -541,11 +692,13 @@ def cell_trough(comp, body, cx, cy):
         box(comp, cx, cy + sy, PLATE_TOP + SLOT_FLOOR, outer_w + 2, SLOT_W,
             wall_h + LEAD_H - SLOT_FLOOR + 1.0, CUT, [body])
 
-    # ---- small +Y end stop: just enough to stop longitudinal cell movement,
-    # without becoming another rigid end wall or trapping the lead wires. ----
-    stop_y = cy + CELL_L / 2.0 - END_STOP_T / 2.0
-    box(comp, cx, stop_y, PLATE_TOP, END_STOP_W, END_STOP_T, END_STOP_H,
-        JOIN, [body])
+    # ---- two end stops, entirely outside the 52mm cell envelope.  Their
+    # inner faces meet the cell ends at +/- CELL_L/2; neither enters the
+    # saddle or takes away insertion space. ----
+    for sy in (-1, 1):
+        stop_y = cy + sy * (CELL_L / 2.0 + END_STOP_T / 2.0)
+        box(comp, cx, stop_y, PLATE_TOP, END_STOP_W, END_STOP_T, END_STOP_H,
+            JOIN, [body])
 
     return outer_w
 
@@ -614,23 +767,25 @@ def _feature_rects():
             ov = GRIP_P.get(name) or {}
             for axis, half, sz in (('w', w / 2, 'x'), ('l', l / 2, 'y')):
                 seat = half + ov.get(axis, SNAP_GAP)
-                tip = half - SNAP_B
+                tip = half - snap_emboss(name, axis)
                 shelf_tip = half - SNAP_SEAT_IN
                 root_outer = seat + SNAP_ROOT_FLARE + SNAP_T
-                lead_outer = tip + SNAP_T + SNAP_FLARE
+                lead_outer = tip + SNAP_HEAD_T + SNAP_FLARE
                 outer = max(root_outer, lead_outer)
                 inner = min(tip, shelf_tip)
                 mid, thick = (inner + outer) / 2, outer - inner
                 for along in finger_offsets(name, axis):
                     for s in (-1, 1):
+                        if not finger_side_enabled(name, axis, s):
+                            continue
                         if sz == 'x':
                             F.append(_rect(name, name + ' finger',
                                            cx + s * mid, cy + along,
-                                           thick, SNAP_W))
+                                           thick, max(SNAP_W, SNAP_ROOT_FOOT_W)))
                         else:
                             F.append(_rect(name, name + ' finger',
                                            cx + along, cy + s * mid,
-                                           SNAP_W, thick))
+                                           max(SNAP_W, SNAP_ROOT_FOOT_W), thick))
             sw, sl = TIE_SLOT
             if TIE_AXIS.get(name, 'x') == 'y':
                 for sy in (-1, 1):
@@ -643,17 +798,22 @@ def _feature_rects():
         else:
             ow = CELL_D + CELL_CLR + 2 * TROUGH_W
             F.append(_rect(name, name + ' saddle', cx, cy, ow, CELL_L))
+            for sy in (-1, 1):
+                F.append(_rect(name, name + ' end stop', cx,
+                               cy + sy * (CELL_L / 2.0 + END_STOP_T / 2.0),
+                               END_STOP_W, END_STOP_T))
             sw, sl = TIE_SLOT
             for ty in CELL_TIE_Y:
                 for sx in (-1, 1):
                     F.append(_rect(name, name + ' tie',
                                    cx + sx * (ow / 2 + TIE_OFF), cy + ty,
                                    sw, sl))
-    half = PCB_HOLE_PITCH / 2
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            F.append(_rect('tray', 'PCB post', sx * half, sy * half,
-                           POST_D, POST_D))
+    if PCB_POSTS:
+        half = PCB_HOLE_PITCH / 2
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                F.append(_rect('tray', 'PCB post', sx * half, sy * half,
+                               POST_D, POST_D))
     for (x, y) in TRAY_MOUNT:
         F.append(_rect('tray', 'tray mount', x, y, TRAY_CB, TRAY_CB))
     for (x, y) in HARNESS_TIE:
@@ -663,6 +823,9 @@ def _feature_rects():
 
 def validate():
     bad = []
+
+    if not 0.25 <= TRAY_ENTRY_CHAMFER <= PLATE_TH / 2.0:
+        bad.append('tray entry chamfer must be 0.25mm through half the plate thickness')
 
     def gap(a, b):
         return max(max(a[2] - b[3], b[2] - a[3]),
@@ -717,8 +880,9 @@ def validate():
         ov = GRIP_P.get(name) or {}
         for axis, half in (('w', w / 2.0), ('l', l / 2.0)):
             seat = half + ov.get(axis, SNAP_GAP)
-            over = half - (half - SNAP_B)      # emboss past the board edge
-            defl_s = seat - (half - SNAP_B)    # stem face -> emboss tip
+            emboss = snap_emboss(name, axis)
+            over = half - (half - emboss)      # emboss past the board edge
+            defl_s = seat - (half - emboss)    # stem face -> emboss tip
             if over <= 0.15:
                 bad.append('%s %s emboss only %.2fmm over the board - no '
                            'click' % (name, axis, over))
@@ -735,24 +899,25 @@ def validate():
             # 4.5mm aperture and could not be tensioned.)
             offs = sorted(finger_offsets(name, axis))
             edge = l if axis == 'w' else w      # the edge they sit along
+            band_w = max(SNAP_W, SNAP_ROOT_FOOT_W)
             for p, q in zip(offs, offs[1:]):
-                if q - p < SNAP_W + 1.0:
+                if q - p < band_w + 1.0:
                     bad.append('%s %s fingers %.1fmm apart - only %.2fmm '
                                'between %.1fmm bands, they fuse'
-                               % (name, axis, q - p, q - p - SNAP_W, SNAP_W))
+                               % (name, axis, q - p, q - p - band_w, band_w))
             for o in offs:
-                if abs(o) + SNAP_W / 2.0 > edge / 2.0:
+                if abs(o) + band_w / 2.0 > edge / 2.0:
                     bad.append('%s %s finger at %+.1f overhangs its %.1fmm '
                                'edge by %.2fmm' % (name, axis, o, edge,
-                               abs(o) + SNAP_W / 2.0 - edge / 2.0))
+                               abs(o) + band_w / 2.0 - edge / 2.0))
     snap_worst = max(
         3.0 * SNAP_T * ((half + (GRIP_P.get(n) or {}).get(a, SNAP_GAP))
-                        - (half - SNAP_B)) / (2.0 * snap_len ** 2)
+                        - (half - snap_emboss(n, a))) / (2.0 * snap_len ** 2)
         for (n, w, l, h, cx, cy, mt) in MODULES if mt == 'corners'
         for a, half in (('w', w / 2.0), ('l', l / 2.0)))
 
     # ---- the post pilot must break out of the post top ----
-    if PLATE_TOP + 1.0 + (POST_H - 1.0) < PLATE_TOP + POST_H - 1e-9:
+    if PCB_POSTS and PLATE_TOP + 1.0 + (POST_H - 1.0) < PLATE_TOP + POST_H - 1e-9:
         bad.append('PCB post pilot is capped - no screw can enter')
 
     # ---- the cell clip: retention AND insertability ----
@@ -842,22 +1007,18 @@ def build_plate(comp):
     plate = box(comp, 0, 0, 0, PLATE_W, PLATE_H, PLATE_TH, NEW).bodies.item(0)
     plate.name = 'FIR Electronics Tray'
     fillet_vertical(comp, plate, CORNER_R)
+    chamfer_bottom(comp, plate, TRAY_ENTRY_CHAMFER)
 
 
-    # ---- the PCB: 4 posts on its own M3 pattern ----
-    half = PCB_HOLE_PITCH / 2.0
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            x, y = PCB_CX + sx * half, PCB_CY + sy * half
-            cyl(comp, x, y, PLATE_TOP, POST_D, POST_H, JOIN, [plate])
-            # Pilot for an M3 self-tapper. It must be OPEN AT THE TOP - the
-            # screw comes down through the PCB. Rev F cut PLATE_TOP..+29.5
-            # inside a post spanning PLATE_TOP..+30, which capped it with
-            # 0.5mm of solid and sealed 145mm3 of air inside each post: the
-            # screw had nowhere to enter. Cut from 1mm above the plate face
-            # to the post top instead, same convention as screw_bosses().
-            cyl(comp, x, y, PLATE_TOP + 1.0, POST_PILOT, POST_H - 1.0, CUT,
-                [plate])
+    # ---- the PCB posts are deliberately omitted for this print ----
+    if PCB_POSTS:
+        half = PCB_HOLE_PITCH / 2.0
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                x, y = PCB_CX + sx * half, PCB_CY + sy * half
+                cyl(comp, x, y, PLATE_TOP, POST_D, POST_H, JOIN, [plate])
+                cyl(comp, x, y, PLATE_TOP + 1.0, POST_PILOT,
+                    POST_H - 1.0, CUT, [plate])
 
     # ---- wire-in modules, each held its own way ----
     for (name, w, l, h, cx, cy, mount) in MODULES:
@@ -884,20 +1045,22 @@ def build_plate(comp):
         box(comp, x, y, -1, HARNESS_SLOT[0], HARNESS_SLOT[1],
             PLATE_TH + 2, CUT, [plate])
 
-    # ---- names engraved last, so they cut into finished plate ----
-    for (txt, lx, ly, sz) in LABELS:
-        engrave(comp, plate, txt, lx, ly, sz)
+    # ---- labels are optional; omit them for the faster current print ----
+    if PRINT_LABELS:
+        for (txt, lx, ly, sz) in LABELS:
+            engrave(comp, plate, txt, lx, ly, sz)
 
     return plate
 
 
 def build_parts(comp):
     """Placeholders, to eyeball the fit. Never printed."""
-    b = box(comp, PCB_CX, PCB_CY, PLATE_TOP + POST_H, PCB_W, PCB_H, 1.6,
+    pcb_z = PLATE_TOP + (POST_H if PCB_POSTS else 0.0)
+    b = box(comp, PCB_CX, PCB_CY, pcb_z, PCB_W, PCB_H, 1.6,
             NEW).bodies.item(0)
     b.name = 'PART: brain PCB 115x115'
     # the ESP32 stands on its sockets above the PCB
-    e = box(comp, PCB_CX, PCB_CY, PLATE_TOP + POST_H + 1.6 + 8.5,
+    e = box(comp, PCB_CX, PCB_CY, pcb_z + 1.6 + 8.5,
             28.0, 56.0, 13.0, NEW).bodies.item(0)
     e.name = 'PART: ESP32 DevKitC'
     for (name, w, l, h, cx, cy, mount) in MODULES:

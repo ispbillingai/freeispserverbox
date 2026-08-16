@@ -1,28 +1,125 @@
 # FIR_ShellCheck.py - Autodesk Fusion 360 script
-# REAL-PARTS ALIGNMENT ASSEMBLY (see-inside). Builds the actual parts in their assembled spots:
-#   1 SHELL  - the real FIR_Shell tub (walls, 951+PoE cradles, AC/DC divider, lid seat + 6 bolt
-#              bosses, keyholes, cable run)                                        -> transparent
-#   2 LID    - the real FIR_BottomLid (all ports, holding frames, 6 bolts, shelf, top groove),
-#              built in lid coords then ROTATED onto the front opening              -> transparent
-#   3 951    - the MikroTik with its measured ports, seated in the cradle          -> SOLID
-#   4 TOP CAP - the deep-cap top lid ASSEMBLED on the tub (front-open side at the front; the
-#              bottom lid's 3mm top build-out closes that edge). CAP_LIFT hovers it -> transparent
-# So you can see: 951 ports <-> lid ports <-> cradle + bolts all line up. Run ALONE in a fresh design.
+#
+# ALL-UP INSPECTION ASSEMBLY ONLY -- never export this model for printing.
+# It builds the assembled tub/cap plus the ACTUAL BottomLid, CurvedLid, brain
+# case and tray builders, then adds transparent PCB, component, connector,
+# cable and driver-access envelopes.  The intent is to catch interference and
+# wrong assembly order before a print; printed part geometry remains in its
+# own source files.
 
-import adsk.core, adsk.fusion, adsk.cam, traceback, math
+import importlib.util
+import math
+import os
+import sys
+
+import adsk.core, adsk.fusion, adsk.cam, traceback
+
+
+def _load_shared_interface():
+    """Load the one brain-stack interface contract in workspace or Fusion."""
+    script_file = globals().get('__file__', '')
+    script_dir = (os.path.dirname(os.path.abspath(script_file))
+                  if script_file else os.getcwd())
+    candidates = []
+    override = os.environ.get('FIR_INTERFACE_PATH')
+    if override:
+        candidates.append(override if override.lower().endswith('.py')
+                          else os.path.join(override, 'FIR_Interface.py'))
+    candidates.extend((
+        os.path.join(script_dir, 'FIR_Interface.py'),
+        os.path.join(script_dir, '..', '_shared', 'FIR_Interface.py'),
+    ))
+    workspace_source = globals().get('_workspace_source')
+    if workspace_source:
+        candidates.append(os.path.join(
+            os.path.dirname(os.path.abspath(workspace_source)), '..',
+            '_shared', 'FIR_Interface.py'))
+    for candidate in candidates:
+        path = os.path.realpath(os.path.abspath(candidate))
+        if not os.path.isfile(path):
+            continue
+        # Always reload the shared contract so this check cannot inspect an
+        # older cached tray/cap interface after a source sync.
+        sys.modules.pop('_freeisp_shared_interface', None)
+        spec = importlib.util.spec_from_file_location(
+            '_freeisp_shared_interface', path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules['_freeisp_shared_interface'] = module
+            spec.loader.exec_module(module)
+            return module
+    raise ImportError(
+        'FIR_Interface.py not found. Deploy fusion/_shared beside the Fusion scripts.')
+
+
+INTERFACE = _load_shared_interface()
 
 # ---- shell frame (FIR_Shell) ----
 BOX_W, BOX_D, BOX_H = 280.0, 280.0, 80.0
 WALL, FLOOR, CORNER_R, HALF, FRONT_Y = 3.0, 3.0, 10.0, 140.0, 137.0
 MIK_W, MIK_D, MIK_H, MIK_CX, ST_H = 114.0, 139.0, 29.0, 78.0, 3.5
-POE_W, POE_D, POE_H, POE_CX = 100.0, 100.0, 28.0, -85.0
+# Confirmed PoE switch envelope: 82mm face x 52mm deep x 23mm high.
+POE_W, POE_D, POE_H, POE_CX = 82.0, 52.0, 23.0, -85.0
 EXT_CY, DIV_Y, PLATE_TH = -110.0, -82.0, 3.0
 EXT_W, EXT_D, EXT_H, EXT_FRONT_RETAINER_H = 240.0, 47.0, 29.0, 29.0
-# ---- lid frame (FIR_BottomLid) ----
-PW, PH, PT, SW_CX, MIK_X0, BASE = 280.0, 80.0, 3.0, 85.0, -135.0, 6.5
+# Shared brain-stack interface.  The cap-boss pattern is derived in
+# FIR_Interface from the case holes + CASE_TO_CAP_Y, so this inspection model
+# cannot silently use a different mounting pattern from the printed parts.
+TRAY_W, TRAY_H, TRAY_TH = INTERFACE.TRAY_W, INTERFACE.TRAY_H, INTERFACE.TRAY_TH
+TRAY_MOUNT = INTERFACE.TRAY_MOUNT
+PCB_W, PCB_H, PCB_TH = INTERFACE.PCB_W, INTERFACE.PCB_H, INTERFACE.PCB_TH
+PCB_HOLE_PATTERN = INTERFACE.PCB_HOLE_PATTERN
+CASE_TO_CAP_Y = INTERFACE.CASE_TO_CAP_Y
+CASE_MOUNT = INTERFACE.CASE_MOUNT
+BRAIN_CAP_MOUNT = INTERFACE.CAP_BOSS_PATTERN
+BRAIN_CAP_BOSS_D, BRAIN_CAP_BOSS_H = 9.0, 10.8
+BRAIN_CAP_FLANGE_D, BRAIN_CAP_FLANGE_H = 13.0, 3.0
+BRAIN_CAP_PILOT = 2.6
+# ---- front device reference positions (for connector envelopes only) ----
+SW_CX, BASE = 85.0, 6.5
+SW_PORT_SIDE_LAND = 6.6
+SW_PORT_W, SW_PORT_H = 82.0 - 2.0 * SW_PORT_SIDE_LAND, 11.5
+SW_PORT_FROM_BOTTOM = 3.2
+SW_PORT_Z0 = BASE + SW_PORT_FROM_BOTTOM
 # ---- top cap (FIR_Shell build_top_lid, assembled) ----
 CAP_LIFT = 0.0        # 0 = fully seated. Set to e.g. 40.0 to HOVER the cap above the tub and
                       # watch how it drops on (open edge stays at the front).
+COVER_TRAVEL = 0.0    # 0 = fully slid home; positive mm moves the cover outward (+Y) to inspect rail entry.
+# ---- confirmed Tenda switch DC jack (shared contract) ----
+# The barrel jack is on the switch's own RIGHT-hand end face (shell -X), 8.3mm
+# forward of its rear.  Its height on that face is not measured yet.
+POE_JACK_D = INTERFACE.POE_JACK_D
+POE_JACK_FROM_REAR = INTERFACE.POE_JACK_FROM_REAR
+POE_JACK_FROM_BASE = INTERFACE.POE_JACK_FROM_BASE
+POE_JACK_SIDE = INTERFACE.POE_JACK_SIDE
+POE_PLUG_D = INTERFACE.POE_PLUG_D
+POE_PLUG_STRAIGHT_L = INTERFACE.POE_PLUG_STRAIGHT_L
+POE_PLUG_RIGHT_ANGLE_L = INTERFACE.POE_PLUG_RIGHT_ANGLE_L
+# ---- external alarm horn (now a real cap cut, made by FIR_Shell) ----
+# The horn cannot fit inside the tub behind the PoE switch: its 104mm body
+# would collide with the switch, hanging brain case or rear adapter bank.
+# This is the safe top-cap position directly behind the switch side.  The
+# 104mm body has a small 5mm outboard overhang, which preserves clearance for
+# the internal mounting hardware beside the brain case.
+# The confirmed 52mm-deep switch ends at Y=84.5, so this body envelope ends
+# at Y=80.0: a deliberate 4.5mm behind-switch gap.
+# The bolt pads, through-holes and gland hole are NOT drawn here any more:
+# FIR_Shell cuts them into the printable cap, and this view imports that cap.
+HORN_CX, HORN_CY = INTERFACE.HORN_CX, INTERFACE.HORN_CY
+HORN_FLANGE_D = INTERFACE.HORN_FLANGE_D
+HORN_BODY_D, HORN_BODY_H = INTERFACE.HORN_BODY_D, INTERFACE.HORN_BODY_H
+HORN_HOLE_D = INTERFACE.HORN_HOLE_D
+HORN_PAD_D = INTERFACE.HORN_PAD_D
+HORN_WIRE_D = INTERFACE.HORN_WIRE_D
+CAP_ROOF_OUTER_Z, CAP_ROOF_TH = 120.0, 3.0  # assembled cap roof faces
+# These are transparent screwdriver-travel illustrations only, not printed
+# posts.  Keep the normal all-up view clean; enable temporarily when checking
+# the three assembly stages.
+SHOW_DRIVER_ACCESS = False
+CHECK_PREFIX = 'CHECK: ALL-UP'
+CHECK_VERSION = ('v31 all-up: horn now really bolted through the cap roof + switch DC-jack '
+                 'and barrel-plug clearance + MikroTik cradle trimmed clear of the hanging '
+                 'brain case + front-cover port handedness corrected')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -76,35 +173,6 @@ def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
     return f.add(ei)
 
 
-def box_y(comp, cx, cz, ycenter, sx, sz, span, op, parts=None):
-    sk = comp.sketches.add(comp.xZConstructionPlane)
-    sk.sketchCurves.sketchLines.addCenterPointRectangle(
-        adsk.core.Point3D.create(mm(cx), mm(cz), 0),
-        adsk.core.Point3D.create(mm(cx + sx / 2.0), mm(cz + sz / 2.0), 0))
-    f = comp.features.extrudeFeatures
-    ei = f.createInput(sk.profiles.item(0), op)
-    if abs(ycenter) > 1e-9:
-        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(adsk.core.ValueInput.createByReal(mm(ycenter)))
-    ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
-    if parts:
-        ei.participantBodies = parts
-    return f.add(ei)
-
-
-def cyl_x(comp, cy, cz, xcenter, d, span, op, parts=None):
-    # cylinder running along X (circle on yZ plane), SYMMETRIC about xcenter - side-wall bolt pilots
-    sk = comp.sketches.add(comp.yZConstructionPlane)
-    sk.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(mm(cy), mm(cz), 0), mm(d / 2.0))
-    f = comp.features.extrudeFeatures
-    ei = f.createInput(sk.profiles.item(0), op)
-    if abs(xcenter) > 1e-9:
-        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(adsk.core.ValueInput.createByReal(mm(xcenter)))
-    ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
-    if parts:
-        ei.participantBodies = parts
-    return f.add(ei)
-
-
 def yport(comp, body, cx, cz, kind, a, b, y_face, span):
     # robust port cut into a +Y face: sketch on an offset plane AT the face, symmetric extrude
     try:
@@ -126,49 +194,6 @@ def yport(comp, body, cx, cz, kind, a, b, y_face, span):
         SKIPPED.append('yport: {}'.format(e))
 
 
-def fillet_vertical(comp, body, r):
-    try:
-        coll = adsk.core.ObjectCollection.create()
-        for e in body.edges:
-            g = e.geometry
-            if isinstance(g, adsk.core.Line3D):
-                v = g.startPoint.vectorTo(g.endPoint); v.normalize()
-                if abs(v.z) > 0.99:
-                    coll.add(e)
-        if coll.count:
-            fi = comp.features.filletFeatures.createInput()
-            fi.addConstantRadiusEdgeSet(coll, adsk.core.ValueInput.createByReal(mm(r)), False)
-            comp.features.filletFeatures.add(fi)
-    except Exception as e:
-        SKIPPED.append('fillet: {}'.format(e))
-
-
-def frame_grip(comp, plate, xl, xr, yb, yt, depth, wt):
-    # walls clamped to |x| <= 136.7 so they clear the tub side walls (inner 137) - mirrors FIR_BottomLid
-    clr = 0.5
-    lim = PW / 2.0 - 3.3
-    fh = (yt - yb) + 2 * clr
-    fx0 = max(xl - clr - wt, -lim); fx1 = min(xr + clr + wt, lim)
-    box(comp, (fx0 + fx1) / 2, yb - clr - wt / 2, -depth, fx1 - fx0, wt, depth, JOIN, [plate])
-    box(comp, (fx0 + fx1) / 2, yt + clr + wt / 2, -depth, fx1 - fx0, wt, depth, JOIN, [plate])
-    box(comp, (fx0 + xl - clr) / 2, (yb + yt) / 2, -depth, (xl - clr) - fx0, fh, depth, JOIN, [plate])
-    box(comp, (xr + clr + fx1) / 2, (yb + yt) / 2, -depth, fx1 - (xr + clr), fh, depth, JOIN, [plate])
-
-
-def cradle_grip(comp, sh, cx, cy, w, d, h):
-    wt, clr, P, HK = 2.5, 0.5, 14.0, 4.0
-    hw, hd = w / 2 + clr, d / 2 + clr
-    for px in (cx - hw + P / 2, cx, cx + hw - P / 2):
-        box(comp, px, cy - hd - wt / 2, FLOOR, P, wt, h + 4, JOIN, [sh])
-        box(comp, px, cy - hd + HK / 2, FLOOR + h, P, wt + HK, 3, JOIN, [sh])
-    fyc = cy + hd - 11 - P / 2                # front arms 11mm back: the lid frames own Y127-137
-    for s in (-1, 1):
-        box(comp, cx + s * (hw + wt / 2), cy - hd + P / 2, FLOOR, wt, P, h, JOIN, [sh])
-        box(comp, cx + s * (hw + wt / 2), fyc, FLOOR, wt, P, h + 5, JOIN, [sh])
-        box(comp, cx + s * (hw - 0.75), fyc, FLOOR + h, HK + wt, P, 3, JOIN, [sh])
-        box(comp, cx + s * w / 4, cy - hd + 2, FLOOR, 3, 3, 3, JOIN, [sh])
-
-
 def set_opacity(body, o):
     try:
         body.opacity = o
@@ -176,77 +201,65 @@ def set_opacity(body, o):
         SKIPPED.append('opacity: {}'.format(e))
 
 
-def build_shell(comp):
-    # FRONT OPEN TO Y137 (mirrors FIR_Shell v17): the lid fills the slab Y137-140, so floor +
-    # side walls stop at 137, the front lip is gone and the top rail sits BEHIND the lid plane.
-    sh = box(comp, 0, -WALL / 2, 0, BOX_W, BOX_D - WALL, FLOOR, NEW).bodies.item(0)
-    sh.name = '1 SHELL (see-through)'
-    fillet_vertical(comp, sh, CORNER_R)
-    box(comp, -HALF + WALL / 2, -WALL / 2, FLOOR, WALL, BOX_D - WALL, BOX_H - FLOOR, JOIN, [sh])
-    box(comp, HALF - WALL / 2, -WALL / 2, FLOOR, WALL, BOX_D - WALL, BOX_H - FLOOR, JOIN, [sh])
-    box(comp, 0, -HALF + WALL / 2, FLOOR, BOX_W, WALL, BOX_H - FLOOR, JOIN, [sh])
-    box(comp, 0, FRONT_Y - 1.5, BOX_H - 8, BOX_W - 2 * WALL, 3, 8, JOIN, [sh])   # top rail (Y134-137)
-    # (divider frame removed - clean slate)
-    m_back = FRONT_Y - 0.5                             # devices right against the lid inside
-    for sx in (MIK_CX - (MIK_W / 2 - 6), MIK_CX + (MIK_W / 2 - 6)):
-        for sy in (m_back - 14, m_back - MIK_D + 8):   # front row 14 back: clear of the lid frames
-            cyl(comp, sx, sy, FLOOR, 7, ST_H, JOIN, [sh])
-    cradle_grip(comp, sh, MIK_CX, m_back - MIK_D / 2, MIK_W, MIK_D, ST_H + MIK_H)
-    for sx in (POE_CX - (POE_W / 2 - 6), POE_CX + (POE_W / 2 - 6)):
-        for sy in (m_back - 14, m_back - POE_D + 8):   # front row 14 back: clear of the lid frames
-            cyl(comp, sx, sy, FLOOR, 7, ST_H, JOIN, [sh])
-    cradle_grip(comp, sh, POE_CX, m_back - POE_D / 2, POE_W, POE_D, ST_H + POE_H)
-    box(comp, 17, EXT_CY + EXT_D / 2 + 1.5, FLOOR, EXT_W, WALL, EXT_FRONT_RETAINER_H, JOIN, [sh])
-    for kx in (-60, 60):
-        cyl_y(comp, kx, BOX_H - 24, -HALF + 1, 11, WALL + 2, CUT, [sh])
-        box_y(comp, kx, BOX_H - 33, -HALF + 1, 5, 18, WALL + 2, CUT, [sh])
-    for sx in (-HALF + WALL, HALF - WALL):             # top-lid side bosses (synced: horizontal pilots)
-        s = 1.0 if sx > 0 else -1.0
-        for sy in (-75, 0, 75):
-            box(comp, sx - s * 6, sy, BOX_H - 14, 12, 12, 12, JOIN, [sh])
-            cyl_x(comp, sy, BOX_H - 8, sx, 2.6, 30, CUT, [sh])
-    for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72), (-132, 44), (132, 44)):
-        bw = 10 if abs(bx) == 132 else 9               # ±132 widened to merge with the side wall
-        box(comp, bx, FRONT_Y - 4.5, bz - 4, bw, 9, 8, JOIN, [sh])
-        cyl_y(comp, bx, bz, FRONT_Y - 4.5, 2.6, 16, CUT, [sh])
-    return sh
+def _load_active_builder(script_name):
+    """Load an active Fusion part builder from its sibling script folder.
+
+    Both the workspace layout and Fusion deployment use
+    ``../<script>/<script>.py`` from this ShellCheck folder.  This deliberately
+    reuses the print-part builders for the brain case and tray instead of
+    maintaining a second, drifting shape copy here.
+    """
+    script_file = globals().get('__file__', '')
+    script_dir = (os.path.dirname(os.path.abspath(script_file))
+                  if script_file else os.getcwd())
+    source_file = script_name + '.py'
+    candidates = [os.path.join(script_dir, '..', script_name, source_file)]
+    source_root = os.environ.get('FIR_SOURCE_ROOT')
+    if source_root:
+        candidates.append(os.path.join(source_root, script_name, source_file))
+    for candidate in candidates:
+        path = os.path.realpath(os.path.abspath(candidate))
+        if not os.path.isfile(path):
+            continue
+        # An all-up rerun must use the current printable builder, not an
+        # earlier module cached by Fusion in the same Python session.
+        cache_name = '_freeisp_allup_' + script_name.lower()
+        sys.modules.pop(cache_name, None)
+        spec = importlib.util.spec_from_file_location(cache_name, path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[cache_name] = module
+            spec.loader.exec_module(module)
+            return module
+    raise ImportError('{} builder not found beside FIR_ShellCheck'.format(script_name))
 
 
-def build_lid_local(comp):
-    plate = box(comp, 0, PH / 2, 0, PW, PH, PT, NEW).bodies.item(0)
-    plate.name = '2 BOTTOM LID (see-through)'
-    fillet_vertical(comp, plate, 6.0)
+def translate_body(comp, body, dx, dy, dz):
+    """Move one all-up body without rotating its local part geometry."""
+    coll = adsk.core.ObjectCollection.create()
+    coll.add(body)
+    matrix = adsk.core.Matrix3D.create()
+    matrix.translation = adsk.core.Vector3D.create(mm(dx), mm(dy), mm(dz))
+    comp.features.moveFeatures.add(comp.features.moveFeatures.createInput(coll, matrix))
 
-    def hole(cx, cy, shape, a, b):
-        if shape == 'c':
-            cyl(comp, cx, cy, -1, a, PT + 2, CUT, [plate])
-        else:
-            box(comp, cx, cy, -1, a, b, PT + 2, CUT, [plate])
 
-    hole(MIK_X0 + 11, BASE + 15, 'c', 6.5, 0); hole(MIK_X0 + 19, BASE + 10, 'c', 2.5, 0)
-    hole(MIK_X0 + 25, BASE + 9.5, 'r', 4, 3); hole(MIK_X0 + 33, BASE + 9.5, 'r', 4, 3)
-    for rx in (44.5, 58.5, 72.5, 86.5, 100.5):
-        hole(MIK_X0 + rx, BASE + 16, 'r', 13.5, 12.5)
-    hole(MIK_X0 + 23, 42, 'c', 9, 0)
-    for i in range(5):
-        hole(SW_CX + (i - 2) * 16, BASE + 16, 'r', 13.5, 12.5)
-    hole(-8, BASE + 18, 'r', 19, 13); hole(-3, BASE + 8, 'c', 7.0, 0); hole(-14, BASE + 8, 'c', 10.0, 0)
-    frame_grip(comp, plate, MIK_X0, MIK_X0 + 114, BASE, BASE + 29, 10, 2.0)
-    frame_grip(comp, plate, SW_CX - 50, SW_CX + 50, BASE, BASE + 28, 10, 2.0)
-    for (bx, by) in ((-120, 72), (-40, 72), (40, 72), (120, 72), (-132, 44), (132, 44)):
-        cyl(comp, bx, by, -1, 3.5, PT + 2, CUT, [plate])
-        cyl(comp, bx, by, PT - 2.2, 6.5, 3, CUT, [plate])
-    box(comp, 0, 1.5, PT, PW, 3, 65, JOIN, [plate])                  # 65mm shelf
-    for rx in (-133, 133):
-        box(comp, rx, 5.5, PT, 4, 5, 62, JOIN, [plate])             # SLIDE-GUIDE RAILS (cover slides on these)
-    for sx in (-125, 125):
-        box(comp, sx, 9.5, PT + 54, 7, 13, 8, JOIN, [plate])        # lock-screw bosses (0.5 clear of cover face)
-        cyl(comp, sx, 12, PT + 54, 2.6, 8, CUT, [plate])
-    for tx in (-130, -40, 40, 130):
-        box(comp, tx, PH - 2, 0, 10, 4, PT, JOIN, [plate])          # clip tabs
-    box(comp, 0, PH + 1.5, 0, PW, 3, PT, JOIN, [plate])             # top build-out
-    box(comp, 0, PH + 1.5, PT - 1, 250, 1.6, 2, CUT, [plate])       # top groove
-    return plate
+def make_check_box(comp, name, cx, cy, z0, sx, sy, sz, opacity=0.55):
+    body = box(comp, cx, cy, z0, sx, sy, sz, NEW).bodies.item(0)
+    body.name = CHECK_PREFIX + ' ' + name
+    set_opacity(body, opacity)
+    return body
+
+
+def make_check_cyl(comp, name, cx, cy, z0, d, sz, opacity=0.30):
+    body = cyl(comp, cx, cy, z0, d, sz, NEW).bodies.item(0)
+    body.name = CHECK_PREFIX + ' ' + name
+    set_opacity(body, opacity)
+    return body
+
+
+# NOTE: this file used to carry its own copy of the tub and the deep cap.  Both
+# are gone: build_actual_shell_and_cap() imports FIR_Shell's real builders, so
+# there is no second definition here that can silently drift from the print source.
 
 
 def place_lid_on_front(comp, body):
@@ -259,43 +272,490 @@ def place_lid_on_front(comp, body):
     comp.features.moveFeatures.add(mi)
 
 
-def build_top_cap(comp):
-    # The TALL-CAP TOP LID in its ASSEMBLED spot (mirrors FIR_Shell v19). CLOSED BOX = 120mm
-    # (12cm, per the plan's 300x250x120 reference + the original 80+50-10 design): the cap
-    # overlaps the tub walls 15mm (skirt Z65-80, tub outer 140 / skirt inner 140.5 = 0.5 slide
-    # clearance) then RISES to the plate at Z117-120, adding 37mm of headroom for the adapters
-    # + the hanging brain. Side BOLTS mid-overlap: cap holes @Z72 <-> tub bosses Z66-78 /
-    # pilots Z72. The FRONT wall only spans Z83.5-117: below it the bottom lid's build-out
-    # (to Z83) + the cover top (Z83) close the front - the cover slides UNDER it, 0.5mm clear.
-    zl = CAP_LIFT
-    oh, ih = 143.0, 140.5                        # outer / inner half-width (286 / 281 cavity)
-    cap = box(comp, 0, 0, 117 + zl, 2 * oh, 2 * oh, 3, NEW).bodies.item(0)   # top plate Z117-120
-    cap.name = '4 TOP CAP (see-through)'
-    for sxs in (-1, 1):                                                  # side skirt walls Z65-117
-        box(comp, sxs * (oh - 1.25), 0, 65 + zl, 2.5, 2 * oh, 52, JOIN, [cap])
-    box(comp, 0, -oh + 1.25, 65 + zl, 2 * oh, 2.5, 52, JOIN, [cap])      # back wall Z65-117
-    box(comp, 0, oh - 1.25, 83.5 + zl, 2 * ih, 2.5, 33.5, JOIN, [cap])   # SHORT front wall Z83.5-117
-    for dx, dy in ((1, 0), (-1, 0), (0, -1)):                            # 0.3mm crush click ribs
-        box(comp, dx * (ih + 0.2), dy * (ih + 0.2), 73 + zl,
-            2 if dx else 20, 20 if dx else 2, 2.0, JOIN, [cap])
-    for sxs in (-1, 1):                                                  # 6 side-bolt clearance holes
-        for byy in (-75, 0, 75):                                         # line up with the tub pilots @ Z72
-            cyl_x(comp, byy, 72 + zl, sxs * (oh - 1), 3.4, 6, CUT, [cap])
-    for bx in (-58.5, 58.5):                                             # brain bolt bosses under the plate
-        for byo in (-50, 50):
-            cyl(comp, bx, byo, 105 + zl, 7, 12, JOIN, [cap])
-            cyl(comp, bx, byo, 104 + zl, 2.6, 13, CUT, [cap])
-    return cap
+def place_cover_on_front(comp, body):
+    """Rigidly place the printable cover in its real closed orientation.
+
+    This is a +90 degree rotation about X, not the reflection used by the old
+    presentation-only FIR_Assembly.  Source +Z becomes shell -Y (into the
+    shelf) and source +Y becomes shell +Z (up the front face).
+    """
+    m = adsk.core.Matrix3D.create()
+    m.setToRotation(math.pi / 2.0, adsk.core.Vector3D.create(1, 0, 0),
+                    adsk.core.Point3D.create(0, 0, 0))
+    # Closed cover: front face at Y=205, lower edge Z=3.  Positive travel
+    # moves it outward so the user can inspect rail entry before it slides home.
+    m.translation = adsk.core.Vector3D.create(
+        0, mm(205.0 + COVER_TRAVEL), mm(43.0))
+    coll = adsk.core.ObjectCollection.create(); coll.add(body)
+    comp.features.moveFeatures.add(comp.features.moveFeatures.createInput(coll, m))
+
+
+def build_actual_front_closure(comp):
+    """Build the active BottomLid and CurvedLid, not copied approximations."""
+    lid_source = _load_active_builder('FIR_BottomLid')
+    cover_source = _load_active_builder('FIR_CurvedLid')
+
+    lid = lid_source.build(comp)
+    lid.name = CHECK_PREFIX + ' bottom lid (actual FIR_BottomLid)'
+    place_lid_on_front(comp, lid)
+    set_opacity(lid, 0.22)
+
+    cover = cover_source.build(comp)
+    cover.name = CHECK_PREFIX + ' curved cover (actual FIR_CurvedLid)'
+    place_cover_on_front(comp, cover)
+    set_opacity(cover, 0.35)
+
+    # The cover is placed with a true rigid transform, never a reflection.
+    # That is what exposed the old handedness fault, and it is what proves the
+    # fix: CurvedLid's notches are now written in real shell X, so its router
+    # notches must land over the router and its switch notches over the switch.
+    check_cover_handedness(lid_source, cover_source)
+    return lid, cover
+
+
+def check_cover_handedness(lid_source, cover_source):
+    """Verify the cover's notches sit under the device they belong to.
+
+    The cover only tips up 90 degrees about X, so its source X is shell X.  The
+    BottomLid is turned over, so its source X is shell -X.  A notch on the wrong
+    half of the box is invisible in a rendered view and obvious here, which is
+    exactly the failure this all-up model exists to catch.
+    """
+    router_span = (MIK_CX - MIK_W / 2.0, MIK_CX + MIK_W / 2.0)
+    switch_span = (POE_CX - POE_W / 2.0, POE_CX + POE_W / 2.0)
+    stray = [nx for nx in cover_source.RJ45_X
+             if not (router_span[0] <= nx <= router_span[1]
+                     or switch_span[0] <= nx <= switch_span[1])]
+    if stray:
+        SKIPPED.append(
+            'front-cover notches at X {} sit under neither the router nor the switch: '
+            'CurvedLid handedness is wrong'
+            .format(', '.join('{:.1f}'.format(v) for v in stray)))
+    lid_power_x = -lid_source.POWER_CABLE_X          # turned-over plate
+    if abs(cover_source.POWER_CABLE_X - lid_power_x) > 1.0:
+        SKIPPED.append(
+            'front-cover power notch is at shell X{:.1f} but the BottomLid pass-through it '
+            'has to line up with is at X{:.1f}'
+            .format(cover_source.POWER_CABLE_X, lid_power_x))
 
 
 def build_mikrotik(comp):
     m_back = FRONT_Y - 0.5                             # 951 port face right against the lid inside
     oy = m_back - MIK_D / 2.0
     dev = box(comp, MIK_CX, oy, FLOOR + ST_H, MIK_W, MIK_D, MIK_H, NEW).bodies.item(0)
-    dev.name = '3 MikroTik 951'
+    dev.name = CHECK_PREFIX + ' MikroTik RB951 (measured ports)'
     for (k, x, z, a, b) in MPORTS:
         cx = MIK_CX - (-MIK_W / 2.0 + x)                 # flipped in X to match the lid
         yport(comp, dev, cx, FLOOR + ST_H + z, k, a, b, m_back, 8.0)
+    return dev
+
+
+def build_brain_all_up(comp):
+    """Build the real gadget + real tray, then current physical envelopes."""
+    gadget = _load_active_builder('FIR_ModuleGadget')
+    plate_source = _load_active_builder('FIR_ModulePlate')
+
+    # Cap-boss bottoms are roof-inner-face minus boss height.  The brain-case
+    # roof outer face is its local BODY_Z; deriving this keeps CAP_LIFT exact.
+    roof_inside_z = 117.0 + CAP_LIFT
+    case_z = roof_inside_z - BRAIN_CAP_BOSS_H - gadget.BODY_Z
+    case_y = CASE_TO_CAP_Y
+
+    # The case now follows the confirmed 52mm plate-to-PCB stack.  The cap
+    # still supplies the same boss-bottom Z datum, so make any reduced lower
+    # clearance explicit rather than hiding it in a transparent all-up view.
+    router_top = FLOOR + ST_H + MIK_H
+    poe_top = FLOOR + ST_H + POE_H
+    router_gap = case_z - router_top
+    poe_gap = case_z - poe_top
+    if router_gap < 0.0:
+        SKIPPED.append(
+            'ALL-UP INTERFERENCE: brain case/tray lower face Z{:.1f} overlaps '
+            'the MikroTik top Z{:.1f} by {:.1f}mm; resolve before printing.'
+            .format(case_z, router_top, -router_gap))
+    elif router_gap < 1.0:
+        SKIPPED.append(
+            'ALL-UP TIGHT CLEARANCE: brain case/tray lower face is only {:.1f}mm '
+            'above the MikroTik; target at least 1.0mm.'
+            .format(router_gap))
+    if poe_gap < 1.0:
+        SKIPPED.append(
+            'ALL-UP TIGHT CLEARANCE: brain case/tray lower face is only {:.1f}mm '
+            'above the PoE switch; target at least 1.0mm.'
+            .format(poe_gap))
+
+    brain_case = gadget.build(comp)
+    brain_case.name = CHECK_PREFIX + ' brain case (actual FIR_ModuleGadget)'
+    translate_body(comp, brain_case, 0.0, case_y, case_z)
+    set_opacity(brain_case, 0.24)
+
+    # Use the actual printed tray builder.  Do NOT call ModulePlate.build_parts:
+    # its PCB preview is intentionally at the old tray-post height, whereas the
+    # current PCB belongs to the gadget roof.
+    tray = plate_source.build_plate(comp)
+    tray.name = CHECK_PREFIX + ' electronics tray (actual FIR_ModulePlate)'
+    # The real tray spans local Z=0..3; its top face contacts the case ledge
+    # that begins at local Z=3.  Do not add PLATE_SEAT_Z again here.
+    translate_body(comp, tray, 0.0, case_y, case_z)
+    set_opacity(tray, 0.50)
+
+    # The current PCB and electronics do not have imported manufacturer STEP
+    # files.  These envelopes use the active Gadget/ModulePlate dimensions and
+    # are deliberately named as inspection geometry, never printable parts.
+    # Owner-confirmed orientation: the PCB's populated/silkscreen face points
+    # DOWN toward the ModulePlate; only the bare solder side faces the roof.
+    # Read the explicit datum from the active Gadget, with an orientation-safe
+    # fallback for a pre-v21 builder.
+    pcb_component_face = getattr(gadget, 'PCB_COMPONENT_FACE_Z',
+                                 gadget.PCB_TOP_Z - PCB_TH)
+    pcb_z0 = case_z + pcb_component_face
+    make_check_box(comp, 'brain PCB 115x115 (component face DOWN)',
+                   0.0, case_y, pcb_z0, PCB_W, PCB_H, PCB_TH, 0.62)
+    socket_z0 = case_z + pcb_component_face - gadget.PCB_SOCKET_H
+    devkit_z0 = socket_z0 - gadget.PCB_DEVKIT_H
+    make_check_box(comp, 'ESP32 socket envelope (downward)', 0.0, case_y,
+                   socket_z0, 28.0, 56.0, gadget.PCB_SOCKET_H, 0.48)
+    make_check_box(comp, 'ESP32 DevKitC envelope (downward)', 0.0, case_y,
+                   devkit_z0, 28.0, 56.0, gadget.PCB_DEVKIT_H, 0.55)
+
+    for name, width, length, height, cx, cy, mount in plate_source.MODULES:
+        z0 = plate_source.PLATE_TOP if mount == 'flat' else \
+            plate_source.PLATE_TOP + plate_source.RAISE
+        if name == 'battery cell':
+            # 14500 cell axis is along the tray Y direction.
+            feature = cyl_y(comp, cx, case_z + z0 + height / 2.0,
+                            case_y + cy, width, length, NEW)
+            item = feature.bodies.item(0)
+            item.name = CHECK_PREFIX + ' 14500 cell envelope'
+            set_opacity(item, 0.65)
+        else:
+            make_check_box(comp, 'module envelope: ' + name,
+                           cx, case_y + cy, case_z + z0,
+                           width, length, height, 0.58)
+        if name == 'relay':
+            # The real relay terminal block extends 12mm beyond the 34mm board
+            # toward +X (source envelope reaches X=49 locally).  Include it so
+            # the inspection view cannot falsely clear that terminal side.
+            make_check_box(comp, 'relay terminal overhang envelope',
+                           cx + width / 2.0 + 6.0, case_y + cy,
+                           case_z + z0, 12.0, length, height, 0.58)
+
+    # J4/J5 plugs descend through the free +X margin, then leave through the
+    # 50x5 Dupont exit centred in the PCB-to-plate gap.
+    for label, y0, y1 in (
+            ('J4 TFT 5V connector', gadget.J4_J5_Y_MIN, -27.4),
+            ('J5 RC522 3V3 connector', -21.5, gadget.J4_J5_Y_MAX)):
+        cy = case_y + (y0 + y1) / 2.0
+        span = y1 - y0
+        # The J4/J5 header stacks are on the component face, so they hang
+        # down into the plate-side gap rather than rising toward the roof.
+        make_check_box(comp, label, PCB_W / 2.0 + 2.0, cy,
+                       case_z + pcb_component_face - 4.0,
+                       4.0, span, 4.0, 0.62)
+        service_top = pcb_component_face - 4.0
+        service_bottom = gadget.JUMPER_Z0 + gadget.JUMPER_H
+        if service_top > service_bottom:
+            make_check_box(comp, label + ' vertical service drop',
+                           PCB_W / 2.0 + 3.5, cy,
+                           case_z + service_bottom,
+                           7.0, span, service_top - service_bottom, 0.30)
+        make_check_box(comp, label + ' Dupont exit envelope',
+                       PCB_W / 2.0 + 7.0, cy,
+                       case_z + gadget.JUMPER_Z0, 10.0, span, gadget.JUMPER_H, 0.30)
+
+    return {
+        'gadget': gadget,
+        'plate': plate_source,
+        'case_y': case_y,
+        'case_z': case_z,
+        'pcb_z0': pcb_z0,
+    }
+
+
+def build_poe_dc_jack(comp):
+    """Show the Tenda's own DC jack and the volume its plug demands.
+
+    Measured: a 6mm barrel jack on the switch's RIGHT-hand end face, 8.3mm
+    forward of its rear.  Height on that face is not measured, so it is drawn
+    at mid-height and reported as an assumption rather than shown as fact.
+    """
+    front = FRONT_Y - 0.5
+    rear = front - POE_D
+    face_x = POE_CX + POE_JACK_SIDE * POE_W / 2.0
+    jack_y = rear + POE_JACK_FROM_REAR
+    jack_z = FLOOR + ST_H + POE_JACK_FROM_BASE
+
+    make_check_cyl(comp, 'switch DC jack (6mm, measured)',
+                   face_x, jack_y, jack_z - POE_JACK_D / 2.0,
+                   POE_JACK_D, 1.0, 0.70)
+    # Straight plug first: if it fits, everything fits.  It is drawn as the
+    # volume the plug body wants, sticking out of that end face.
+    plug_x = face_x + POE_JACK_SIDE * POE_PLUG_STRAIGHT_L / 2.0
+    make_check_box(comp, 'switch DC plug envelope (straight barrel)',
+                   plug_x, jack_y, jack_z - POE_PLUG_D / 2.0,
+                   POE_PLUG_STRAIGHT_L, POE_PLUG_D, POE_PLUG_D, 0.45)
+
+    wall_inner = POE_JACK_SIDE * (HALF - WALL)
+    air = abs(wall_inner - face_x)
+    if POE_JACK_SIDE > 0:
+        air = min(air, abs((MIK_CX - MIK_W / 2.0) - face_x))
+    if air < POE_PLUG_STRAIGHT_L + 1.0:
+        SKIPPED.append(
+            'switch DC jack: only {:.1f}mm of air off its end face. A straight barrel plug '
+            'needs ~{:.0f}mm and will NOT fit; a right-angle plug needs ~{:.0f}mm. Either '
+            'use a right-angle DC plug or move the switch inboard (which also moves the '
+            'BottomLid 68.8mm slot).'
+            .format(air, POE_PLUG_STRAIGHT_L, POE_PLUG_RIGHT_ANGLE_L))
+    if not INTERFACE.POE_JACK_MEASURED_HEIGHT:
+        SKIPPED.append(
+            'switch DC jack height is ASSUMED at {:.1f}mm above the switch base (mid-height); '
+            'measure it so the cradle post beside it can be set exactly'
+            .format(POE_JACK_FROM_BASE))
+    return air
+
+
+def build_poe_and_front_connectors(comp):
+    """Confirmed PoE switch plus router/switch service envelopes."""
+    front = FRONT_Y - 0.5
+    poe = make_check_box(comp, 'PoE switch envelope', POE_CX,
+                         front - POE_D / 2.0, FLOOR + ST_H,
+                         POE_W, POE_D, POE_H, 0.58)
+
+    # BottomLid local X is mirrored into the assembled shell.  The real
+    # switch now has one measured 68.8 x 11.5mm service slot, not five guessed
+    # individual RJ45 openings.  This is an external plug/service envelope,
+    # not an additional cut in the printable parts.
+    make_check_box(comp, 'PoE 68.8 x 11.5 long-port service envelope',
+                   -SW_CX, front + 4.0, SW_PORT_Z0,
+                   SW_PORT_W, 8.0, SW_PORT_H, 0.40)
+
+    build_poe_dc_jack(comp)
+
+    # Router port envelopes use the same measured MPORTS values used by its
+    # cut geometry.  Only the five RJ45 plugs are shown as external volumes.
+    for index, (kind, px, pz, width, height) in enumerate(MPORTS):
+        if kind != 'r' or width < 10.0:
+            continue
+        cx = MIK_CX - (-MIK_W / 2.0 + px)
+        make_check_box(comp, 'MikroTik RJ45 plug {}'.format(index - 3), cx,
+                       front + 4.0, FLOOR + ST_H + pz - height / 2.0,
+                       width, 8.0, height, 0.40)
+    return poe
+
+
+def build_extension_and_adapters(comp):
+    """Show the current shell-source extension and three adapters."""
+    make_check_box(comp, 'extension strip envelope', 0.0, EXT_CY, FLOOR,
+                   EXT_W, EXT_D, EXT_H, 0.50)
+    for index, ax in enumerate((-80.0, 0.0, 80.0)):
+        make_check_box(comp, 'adapter {} envelope'.format(index + 1), ax,
+                       EXT_CY, FLOOR + EXT_H, 46.0, 46.0, 52.0, 0.48)
+    # The old 48mm internal buzzer proxy is intentionally not shown.  The
+    # owner supplied the real 104mm horn, which is previewed on the cap by
+    # build_horn_preview() after the brain case is placed.
+
+
+def horn_mount_points():
+    """The measured 50 / 50 / 38.5mm horn triangle, in assembled shell axes.
+
+    Solved once in the shared contract so FIR_Shell's cap holes and this
+    inspection view cannot end up on two different triangles.
+    """
+    return INTERFACE.horn_mount_points()
+
+
+def build_horn_preview(comp, brain):
+    """Show the external horn over the mount FIR_Shell now cuts into the cap.
+
+    The pads, the three 6.5mm through-holes and the PG7 gland hole are real
+    printable geometry made by FIR_Shell.build_top_lid(); this view imports
+    that cap, so only the bought horn, its fasteners and its lead are drawn
+    here.  The checks below are what actually earn the position.
+    """
+    roof_z = CAP_ROOF_OUTER_Z + CAP_LIFT
+    make_check_cyl(comp, 'horn 69mm external mounting flange',
+                   HORN_CX, HORN_CY, roof_z, HORN_FLANGE_D, 3.0, 0.36)
+    make_check_cyl(comp, 'horn 104mm x 102mm external body envelope',
+                   HORN_CX, HORN_CY, roof_z, HORN_BODY_D, HORN_BODY_H, 0.25)
+
+    # Roof inner face is 3mm below the exterior; each pad finishes 0.5mm inside
+    # that roof, so it prints fused from the inside rather than sitting on it.
+    pad_z = roof_z - CAP_ROOF_TH - INTERFACE.HORN_PAD_H + INTERFACE.HORN_PAD_EMBED
+    points = horn_mount_points()
+    for index, (px, py) in enumerate(points):
+        # Bolt + washer + locknut: the fastener travels the whole stack, which
+        # is what makes this a through-bolt rather than a thread in 3mm of PETG.
+        make_check_cyl(comp, 'horn through-bolt {} (bolt + washers + locknut)'.format(index + 1),
+                       px, py, pad_z - 6.0, HORN_HOLE_D,
+                       INTERFACE.HORN_PAD_H + CAP_ROOF_TH + 12.0, 0.18)
+        make_check_cyl(comp, 'horn locknut driver access {}'.format(index + 1),
+                       px, py, pad_z - 22.0, 14.0, 22.0, 0.10)
+
+    wx, wy = INTERFACE.horn_wire_point()
+    make_check_cyl(comp, 'horn PG7 cable gland', wx, wy,
+                   pad_z - 14.0, 18.0, CAP_ROOF_TH + 18.0, 0.30)
+    make_check_box(comp, 'horn lead drop (gland -> brain case)', wx, wy,
+                   brain['case_z'], 5.0, 5.0,
+                   pad_z - 14.0 - brain['case_z'], 0.22)
+
+    # These checks are the crucial reason for choosing this slightly outboard
+    # spot: pads must clear the brain case and the cap bosses, the flange must
+    # stay on the roof, and the horn must stay behind the switch.
+    gadget = brain['gadget']
+    brain_left_edge = -gadget.W / 2.0
+    inboard_pad_edge = max(px + HORN_PAD_D / 2.0 for px, _ in points)
+    if inboard_pad_edge >= brain_left_edge:
+        SKIPPED.append(
+            'horn mount reaches the brain case: move it farther outboard before printing')
+
+    def circle_to_rect_air(px, py, radius, xl, xr, yb, yt):
+        dx = max(xl - px, 0.0, px - xr)
+        dy = max(yb - py, 0.0, py - yt)
+        return math.sqrt(dx * dx + dy * dy) - radius
+
+    case_box = (-gadget.W / 2.0, gadget.W / 2.0,
+                brain['case_y'] - gadget.H / 2.0,
+                brain['case_y'] + gadget.H / 2.0)
+    pad_radius = HORN_PAD_D / 2.0
+    for index, (px, py) in enumerate(points):
+        air = circle_to_rect_air(px, py, pad_radius, *case_box)
+        if air < 2.0:
+            SKIPPED.append(
+                'horn bolt pad {} has only {:.1f}mm brain-case clearance'.format(index + 1, air))
+        for bx, by in BRAIN_CAP_MOUNT:
+            boss_air = math.hypot(px - bx, py - by) - (pad_radius + BRAIN_CAP_FLANGE_D / 2.0)
+            if boss_air < 2.0:
+                SKIPPED.append(
+                    'horn bolt pad {} has only {:.1f}mm cap-boss clearance'.format(index + 1, boss_air))
+
+    # The gland has to drop into free air, not onto the brain-case roof.
+    gland_air = circle_to_rect_air(wx, wy, INTERFACE.HORN_WIRE_PAD_D / 2.0, *case_box)
+    if gland_air < 2.0:
+        SKIPPED.append(
+            'horn cable gland is only {:.1f}mm from the brain case; its lead would land on the '
+            'case roof instead of dropping beside it'.format(gland_air))
+    gland_radius = math.hypot(wx - HORN_CX, wy - HORN_CY)
+    if gland_radius - HORN_WIRE_D / 2.0 < HORN_FLANGE_D / 2.0:
+        SKIPPED.append('horn cable gland is under the 69mm flange and would be blocked by it')
+    if gland_radius + HORN_WIRE_D / 2.0 > HORN_BODY_D / 2.0:
+        SKIPPED.append('horn cable gland sits outside the 104mm body: it would be exposed on the roof')
+
+    flange_radius = HORN_FLANGE_D / 2.0
+    if abs(HORN_CX) + flange_radius > 143.0 or abs(HORN_CY) + flange_radius > 143.0:
+        SKIPPED.append('horn flange extends beyond the top-cap roof; move it before printing')
+    switch_rear_y = FRONT_Y - 0.5 - POE_D
+    horn_to_switch = switch_rear_y - (HORN_CY + HORN_BODY_D / 2.0)
+    if horn_to_switch < 4.0:
+        SKIPPED.append(
+            'horn body is only {:.1f}mm behind the switch; retain at least 4mm'.format(horn_to_switch))
+    pad_to_case_roof = pad_z - (brain['case_z'] + gadget.BODY_Z)
+    if pad_to_case_roof < 2.0:
+        SKIPPED.append(
+            'horn pad has only {:.1f}mm vertical clearance above the brain case'.format(pad_to_case_roof))
+
+    return points
+
+
+def build_cable_paths(comp, brain):
+    """Inspection-only cable envelopes, routed below the brain case.
+
+    The old horizontal mains proxy entered the brain-case volume.  It is not
+    reused here: mains routing is intentionally reported as unresolved rather
+    than hidden behind a false-clearance drawing.
+    """
+    gadget = brain['gadget']
+    front = FRONT_Y - 0.5
+    low_z = FLOOR + 1.0
+    make_check_box(comp, 'DC cable to MikroTik (low-floor route)', -40.0,
+                   front - 70.0, low_z, 4.0, 120.0, 4.0, 0.24)
+    # The switch is fed from its own end face, not from the middle of the box:
+    # this run hugs the -X wall gap and turns in at the jack.
+    jack_run_x = POE_CX + POE_JACK_SIDE * (POE_W / 2.0 + 5.0)
+    make_check_box(comp, 'DC cable to switch jack (low-floor route)', jack_run_x,
+                   front - 60.0, low_z, 4.0, 110.0, 4.0, 0.24)
+    for index, px in enumerate((90.5, 76.5, 62.5, 48.5, 34.5)):
+        make_check_box(comp, 'MikroTik LAN lead {}'.format(index + 1), px,
+                       front + 20.0, FLOOR + ST_H + BASE + 16.0 - 3.0,
+                       4.0, 42.0, 4.0, 0.22)
+    # Short, non-committal internal runs show the actual J4/J5 exit direction
+    # without claiming an unmeasured destination outside the brain case.
+    make_check_box(comp, 'J4/J5 wire service loop envelope', 76.0,
+                   brain['case_y'] - 25.0,
+                   brain['case_z'] + gadget.JUMPER_Z0,
+                   18.0, 50.0, gadget.JUMPER_H, 0.22)
+    SKIPPED.append(
+        'mains route intentionally not drawn: the previous proxy intersected the brain case')
+
+
+def build_driver_access(comp, brain):
+    """Show which screws can be reached at each real assembly stage."""
+    gadget = brain['gadget']
+    case_z, case_y = brain['case_z'], brain['case_y']
+    # Stage 1: empty case -> cap.  These long driver corridors must be used
+    # before PCB/tray installation, which is why they are shown separately.
+    for index, (x, y) in enumerate(BRAIN_CAP_MOUNT):
+        make_check_cyl(comp, 'driver stage 1 case-to-cap screw {}'.format(index + 1),
+                       x, y, case_z, 5.0, gadget.BODY_Z, 0.14)
+    # Stage 2: PCB screws are reachable from the open component-side bottom
+    # before the tray.  They travel upward into the short roof posts.
+    for index, (x, y) in enumerate(PCB_HOLE_PATTERN):
+        make_check_cyl(comp, 'driver stage 2 PCB screw {}'.format(index + 1),
+                       x, case_y + y, case_z, 4.0,
+                       getattr(gadget, 'PCB_COMPONENT_FACE_Z',
+                               gadget.PCB_TOP_Z - PCB_TH), 0.14)
+    # Stage 3: tray screws enter from the open bottom and only retain the tray.
+    for index, (x, y) in enumerate(TRAY_MOUNT):
+        make_check_cyl(comp, 'driver stage 3 tray screw {}'.format(index + 1),
+                       x, case_y + y, case_z, 4.0,
+                       gadget.PLATE_SEAT_Z + gadget.PLATE_BOSS_H, 0.14)
+
+
+def build_actual_shell_and_cap(comp):
+    """Use FIR_Shell's print builders, transforming its cap into assembly."""
+    shell_source = _load_active_builder('FIR_Shell')
+    del shell_source.SKIPPED[:]
+    shell = shell_source.build(comp)
+    shell.name = CHECK_PREFIX + ' shell / actual FIR_Shell tub (see-through)'
+    set_opacity(shell, 0.22)
+
+    # FIR_Shell builds the cap plate-down for printing: its external roof is
+    # local Z=0 and its inner roof face is Z=3.  Rotate 180 degrees around Y
+    # and lift to Z=120, preserving +Y as the front.  The cap is symmetric in
+    # X, so the X mirror does not change any placement datum.
+    cap = shell_source.build_top_lid(comp, 0.0)
+    cap.name = CHECK_PREFIX + ' top cap / actual FIR_Shell (see-through)'
+    coll = adsk.core.ObjectCollection.create()
+    coll.add(cap)
+    matrix = adsk.core.Matrix3D.create()
+    matrix.setToRotation(math.pi, adsk.core.Vector3D.create(0, 1, 0),
+                         adsk.core.Point3D.create(0, 0, 0))
+    matrix.translation = adsk.core.Vector3D.create(0, 0, mm(120.0 + CAP_LIFT))
+    comp.features.moveFeatures.add(comp.features.moveFeatures.createInput(coll, matrix))
+    set_opacity(cap, 0.22)
+    # Carry the tub's own build notes into this report.  They are where the
+    # cradle says what it had to trim, and they would otherwise never be seen
+    # by anyone running the all-up view instead of FIR_Shell directly.
+    for note in shell_source.SKIPPED:
+        SKIPPED.append('FIR_Shell: ' + note)
+    return shell, cap
+
+
+def clear_old(comp):
+    """Delete only bodies made by ShellCheck, never arbitrary user geometry."""
+    legacy_names = (
+        '1 SHELL (see-through)', '2 BOTTOM LID (see-through)',
+        '3 MikroTik 951', '4 TOP CAP (see-through)',
+    )
+    removed = 0
+    for index in range(comp.bRepBodies.count - 1, -1, -1):
+        body = comp.bRepBodies.item(index)
+        if body.name.startswith(CHECK_PREFIX) or body.name in legacy_names:
+            try:
+                body.deleteMe()
+                removed += 1
+            except Exception as e:
+                SKIPPED.append('clear {}: {}'.format(body.name, e))
+    return removed
 
 
 def run(context):
@@ -313,13 +773,38 @@ def run(context):
             pass
         del SKIPPED[:]
         comp = design.rootComponent
-        sh = build_shell(comp); set_opacity(sh, 0.30)
-        lid = build_lid_local(comp); place_lid_on_front(comp, lid); set_opacity(lid, 0.30)
+        # Rebuild the current shared contract/builders on every inspection
+        # run so a source sync cannot be hidden by Fusion's module cache.
+        sys.modules.pop('_freeisp_shared_interface', None)
+        removed = clear_old(comp)
+        sh, cap = build_actual_shell_and_cap(comp)
+        lid, cover = build_actual_front_closure(comp)
         build_mikrotik(comp)
-        cap = build_top_cap(comp); set_opacity(cap, 0.30)
+        build_poe_and_front_connectors(comp)
+        build_extension_and_adapters(comp)
+        brain = build_brain_all_up(comp)
+        horn_points = build_horn_preview(comp, brain)
+        build_cable_paths(comp, brain)
+        if SHOW_DRIVER_ACCESS:
+            build_driver_access(comp, brain)
         app.activeViewport.fit()
+        message = (CHECK_VERSION + '\n\n'
+                   'Built the assembled tub, BottomLid, CurvedLid, cap, actual brain case, actual tray, '
+                   'PCB/module envelopes, router, PoE switch, three adapters, connectors and '
+                   'cable paths. Driver-access guide cylinders: {}.\n'
+                   'Cleared {} prior ShellCheck body(ies).\n'
+                   'Interface {}: tray {}x{}, PCB {}x{}, case offset +Y{}.'
+                   .format('shown' if SHOW_DRIVER_ACCESS else 'hidden (set SHOW_DRIVER_ACCESS=True to inspect)',
+                           removed, INTERFACE.INTERFACE_VERSION,
+                           TRAY_W, TRAY_H, PCB_W, PCB_H, CASE_TO_CAP_Y))
+        message += ('\nHorn preview: external top-cap location X{:.1f}, Y{:.1f}; '
+                    '69mm flange, 104mm body x 102mm high; measured 6mm axes at {}.'
+                    .format(HORN_CX, HORN_CY,
+                            ', '.join('({:.1f}, {:.1f})'.format(x, y)
+                                      for x, y in horn_points)))
         if SKIPPED:
-            ui.messageBox('Real-parts check built. Skipped:\n - ' + '\n - '.join(SKIPPED))
+            message += '\n\nInspection notes:\n - ' + '\n - '.join(SKIPPED)
+        ui.messageBox(message)
     except:  # noqa
         if ui:
             ui.messageBox('FIR_ShellCheck failed:\n{}'.format(traceback.format_exc()))

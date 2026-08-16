@@ -3,7 +3,7 @@
     "type": "script",
     "author": "FREEISPRADIUS",
     "description": {
-        "": "Premium edge-router-style smart-module shell: vented, chamfered, screen+LED+TAP+logo top."
+        "": "Active FreeISP brain case: 128.3mm snug-push-fit ModulePlate with 0.35mm per-side FDM allowance, component-side-down PCB at 52mm above that plate, a 50x5 J4/J5 wire exit centred in the gap, short roof-embedded supports with M3x10 PCB screws, and four visibly open M3 roof holes for upward attachment to the top-cap bosses."
     },
     "supportedOS": "windows|mac",
     "editEnabled": true

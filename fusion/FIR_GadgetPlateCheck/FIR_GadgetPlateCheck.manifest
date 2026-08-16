@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "INSPECTION ONLY: real FIR_ModuleGadget with real snug-fit FIR_ModulePlate, actual module envelopes, component-side-down PCB/ESP32 stack, and transparent J4/J5 header-to-active-exit service routing. Fails visibly unless tray fit is 0.25..0.50mm per side and Plate-top to PCB component-face gap is 50..55mm; never export for printing."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

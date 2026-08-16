@@ -3,7 +3,7 @@
     "type": "script",
     "author": "FREEISPRADIUS",
     "description": {
-        "": "The snap-on CURVED LID (cover): 280 x 65, whole top curves, thin shell. Step 1 = the shell; ports (on the flat bottom band) + side grooves/click come next."
+        "": "Sliding CurvedLid cover: 280 x 65 hood, rail-guided and locked by two front M3 screws. Its notches are written in true shell X - the cover is tipped up, not turned over like the BottomLid. It is not a snap/detent closure."
     },
     "supportedOS": "windows|mac",
     "editEnabled": true

@@ -1,8 +1,8 @@
 # FIR_Assembly.py - Autodesk Fusion 360 script
-# ASSEMBLY VIEW: the real BOTTOM LID + the COVER, each in its true assembled position so you can
-# see the finished look. Two separate bodies. The cover is built flipped/shifted so it sits ON the
-# shelf and slides home against the lid's outside face (rails -> caps, bulges -> recesses line up).
-# Run ALONE in a fresh design.
+# PRESENTATION VIEW ONLY: this script rebuilds the BottomLid and cover to show
+# their local port layout together.  Its cover placement contains an X
+# reflection, so it is not a physical rigid-transform fit check.  Use
+# FIR_ShellCheck for the truthful all-up closure / port-orientation inspection.
 
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
@@ -11,6 +11,7 @@ PW, PH, PT = 280.0, 80.0, 3.0
 SW_CX = 85.0
 MIK_X0 = -135.0
 BASE = 6.5
+POWER_CABLE_X = 10.0             # matches the CurvedLid dedicated power notch
 
 # ---- cover (FIR_CurvedLid coords) ----
 LEN, HEIGHT, DEPTH = 280.0, 80.0, 65.0
@@ -25,6 +26,7 @@ RAIL_X = 133.0
 SHELF_TOP_Y = -HEIGHT / 2.0
 RAIL_TOP_Y = SHELF_TOP_Y + 5.0
 TZ0, TZ1 = WALL, DEPTH - 2.0                 # TZ0=WALL: catch grows off the face inner (3.0 floated 0.5mm)
+TONGUE_LEN, TONGUE_W, TONGUE_D = 249.0, 1.0, 0.7
 
 # cover -> assembly transform: sit on the shelf (Y +43), flip Z about the shelf front (Z' = 68 - Z)
 YS = 43.0
@@ -145,7 +147,9 @@ def build_lid(comp):
         hole(SW_CX + (i - 2) * 16, BASE + 16, 'r', 13.5, 12.5)
     hole(-8, BASE + 18, 'r', 19, 13)
     hole(-3, BASE + 8, 'c', 7.0, 0)                     # power jack (synced: moved LEFT below the switch)
-    hole(-14, BASE + 8, 'c', 10.0, 0)                   # 10mm cable (synced: moved LEFT below the switch)
+    # Dedicated 10mm power-cable pass-through.  It is aligned with the cover
+    # power notch; measured device-port openings above remain unchanged.
+    hole(POWER_CABLE_X, BASE + 8, 'c', 10.0, 0)
 
     frame_grip(comp, plate, MIK_X0, MIK_X0 + 114, BASE, BASE + 29, 10, 2.0)
     frame_grip(comp, plate, SW_CX - 50, SW_CX + 50, BASE, BASE + 28, 10, 2.0)
@@ -178,10 +182,10 @@ def build_cover(comp):
 
     for rx in RJ45_X:
         notch(rx, HOLE_D)
-    notch(10, PWR_D)
+    notch(POWER_CABLE_X, PWR_D)
 
     cbox(comp, 0, HEIGHT / 2 - WALL / 2, 0, LEN, WALL, DEPTH, JOIN, [cf])              # top wall
-    cbox(comp, 0, 38.5, DEPTH, 250, 1.0, 1.0, JOIN, [cf])                              # top tongue centred in the lid groove
+    cbox(comp, 0, 38.5, DEPTH, TONGUE_LEN, TONGUE_W, TONGUE_D, JOIN, [cf])              # tolerant top tongue in the lid groove
     for sx in (-LEN / 2 + WALL / 2, LEN / 2 - WALL / 2):
         cbox(comp, sx, 0, 0, WALL, HEIGHT, DEPTH, JOIN, [cf])                          # end walls
 

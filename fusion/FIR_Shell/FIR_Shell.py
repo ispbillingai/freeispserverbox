@@ -8,7 +8,55 @@
 # Coordinate frame: origin at footprint centre, +Y = front (ports/UI), +Z = up. HALF = 140.
 # This is the main tub only (print BOTTOM-DOWN, no support). Bottom lid + top lid are separate.
 
+import importlib.util
+import os
+import sys
+
 import adsk.core, adsk.fusion, adsk.cam, traceback
+
+
+def _load_shared_interface():
+    """Load the one mechanical-interface contract in workspace or Fusion."""
+    script_file = globals().get('__file__', '')
+    script_dir = (os.path.dirname(os.path.abspath(script_file))
+                  if script_file else os.getcwd())
+    candidates = []
+    override = os.environ.get('FIR_INTERFACE_PATH')
+    if override:
+        candidates.append(override if override.lower().endswith('.py')
+                          else os.path.join(override, 'FIR_Interface.py'))
+    workspace_source = globals().get('_workspace_source')
+    if workspace_source:
+        candidates.append(os.path.join(
+            os.path.dirname(os.path.abspath(workspace_source)), '..',
+            '_shared', 'FIR_Interface.py'))
+    candidates.extend((
+        os.path.join(script_dir, 'FIR_Interface.py'),
+        os.path.join(script_dir, '..', '_shared', 'FIR_Interface.py'),
+    ))
+
+    seen = set()
+    for candidate in candidates:
+        path = os.path.realpath(os.path.abspath(candidate))
+        if path in seen or not os.path.isfile(path):
+            continue
+        seen.add(path)
+        # Always reload the shared contract: Fusion otherwise preserves an
+        # older tray/cap interface after a source sync.
+        sys.modules.pop('_freeisp_shared_interface', None)
+        spec = importlib.util.spec_from_file_location(
+            '_freeisp_shared_interface', path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules['_freeisp_shared_interface'] = module
+            spec.loader.exec_module(module)
+            return module
+    raise ImportError(
+        'FIR_Interface.py not found. Deploy fusion/_shared beside the '
+        'Fusion script folders, or set FIR_INTERFACE_PATH.')
+
+
+INTERFACE = _load_shared_interface()
 
 BOX_W, BOX_D, BOX_H = 280.0, 280.0, 80.0       # tub 80mm; deep-cap lid adds the rest
 WALL, FLOOR, CORNER_R = 3.0, 3.0, 10.0
@@ -17,7 +65,10 @@ FRONT_Y = HALF - WALL
 
 MIK_W, MIK_D, MIK_H, MIK_CX = 114.0, 139.0, 29.0, 78.0   # MikroTik now +X = LEFT in front view (matches lid)
 ST_H = 3.5                                       # 951 standoff -> port face z6..35
-POE_W, POE_D, POE_H, POE_CX = 100.0, 100.0, 28.0, -85.0  # PoE switch matches the bottom-lid switch frame
+# Confirmed physical PoE switch: 82mm port face x 52mm depth x 23mm high.
+# Its front face remains against the BottomLid, so only its rear edge moves
+# forward; the centre stays aligned with the 68.8mm long BottomLid opening.
+POE_W, POE_D, POE_H, POE_CX = 82.0, 52.0, 23.0, -85.0
 EXT_CY = -110.0                                  # extension/adapter zone (back)
 EXT_W, EXT_D, EXT_H = 240.0, 47.0, 29.0
 EXT_FRONT_RETAINER_H = EXT_H                     # internal front retainer; wedges attach to back casing wall
@@ -25,6 +76,56 @@ ADAP_TOP = 70.0                                  # adapter TOP height above floo
 DIV_Y = -82.0                                    # AC/DC divider line (front=DC, back=AC)
 SHELF_Z, MOD_CX = 45.0, -5.0
 PLATE_TH = 3.0
+# Brain-case interface: the small FIR_ModuleGadget hangs from these four
+# reinforced bosses using low-profile M3x12 self-tapping screws.  A broad
+# flange embeds each boss into the cap roof so tightening cannot snap a thin
+# free-standing post.  The shared contract owns the small-case offset and
+# derives this cap pattern from its four local roof holes.  The 10.8mm boss
+# height keeps the confirmed 69.6mm brain case 1.1mm above the MikroTik in
+# the all-up stack, while an M3x12 still gets 9mm engagement after crossing
+# the case's 3mm roof.
+BRAIN_CASE_TO_CAP_Y = INTERFACE.CASE_TO_CAP_Y
+BRAIN_CASE_MOUNT = INTERFACE.CASE_MOUNT
+BRAIN_CAP_MOUNT = INTERFACE.CAP_BOSS_PATTERN
+BRAIN_CAP_BOSS_D, BRAIN_CAP_BOSS_H = 9.0, 10.8
+BRAIN_CAP_FLANGE_D, BRAIN_CAP_FLANGE_H = 13.0, 3.0
+BRAIN_CAP_PILOT = 2.6
+
+# ---- deep top cap, expressed once so the tub can reason about it -----------
+CAP_SKIRT_H = 52.0                               # 15mm tub overlap + 37mm headroom
+CAP_ROOF_TH = 3.0
+CAP_TUB_OVERLAP = 15.0
+CAP_TOP_Z = BOX_H - CAP_TUB_OVERLAP + CAP_SKIRT_H + CAP_ROOF_TH   # 120 assembled
+CAP_ROOF_INNER_Z = CAP_TOP_Z - CAP_ROOF_TH                        # 117 assembled
+
+# ---- the hanging brain case, as a KEEP-OUT for tub features ---------------
+# The small case bolts up under the cap bosses, so its underside is fixed by
+# the cap, not by the tub.  Anything in the tub that rises into this box is an
+# interference the all-up view would otherwise only show as a faint overlap.
+BRAIN_CASE_BOTTOM_Z = CAP_ROOF_INNER_Z - BRAIN_CAP_BOSS_H - INTERFACE.CASE_BODY_Z
+BRAIN_CASE_KEEPOUT = (
+    -INTERFACE.CASE_OUTER_W / 2.0, INTERFACE.CASE_OUTER_W / 2.0,
+    BRAIN_CASE_TO_CAP_Y - INTERFACE.CASE_OUTER_H / 2.0,
+    BRAIN_CASE_TO_CAP_Y + INTERFACE.CASE_OUTER_H / 2.0,
+    BRAIN_CASE_BOTTOM_Z - 1.0,                   # keep a 1mm air gap under it
+)
+
+# ---- confirmed Tenda switch DC jack (shared contract) ----------------------
+POE_JACK_SIDE = INTERFACE.POE_JACK_SIDE
+POE_JACK_FROM_REAR = INTERFACE.POE_JACK_FROM_REAR
+POE_JACK_FROM_BASE = INTERFACE.POE_JACK_FROM_BASE
+POE_PLUG_D = INTERFACE.POE_PLUG_D
+# The jack height is not measured yet, so the cradle post beside it is clipped
+# to a height that clears the plug wherever it actually sits on that face.
+POE_JACK_POST_MAX_H = 8.0
+
+# ---- external alarm horn on the cap (shared contract) ----------------------
+HORN_BOLT_CLEAR_D = INTERFACE.HORN_BOLT_CLEAR_D
+HORN_PAD_D, HORN_PAD_H = INTERFACE.HORN_PAD_D, INTERFACE.HORN_PAD_H
+HORN_PAD_EMBED = INTERFACE.HORN_PAD_EMBED
+HORN_WIRE_D = INTERFACE.HORN_WIRE_D
+HORN_WIRE_PAD_D, HORN_WIRE_PAD_H = INTERFACE.HORN_WIRE_PAD_D, INTERFACE.HORN_WIRE_PAD_H
+
 SHOW_PARTS = False                               # False = print-ready (no display components/cables)
 
 CM = 0.1
@@ -255,25 +356,58 @@ def strap_anchor(comp, sh, sx_wall):
     return
 
 
-def cradle_grip(comp, sh, cx, cy, w, d, h):
+def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, label='cradle'):
     # SECTIONED grip (saves material vs solid walls): short POSTS at the corners + centre instead of
     # continuous walls - still hugs the device on 3 sides. 2 cantilever SNAP-TABS hook the top edges
     # to lock it; front (toward the ports) stays open. Drops in + clicks; flex the tabs to lift out.
+    #
+    # ceiling = (x0, x1, y0, y1, z_max): anything of this cradle whose footprint falls inside that
+    #   rectangle is TRIMMED to z_max instead of rising into whatever hangs there. A feature that
+    #   would be trimmed to nothing is dropped entirely - never leave a floating stub.
+    # side_post_clip = (side_sign, z_max): shorten one back SIDE post so a connector on that end
+    #   face of the device stays reachable. It is clipped, not windowed: a window through a 2.5mm
+    #   post leaves the material above it hanging on nothing.
     wt, clr, P = 2.5, 0.5, 14.0
     hw, hd = w / 2 + clr, d / 2 + clr
     HK = 4.0                                                                          # how far the hook curls IN
+
+    def part(fx, fy, z0, sx, sy, sz, what):
+        # Build one cradle feature, trimmed to whatever hangs above it, and return the
+        # top Z it actually reached (None if there was no room for it at all).
+        if ceiling:
+            x0, x1, y0, y1, z_max = ceiling
+            overlaps = (fx + sx / 2.0 > x0 and fx - sx / 2.0 < x1 and
+                        fy + sy / 2.0 > y0 and fy - sy / 2.0 < y1)
+            if overlaps:
+                sz = min(sz, z_max - z0)
+        if sz < 1.0:
+            SKIPPED.append('{} {} at X{:.1f} omitted BY DESIGN: only {:.1f}mm under the part '
+                           'hanging above it. Nothing is lost - a device with that little air '
+                           'over it cannot lift out of the cradle anyway'
+                           .format(label, what, fx, max(0.0, sz)))
+            return None
+        box(comp, fx, fy, z0, sx, sy, sz, JOIN, [sh])
+        return z0 + sz
+
     # back: 3 posts that RISE PAST the device top, each with a hook growing off the post + curling IN
     for px in (cx - hw + P / 2, cx, cx + hw - P / 2):
-        box(comp, px, cy - hd - wt / 2, FLOOR, P, wt, h + 4, JOIN, [sh])               # back post (rises to h+4)
-        box(comp, px, cy - hd + HK / 2, FLOOR + h, P, wt + HK, 3, JOIN, [sh])          # hook off the post, curls IN over top
+        top = part(px, cy - hd - wt / 2, FLOOR, P, wt, h + 4, 'back post')             # back post (rises to h+4)
+        # A hook only makes sense on a post that still reaches the device top; growing one
+        # off a trimmed post would leave it floating in mid-air.
+        if top is not None and top >= FLOOR + h - 1e-6:
+            part(px, cy - hd + HK / 2, FLOOR + h, P, wt + HK, 3, 'back hook')          # hook, curls IN over top
     # front arms sit 11mm BACK from the device front: the lid's holding frames own the front 10mm
     # (tub Y127-137) and the arms used to occupy the exact same space - the lid could not seat.
     fyc = cy + hd - 11 - P / 2
     for s in (-1, 1):
-        box(comp, cx + s * (hw + wt / 2), cy - hd + P / 2, FLOOR, wt, P, h, JOIN, [sh])        # back side post
-        box(comp, cx + s * (hw + wt / 2), fyc, FLOOR, wt, P, h + 5, JOIN, [sh])                # front arm rises past top
-        box(comp, cx + s * (hw - 0.75), fyc, FLOOR + h, HK + wt, P, 3, JOIN, [sh])             # hook off the arm, curls IN
-        box(comp, cx + s * w / 4, cy - hd + 2, FLOOR, 3, 3, 3, JOIN, [sh])             # alignment lug
+        side_h = h
+        if side_post_clip and side_post_clip[0] == s:
+            side_h = max(0.0, side_post_clip[1] - FLOOR)
+        part(cx + s * (hw + wt / 2), cy - hd + P / 2, FLOOR, wt, P, side_h, 'back side post')
+        top = part(cx + s * (hw + wt / 2), fyc, FLOOR, wt, P, h + 5, 'front arm')      # rises past top
+        if top is not None and top >= FLOOR + h - 1e-6:
+            part(cx + s * (hw - 0.75), fyc, FLOOR + h, HK + wt, P, 3, 'front hook')    # hook, curls IN
+        part(cx + s * w / 4, cy - hd + 2, FLOOR, 3, 3, 3, 'alignment lug')
     return
 
 
@@ -301,7 +435,12 @@ def build(comp):
     for sx in (MIK_CX - (MIK_W / 2 - 6), MIK_CX + (MIK_W / 2 - 6)):     # airflow standoffs
         for sy in (m_back - 14, m_back - MIK_D + 8):                    # front row 14 back: clear of the lid's 10mm frames
             cyl(comp, sx, sy, FLOOR, 7, ST_H, JOIN, [sh])
-    cradle_grip(comp, sh, MIK_CX, m_cy, MIK_W, MIK_D, ST_H + MIK_H)     # +ST_H: 951 sits on standoffs, so hooks reach its true top
+    # +ST_H: the 951 sits on standoffs, so the hooks reach its true top. The brain case hangs
+    # only 1.1mm over that top, so the -X end of this cradle CANNOT carry a snap hook: it is
+    # trimmed to a plain support post there. Nothing is lost - a router with 1.1mm of air above
+    # it cannot lift out of the cradle in the first place.
+    cradle_grip(comp, sh, MIK_CX, m_cy, MIK_W, MIK_D, ST_H + MIK_H,
+                ceiling=BRAIN_CASE_KEEPOUT, label='MikroTik cradle')
 
     # (OLD 951 click-in plate seat REMOVED - the integrated bottom lid is the whole front face now)
 
@@ -311,8 +450,28 @@ def build(comp):
     for sx in (POE_CX - (POE_W / 2 - 6), POE_CX + (POE_W / 2 - 6)):    # match lid port height
         for sy in (p_back - 14, p_back - POE_D + 8):                   # front row 14 back: clear of the lid's 10mm frames
             cyl(comp, sx, sy, FLOOR, 7, ST_H, JOIN, [sh])
-    cradle_grip(comp, sh, POE_CX, p_cy, POE_W, POE_D, ST_H + POE_H)    # snug cradle + snap-tabs
+    # The Tenda's DC barrel jack is on the switch's own RIGHT-hand end face (shell -X), 8.3mm
+    # forward of its rear. The cradle's back side post stood right across it, so on that end the
+    # post is clipped short and the plug now has a clear run out to the side wall.
+    poe_jack_post_top = min(FLOOR + POE_JACK_POST_MAX_H,
+                            FLOOR + ST_H + POE_JACK_FROM_BASE - POE_PLUG_D / 2.0 - 1.0)
+    cradle_grip(comp, sh, POE_CX, p_cy, POE_W, POE_D, ST_H + POE_H,    # snug cradle + snap-tabs
+                ceiling=BRAIN_CASE_KEEPOUT, label='switch cradle',
+                side_post_clip=(POE_JACK_SIDE, poe_jack_post_top))
     # (OLD PoE click-in plate rails REMOVED - integrated bottom lid replaces them)
+    # How much air the plug actually gets on that end face. On the -X end the side wall is the
+    # limit; on the +X end it is the MikroTik. Report it rather than let it be found at wiring.
+    jack_face_x = POE_CX + POE_JACK_SIDE * POE_W / 2.0
+    if POE_JACK_SIDE < 0:
+        poe_jack_air = jack_face_x - (-HALF + WALL)
+    else:
+        poe_jack_air = (MIK_CX - MIK_W / 2.0) - jack_face_x
+    if poe_jack_air < INTERFACE.POE_PLUG_MIN_AIR:
+        SKIPPED.append(
+            'switch DC jack has only {:.1f}mm of air off its end face: a straight barrel plug '
+            'needs ~{:.0f}mm, a right-angle plug ~{:.0f}mm'
+            .format(poe_jack_air, INTERFACE.POE_PLUG_STRAIGHT_L,
+                    INTERFACE.POE_PLUG_RIGHT_ANGLE_L))
 
     # ================= BRAIN MODULE: bolts to the LID (zero shelf) =================
     # No shelf, no ledges - the brain hangs from the lid; bolt bosses live on the lid.
@@ -368,7 +527,9 @@ def build_components(comp):
     p('=extension', 0, EXT_CY, FLOOR, EXT_W, EXT_D, EXT_H)
     for ax in (-80, 0, 80):
         p('=adapter', ax, EXT_CY, FLOOR + EXT_H, 46, 46, 52)     # plugged into the extension
-    cyl(comp, 95, -60, FLOOR, 48, 35, NEW).bodies.item(0).name = '=buzzer'
+    # The old 48mm internal buzzer proxy is retired.  The real 104mm horn is
+    # now reviewed as an external top-cap candidate in FIR_ShellCheck before
+    # any permanent cap mount holes are added.
     # (brain module is shown on the LID, not here - it bolts to the lid)
 
 
@@ -383,8 +544,11 @@ def build_cables(comp):
     w('~mains cord', -85, -52, FLOOR + 2, 5, 5, 52)                     # drops down at the front-left
     w('~mains cord', -85, 25, FLOOR + 3, 5, 155, 5)                     # forward along the floor to the ports
     w('~DC to 951', -40, m_back - 70, FLOOR + 2, 4, 120, 4)              # adapter -> router (along floor)
-    w('~DC to PoE', 30, m_back - 50, FLOOR + 2, 4, 90, 4)                # adapter -> PoE (along floor)
-    w('~buzzer wire', 50, -55, FLOOR + 2, 90, 4, 4)                      # buzzer -> brain (along floor)
+    # The switch's jack is on its -X end, so its DC lead runs up the -X wall gap, not up the
+    # middle of the box where it was drawn before.
+    jack_x = POE_CX + POE_JACK_SIDE * (POE_W / 2.0 + 5.0)
+    w('~DC to PoE', jack_x, m_back - 60, FLOOR + 2, 4, 110, 4)           # adapter -> switch jack (along floor)
+    w('~horn lead', -96, -12, FLOOR + 2, 4, 4, 100)                      # cap gland -> brain (rises to the cap)
     for rx in (-100, -84, -68, -52, -36):                               # LAN leads out the front (951)
         w('~LAN', MIK_CX + (rx + 68), FRONT_Y + 8, FLOOR + 16, 4, 22, 4)
     for rx in (38, 54, 70):                                              # LAN leads out the front (PoE)
@@ -438,6 +602,33 @@ def build_poe_plate(comp, ox, oy):
     return plate
 
 
+def horn_mount(comp, lid, ox):
+    # EXTERNAL ALARM HORN mount, cut into the deep cap's roof.
+    #
+    # PRINT-ORIENTATION WARNING: the cap is built roof-DOWN (its outer face is local z=0) and is
+    # physically FLIPPED left/right on assembly, so a feature at local +X ends up at assembled -X.
+    # The four brain bosses never showed this up because their pattern is symmetric; the horn is
+    # not, so its assembled X is mirrored here exactly once.
+    #
+    # The horn is THROUGH-BOLTED, never self-tapped: it is a 104mm x 102mm lump and a 3mm printed
+    # roof will not hold a thread under it. Each of the three measured axes gets an internal
+    # load-spreading pad embedded 0.5mm into the roof, so it prints as one fused solid and the
+    # locknut pulls against 6mm of material instead of 3mm. Fit each bolt with a washer both sides.
+    pad_z = CAP_ROOF_TH - HORN_PAD_EMBED                     # pad starts INSIDE the roof
+    for index, (hx, hy) in enumerate(INTERFACE.horn_mount_points()):
+        lx = ox - hx                                         # assembled -X -> cap local +X
+        cyl(comp, lx, hy, pad_z, HORN_PAD_D, HORN_PAD_H, JOIN, [lid])
+        cyl(comp, lx, hy, -1.0, HORN_BOLT_CLEAR_D,
+            HORN_PAD_H + CAP_ROOF_TH + 2.0, CUT, [lid])
+    # WIRE ENTRY: a PG7 gland under the horn body but clear of its 69mm flange, offset toward the
+    # box back so the lead drops into free air beside the brain case instead of onto its roof.
+    wx, wy = INTERFACE.horn_wire_point()
+    cyl(comp, ox - wx, wy, pad_z, HORN_WIRE_PAD_D, HORN_WIRE_PAD_H, JOIN, [lid])
+    cyl(comp, ox - wx, wy, -1.0, HORN_WIRE_D,
+        HORN_WIRE_PAD_H + CAP_ROOF_TH + 2.0, CUT, [lid])
+    return
+
+
 def build_top_lid(comp, ox):
     # TALL-CAP lid: the tub is 80mm but the CLOSED BOX IS 120mm (12cm, Francis) - this cap adds
     # the 37mm of headroom the adapters + hanging brain need. It overlaps the tub walls by just
@@ -449,16 +640,25 @@ def build_top_lid(comp, ox):
     # bolts to the inner top. Shown beside the tub in print orientation (plate down, skirt up).
     LW = BOX_W + 6.0          # outer - bulges out over the tub
     inner = BOX_W + 1.0       # slides over the 280 tub with clearance
-    LH = 52.0                 # skirt: 15mm tub overlap + 37mm headroom -> closed box 120mm
-    lid = box(comp, ox, 0, 0, LW, LW, 3.0, NEW).bodies.item(0)
+    LH = CAP_SKIRT_H          # skirt: 15mm tub overlap + 37mm headroom -> closed box 120mm
+    lid = box(comp, ox, 0, 0, LW, LW, CAP_ROOF_TH, NEW).bodies.item(0)
     lid.name = 'FIR TOP LID (deep cap)'
     box(comp, ox, 0, 3.0, LW, LW, LH, JOIN, [lid])                   # skirt block up
-    box(comp, ox, 0, 2.0, inner, inner, LH + 2, CUT, [lid])          # hollow -> skirt walls
+    # Start the hollow at the roof's inner face, not 1mm into it.  This keeps
+    # the full 3mm roof and makes the brain-boss flange join the roof at z=3.
+    box(comp, ox, 0, 3.0, inner, inner, LH + 2, CUT, [lid])          # hollow -> skirt walls
     fillet_corners(comp, lid, CORNER_R, ox, LW / 2.0)               # round the 4 outer corners FULL HEIGHT (after the skirt)
-    for bx in (-58.5, 58.5):                                         # brain bolt bosses (inner top)
-        for byo in (-50, 50):
-            cyl(comp, ox + bx, byo, 3.0, 7, 12, JOIN, [lid])
-            cyl(comp, ox + bx, byo, 3.0, 2.6, 13, CUT, [lid])
+    # Reinforced BRAIN CASE attachment: each M3 pilot is inside a 9mm boss
+    # with a 13mm root flange fused into the cap roof.  FIR_ModuleGadget's
+    # four easy-access roof holes map here when its case is installed +10mm
+    # toward +Y.  No case screw sits at a rounded case corner.
+    for bx, byo in BRAIN_CAP_MOUNT:
+        cyl(comp, ox + bx, byo, 3.0,
+            BRAIN_CAP_FLANGE_D, BRAIN_CAP_FLANGE_H, JOIN, [lid])
+        cyl(comp, ox + bx, byo, 3.0,
+            BRAIN_CAP_BOSS_D, BRAIN_CAP_BOSS_H, JOIN, [lid])
+        cyl(comp, ox + bx, byo, 3.0,
+            BRAIN_CAP_PILOT, BRAIN_CAP_BOSS_H + 1.0, CUT, [lid])
     # click ribs: TRUE crush ribs - 0.8mm proud of the skirt inner face, 0.3mm bite into the
     # tub wall (the old ones bulged 4mm inboard = 3.5mm bite, the cap could never slide on).
     # 2 sides + back only; they land at assembled Z73-75, where the FRONT wall doesn't exist.
@@ -477,12 +677,16 @@ def build_top_lid(comp, ox):
     for sxs in (-1, 1):
         for byy in (-75, 0, 75):
             cyl_x(comp, byy, LH - 4, ox + sxs * (inner / 2 + 1.5), 3.4, 6, CUT, [lid])
+    # EXTERNAL ALARM HORN: three reinforced through-bolt mounts + the gland wire entry.
+    horn_mount(comp, lid, ox)
     if SHOW_PARTS:
         box(comp, ox, 0, 16, 135, 120, 40, NEW).bodies.item(0).name = '=brain (bolts to lid)'
     return lid
 
 
-VERSION = 'v19 top cap TALL again: closed box 120mm, 15mm overlap, front wall stops @Z83.5, bolts @Z72'
+VERSION = ('v25: horn through-bolt mounts + PG7 wire entry cut into the cap roof, switch DC-jack '
+           'clearance in the PoE cradle, MikroTik cradle trimmed under the hanging brain case '
+           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):

@@ -3,7 +3,7 @@
     "type": "script",
     "author": "FREEISPRADIUS",
     "description": {
-        "": "Open carrier plate: components screw on, faceplate in front, tray behind - no sealed box."
+        "": "Active FreeISP electronics ModulePlate: 128.3mm rounded snug-push-fit tray for FIR_ModuleGadget, with unchanged module layout and four underside M3 tray-mount holes."
     },
     "supportedOS": "windows|mac",
     "editEnabled": true

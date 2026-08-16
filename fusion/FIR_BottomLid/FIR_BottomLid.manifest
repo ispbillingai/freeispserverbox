@@ -3,7 +3,7 @@
     "type": "script",
     "author": "FREEISPRADIUS",
     "description": {
-        "": "The integrated-port bottom lid (from Francis's sketch): slanted top, 3 port sections (SWITCH | POWER | MIKROTIK), device cradles so the switch + 951 drop in and line up."
+        "": "Integrated outer front port lid: confirmed 82x52x23 PoE switch frame with one 68.8x11.5 long service opening, measured MikroTik ports, power routes, six lid screws and cover rails."
     },
     "supportedOS": "windows|mac",
     "editEnabled": true

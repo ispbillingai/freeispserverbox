@@ -7,9 +7,23 @@
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
 PW, PH, PT = 280.0, 80.0, 3.0                # plate = full front face: width x TUB HEIGHT x thickness
-SW_CX = 85.0                                 # switch section centre (now RIGHT)
-MIK_X0 = -135.0                              # mikrotik 951 port-face left edge (now LEFT)
+# BottomLid is X-mirrored when mounted on the tub: local +X is physical
+# shell -X.  Keep this source datum so the switch remains at shell X=-85.
+SW_CX = 85.0
+MIK_X0 = -135.0                              # MikroTik port-face left edge in lid coordinates
 BASE = 6.5                                   # device base height -> port Y = BASE + measured_z
+# Confirmed PoE switch: its port face is 82mm wide x 23mm high; it is 52mm
+# deep inside the tub.  Francis measured 6.6mm side lands, so the printed
+# slot is the exact 68.8mm (= 82 - 2*6.6) rather than five guessed RJ45 cuts.
+SW_W, SW_D, SW_H = 82.0, 52.0, 23.0
+SW_PORT_SIDE_LAND = 6.6
+SW_PORT_W, SW_PORT_H = SW_W - 2.0 * SW_PORT_SIDE_LAND, 11.5
+SW_PORT_FROM_BOTTOM = 3.2
+SW_PORT_CY = BASE + SW_PORT_FROM_BOTTOM + SW_PORT_H / 2.0
+# Dedicated power-cable route only.  It shares the CurvedLid power-notch
+# centreline; the router, switch, RJ45, jack and other measured port openings
+# are intentionally not changed here.
+POWER_CABLE_X = 10.0
 
 CM = 0.1
 def mm(v):
@@ -116,18 +130,22 @@ def build(comp):
     for rx in (44.5, 58.5, 72.5, 86.5, 100.5):           # 5 RJ45
         hole(MIK_X0 + rx, BASE + 16, 'r', 13.5, 12.5)
     hole(MIK_X0 + 23, 42, 'c', 9, 0)                      # power-cable pass-through (moved RIGHT, clear of the side bolt)
-    # ---- SWITCH section (left) - 5 RJ45, 14mm pitch (estimate) ----
-    for i in range(5):
-        hole(SW_CX + (i - 2) * 16, BASE + 16, 'r', 13.5, 12.5)
+    # ---- SWITCH section (left) - one confirmed long port opening ----
+    # The opening is 68.8 x 11.5mm (approximately the requested 69 x 11.5),
+    # centred in the 82mm switch face and 3.2mm above its lower edge.
+    hole(SW_CX, SW_PORT_CY, 'r', SW_PORT_W, SW_PORT_H)
     # ---- POWER section (centre) ----
     hole(-8, BASE + 18, 'r', 19, 13)                     # power switch (rocker)
     hole(-3, BASE + 8, 'c', 7.0, 0)                      # power jack  - moved LEFT below the switch, clear of the PoE support
-    hole(-14, BASE + 8, 'c', 10.0, 0)                    # 10mm cable  - moved LEFT below the switch, clear of the PoE support
+    # 10mm grommet/pass-through.  Centreline matches FIR_CurvedLid's dedicated
+    # power notch at X=+10; this is not a router or switch port change.
+    hole(POWER_CABLE_X, BASE + 8, 'c', 10.0, 0)
 
     # HOLDING FRAMES on the INSIDE - 10mm walls (top/bottom/sides) pocket each device's port end
     # so it can't slide up/down/sideways (the box-side retention comes later)
     frame_grip(comp, plate, MIK_X0, MIK_X0 + 114, BASE, BASE + 29, 10, 2.0)        # MIKROTIK (left), 2mm walls
-    frame_grip(comp, plate, SW_CX - 50, SW_CX + 50, BASE, BASE + 28, 10, 2.0)      # SWITCH (right), 2mm walls
+    frame_grip(comp, plate, SW_CX - SW_W / 2.0, SW_CX + SW_W / 2.0,
+               BASE, BASE + SW_H, 10, 2.0)                                          # confirmed switch frame
     # clip tabs along the top edge (locate it on the box front before bolting)
     for tx in (-130, -40, 40, 130):
         box(comp, tx, PH - 2, 0, 10, 4, PT, JOIN, [plate])
