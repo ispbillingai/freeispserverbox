@@ -348,6 +348,13 @@ Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 #define C_BAD     0xF965
 #define C_ACCENT  0x07FF
 #define C_WARN    0xFFE0
+// the socket palette — the PORTS page draws real RJ45 jacks, and metal,
+// gold and plug-plastic are colours nothing else on the screen uses
+#define C_METAL   0x8C51          // the shell of a live socket
+#define C_METALD  0x39E7          // the shell of a dead one, and every shadow
+#define C_GOLD    0xFEA0          // the eight contacts, carrying
+#define C_BRONZE  0x8300          // the same contacts, in an empty socket
+#define C_PLUG    0xC618          // the body of a plug seated in the mouth
 
 // ================================================================
 //  SCREEN SETTINGS — remotely adjustable from the panel, kept in NVS.
@@ -503,6 +510,11 @@ struct Port {
   bool     seen    = false;
 };
 Port     ports[NPORTS];
+// what each socket on the glass is CURRENTLY showing (0 unknown, 1 empty,
+// 2 plugged, 255 nothing yet). A jack is 30-odd draw calls; repainting all
+// five twice a second would flicker, so one only repaints when the cable
+// actually changes.
+uint8_t  jackDrawn[NPORTS] = {255, 255, 255, 255, 255};
 bool     routerOk     = false;
 uint32_t lastGoodPoll = 0;
 uint32_t pollFails    = 0;
@@ -2097,6 +2109,73 @@ void bar(int x, int y, int w, int h, float frac, uint16_t color) {
 }
 
 // ================================================================
+//  RJ45 — the PORTS page as the router's own face.
+//
+//  A row of numbers cannot be read from across a shop; a row of sockets
+//  can. So the ports are drawn as ports: a metal shell, a keyed mouth
+//  with the latch slot under it, eight contacts, and a link LED above.
+//  A cable that is IN fills the mouth with the plug's grey body and lights
+//  the contacts gold; an empty socket is a black hole with dull bronze
+//  pins. Nobody has to be told which is which.
+// ================================================================
+const int JACK_W     = 26;   // one socket
+const int JACK_H     = 26;
+const int JACK_X0    = 7;    // five of them, centred across 160px
+const int JACK_PITCH = 30;
+const int JACK_Y     = 32;   // under the LED strip, inside the faceplate
+
+//  st: 0 = not read yet   1 = link down, empty   2 = link up, plug seated
+void drawJack(int x, int y, uint8_t st) {
+  bool up   = (st == 2);
+  bool live = (st != 0);
+  uint16_t shell = up ? C_METAL : C_METALD;
+  uint16_t mouth = up ? C_PLUG  : ST77XX_BLACK;
+
+  tft.fillRoundRect(x, y, JACK_W, JACK_H, 2, shell);
+  tft.drawFastHLine(x + 2, y, JACK_W - 4, up ? C_VALUE : C_DIM);  // top bevel
+  tft.drawRoundRect(x, y, JACK_W, JACK_H, 2, C_EDGE);             // sits on the card
+
+  // the keyed opening: a wide mouth, and the latch slot beneath it. Both
+  // are one colour, so a plug fills the whole key shape at once.
+  tft.fillRect(x + 4, y + 4,  18, 15, mouth);
+  tft.fillRect(x + 9, y + 19,  8,  4, mouth);
+
+  // a dark line all the way round the key shape. Empty, it is the shadow
+  // in the hole; plugged, it is the gap the plug's body sits in — either
+  // way the mouth stops dissolving into the shell.
+  tft.drawFastHLine(x + 4,  y + 3,  18, C_METALD);
+  tft.drawFastVLine(x + 3,  y + 4,  15, C_METALD);
+  tft.drawFastVLine(x + 22, y + 4,  15, C_METALD);
+  tft.drawFastHLine(x + 4,  y + 19,  5, C_METALD);   // the shoulders either
+  tft.drawFastHLine(x + 17, y + 19,  5, C_METALD);   // side of the latch
+  tft.drawFastVLine(x + 8,  y + 19,  4, C_METALD);
+  tft.drawFastVLine(x + 17, y + 19,  4, C_METALD);
+  tft.drawFastHLine(x + 9,  y + 23,  8, C_METALD);
+  tft.drawFastHLine(x + 4,  y + 4,  18, C_METALD);   // the recess, or the plug's edge
+
+  uint16_t pin = up ? C_GOLD : (live ? C_BRONZE : C_DIM);
+  for (int k = 0; k < 8; k++)
+    tft.drawFastVLine(x + 5 + k * 2, y + 6, 7, pin);
+}
+
+// "ether3" is six characters of which one matters — under a socket, the
+// number IS the label. A port someone renamed keeps its own name, cut to
+// what fits between two jacks. (Takes the index, not the Port: the IDE
+// hoists prototypes above the struct, so a Port& argument will not build.)
+String portShort(int i) {
+  const Port& p = ports[i];
+  if (!p.seen || p.name.length() == 0)  return String(i + 1);
+  if (p.name.startsWith("ether"))       return p.name.substring(5);
+  return p.name.substring(0, 4);
+}
+
+// 0.4 / 12.4 / 340 — one decimal until it stops fitting, then whole Mbps
+String mbpsTxt(float v) {
+  if (v >= 100) return String((int)v);
+  return String(v, 1);
+}
+
+// ================================================================
 //  OTA SELF-VERIFY — the update that cannot brick the box.
 //
 //  ESP32 flash holds TWO app slots. A pull update writes the spare one
@@ -2449,6 +2528,11 @@ void drawStatic() {
     }
     case 1:
       titleBar("PORTS");
+      // the faceplate the five sockets are mounted in
+      cardBox(2, 22, tft.width() - 4, 48);
+      for (int i = 0; i < NPORTS; i++) jackDrawn[i] = 255;   // force a repaint
+      // the caption lives in the one cell the port list leaves empty
+      label(84, 102, "rx/tx Mbps");
       break;
     case 2:
       titleBar("TRAFFIC");
@@ -2531,15 +2615,41 @@ void drawLive() {
       break;
     }
     case 1:
+      // ---- the faceplate: five sockets, drawn as sockets ----
       for (int i = 0; i < NPORTS; i++) {
-        int y = 24 + i * 20;
+        Port& p  = ports[i];
+        int   jx = JACK_X0 + i * JACK_PITCH;
+        uint8_t st = !p.seen ? 0 : (p.running ? 2 : 1);
+
+        if (jackDrawn[i] != st) {          // the socket changes when the cable does
+          jackDrawn[i] = st;
+          drawJack(jx, JACK_Y, st);
+          String s = portShort(i);
+          int ly = JACK_Y + JACK_H + 2;
+          tft.fillRect(jx, ly, JACK_W, 8, C_CARD);
+          tft.setTextSize(1);
+          tft.setTextColor(st == 2 ? C_VALUE : (st == 1 ? C_LABEL : C_DIM), C_CARD);
+          tft.setCursor(jx + 13 - (int)s.length() * 3, ly);   // centred under the jack
+          tft.print(s);
+        }
+
+        // the link/act LED above each socket, behaving like the router's
+        // own: steady green on a quiet link, winking amber under traffic
+        bool busy = (st == 2) && (p.rxMbps + p.txMbps > 0.05f);
+        tft.fillRect(jx + 9, JACK_Y - 6, 8, 3,
+                     st == 2 ? ((busy && heartbeat) ? C_WARN : C_GOOD)
+                             : (st == 1 ? C_EDGE : C_DIM));
+      }
+      // ---- and what each one is actually carrying ----
+      for (int i = 0; i < NPORTS; i++) {
         Port& p = ports[i];
-        tft.fillCircle(7, y + 3, 3, !p.seen ? C_LABEL : (p.running ? C_GOOD : C_BAD));
-        value(14, y, 1, C_VALUE, p.seen ? p.name : "...", 48);
-        if (!p.seen)         value(66, y, 1, C_LABEL, "-", 90);
-        else if (!p.running) value(66, y, 1, C_BAD, "down", 90);
-        else value(66, y, 1, C_VALUE,
-                   String(p.rxMbps, 1) + "/" + String(p.txMbps, 1) + " M", 90);
+        int cx = (i < 3) ? 6 : 84;
+        int cy = 78 + (i % 3) * 12;
+        String s = portShort(i) + " ";
+        if (!p.seen)         value(cx, cy, 1, C_DIM,   s + "--", 74);
+        else if (!p.running) value(cx, cy, 1, C_LABEL, s + "--", 74);
+        else value(cx, cy, 1, C_VALUE,
+                   s + mbpsTxt(p.rxMbps) + "/" + mbpsTxt(p.txMbps), 74);
       }
       break;
     case 2: {
