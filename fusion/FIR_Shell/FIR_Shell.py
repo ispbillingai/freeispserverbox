@@ -623,14 +623,27 @@ def horn_floor_mount(comp, sh):
     more headroom than the 114mm cavity has - so the sound leaves through the
     slotted window both front parts carry above the switch.
 
-    The pads raise the foot clear of the floor's corner fillets.  Pad 6mm +
-    pilot 7mm: an M4 x 10 bottoms exactly at the pilot floor with 2mm of tub
-    floor under it.  Never use longer than M4 x 10 here.
+    Only the TWO holes behind the horn body are bolted - both on the
+    extension side, where a driver comes straight down with the horn still on
+    its bracket.  The third hole, under the body where no tool fits, drops
+    over a printed locating peg: the peg takes shear, the bolts clamp.
+
+    Pad 6mm + pilot 7mm: an M4 x 10 bottoms exactly at the pilot floor with
+    2mm of tub floor under it.  Never use longer than M4 x 10 here.
     """
-    for px, py in INTERFACE.horn_mount_points():
+    for px, py in INTERFACE.horn_bolt_points():
         cyl(comp, px, py, FLOOR, HORN_PAD_D, HORN_PAD_H, JOIN, [sh])
         cyl(comp, px, py, FLOOR + HORN_PAD_H - HORN_PILOT_DEPTH,
             HORN_PILOT_D, HORN_PILOT_DEPTH, CUT, [sh])
+    # Locating peg: same pad, then a 5.5mm post through the 6mm foot hole with
+    # a stepped 3.5mm lead-in tip, so the foot finds it blind under the body.
+    gx, gy = INTERFACE.horn_peg_point()
+    cyl(comp, gx, gy, FLOOR, HORN_PAD_D, HORN_PAD_H, JOIN, [sh])
+    peg_top = FLOOR + HORN_PAD_H + INTERFACE.HORN_FOOT_PLATE_TH
+    cyl(comp, gx, gy, FLOOR + HORN_PAD_H, INTERFACE.HORN_PEG_D,
+        INTERFACE.HORN_FOOT_PLATE_TH, JOIN, [sh])
+    cyl(comp, gx, gy, peg_top, INTERFACE.HORN_PEG_TIP_D,
+        INTERFACE.HORN_PEG_PROUD, JOIN, [sh])
     if not INTERFACE.HORN_FOOT_MEASURED:
         SKIPPED.append(
             'horn foot position is ASSUMED {:.0f}mm back from the mouth. Measure mouth '
@@ -717,9 +730,8 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v27: alarm horn INSIDE on the floor behind the switch, brain case shifted +47mm to '
-           'open the column for it, switch moved inboard to X-71 so a straight barrel plug '
-           'goes in from the side, cap bosses mirrored for the print flip '
+VERSION = ('v28: horn foot now TWO reachable bolts on the extension side + a printed locating '
+           'peg under the body; switch at X-71 for side plug entry; cap bosses mirrored '
            '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 

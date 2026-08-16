@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-16.6'
+INTERFACE_VERSION = '2026-08-16.7'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -150,6 +150,15 @@ HORN_BASE_C2C, HORN_SIDE_C2C = 38.5, 50.0
 # three floor pads move with this one number, so it is worth a tape measure.
 HORN_FOOT_FROM_MOUTH = 99.0
 HORN_FOOT_MEASURED = False
+# Owner decision (16 Aug 2026): only the TWO bolts behind the horn body are
+# real fasteners - both sit on the extension side where a driver reaches them
+# straight down.  The third hole, under the body where no tool fits, drops
+# over a printed locating PEG instead.  0.5mm under the measured 6mm hole so
+# the foot lowers onto it blind; the peg takes shear, the two bolts clamp.
+HORN_PEG_D = 5.5
+HORN_PEG_TIP_D = 3.5              # stepped lead-in tip
+HORN_PEG_PROUD = 3.0              # above the foot plate; bell arch clears it
+HORN_FOOT_PLATE_TH = 3.0
 # Floor mounting: three pads raise the foot clear of the floor fillets.  Pad
 # 6 mm + pilot 7 mm is sized so an M4 x 10 (3 mm foot plate + 7 mm of thread)
 # bottoms exactly at the pilot floor with 2 mm of tub floor still under it;
@@ -192,11 +201,13 @@ def horn_foot_centre():
 
 
 def horn_mount_points():
-    """The three floor-pad centres, in assembled shell coordinates.
+    """The three foot-hole centres, in assembled shell coordinates.
 
     The foot centre is the circumcentre of the measured isosceles triangle.
-    Its single apex points toward the back of the box, so the two base bolts
-    stay under the horn where a driver can still reach them.
+    The single APEX points FORWARD, under the horn body, and gets the peg
+    (index 0).  The two BASE holes point toward the extension at the back,
+    land behind the horn body, and take the real bolts (indices 1 and 2) -
+    that is what makes them reachable with the horn still on its bracket.
     """
     cx, cy = horn_foot_centre()
     half_base = HORN_BASE_C2C / 2.0
@@ -204,10 +215,20 @@ def horn_mount_points():
     base_y = (altitude ** 2 - half_base ** 2) / (2.0 * altitude)
     apex_y = altitude - base_y
     return (
-        (cx, cy - apex_y),
-        (cx - half_base, cy + base_y),
-        (cx + half_base, cy + base_y),
+        (cx, cy + apex_y),                     # 0: PEG, under the body
+        (cx - half_base, cy - base_y),         # 1: bolt, behind the body
+        (cx + half_base, cy - base_y),         # 2: bolt, behind the body
     )
+
+
+def horn_bolt_points():
+    """Only the two real fasteners."""
+    return horn_mount_points()[1:]
+
+
+def horn_peg_point():
+    """The printed locating peg the third foot hole drops over."""
+    return horn_mount_points()[0]
 
 
 def validate():
@@ -275,6 +296,20 @@ def validate():
         errors.append('horn floor pilot would break through the 3mm tub floor')
     if min(HORN_W, HORN_L, HORN_H, HORN_BOLT_TAIL) <= 0.0:
         errors.append('horn envelope must be positive')
+    # The whole point of the peg layout: both real bolts must land BEHIND the
+    # horn body where a vertical driver reaches them, and the peg must land
+    # under the foot disc it locates.
+    body_rear = HORN_MOUTH_Y - HORN_L
+    for bx, by in horn_bolt_points():
+        if by > body_rear - 2.0:
+            errors.append('horn bolt at Y{:.1f} is not clear behind the body '
+                          '(rear {:.1f})'.format(by, body_rear))
+    px, py = horn_peg_point()
+    fx, fy = horn_foot_centre()
+    if math.hypot(px - fx, py - fy) + HORN_PEG_D / 2.0 > HORN_FOOT_D / 2.0:
+        errors.append('horn peg misses the foot disc')
+    if HORN_PEG_D >= HORN_HOLE_D:
+        errors.append('horn peg must be smaller than the measured 6mm foot hole')
     # The horn only fits because the brain case moved; if someone dials that
     # shift back without moving the horn, say so here rather than in a print.
     horn_x1 = HORN_CX + HORN_W / 2.0

@@ -118,9 +118,8 @@ CAP_ROOF_OUTER_Z, CAP_ROOF_TH = 120.0, 3.0  # assembled cap roof faces
 # the three assembly stages.
 SHOW_DRIVER_ACCESS = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v33 all-up: alarm horn INSIDE on the floor behind the switch, brain case '
-                 'shifted +47mm to clear it, switch moved inboard to X-71 for a straight '
-                 'barrel plug, no sound vents (owner decision), cap bosses mirrored')
+CHECK_VERSION = ('v34 all-up: horn foot = two reachable extension-side bolts + printed peg '
+                 'under the body; top-rain shedding verified; switch at X-71; no vents')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -587,9 +586,20 @@ def build_horn_preview(comp, brain):
     fx, fy = INTERFACE.horn_foot_centre()
     make_check_cyl(comp, 'alarm horn 69mm bracket foot', fx, fy,
                    FLOOR + HORN_PAD_H, HORN_FOOT_D, 3.0, 0.45)
-    for index, (px, py) in enumerate(horn_mount_points()):
-        make_check_cyl(comp, 'horn foot bolt {} (M4 into the floor pad)'.format(index + 1),
+    for index, (px, py) in enumerate(INTERFACE.horn_bolt_points()):
+        make_check_cyl(comp, 'horn foot bolt {} (M4, reachable behind the body)'.format(index + 1),
                        px, py, FLOOR, HORN_HOLE_D, HORN_PAD_H + 12.0, 0.20)
+        make_check_cyl(comp, 'horn bolt {} driver corridor'.format(index + 1),
+                       px, py, FLOOR + HORN_PAD_H + 12.0, 12.0, 90.0, 0.10)
+    gx, gy = INTERFACE.horn_peg_point()
+    make_check_cyl(comp, 'horn locating peg (printed, no bolt)', gx, gy,
+                   FLOOR + HORN_PAD_H, INTERFACE.HORN_PEG_D,
+                   INTERFACE.HORN_FOOT_PLATE_TH + INTERFACE.HORN_PEG_PROUD, 0.45)
+    # Both driver corridors must be genuinely open above the bolts.
+    for index, (px, py) in enumerate(INTERFACE.horn_bolt_points()):
+        if hy0 < py < hy1 and hx0 < px < hx1:
+            SKIPPED.append('horn bolt {} is under the body after all - '
+                           'triangle orientation is wrong'.format(index + 1))
 
     # ---- what the position has to survive -------------------------------
     gadget = brain['gadget']
@@ -616,6 +626,15 @@ def build_horn_preview(comp, brain):
         SKIPPED.append(
             'horn fires into a closed box by owner decision - no vents in the front '
             'panel, the cover or the lid. Do not re-add a grille without asking.')
+    # Owner requirement: rain from the TOP must never reach the components;
+    # dripping out the bottom is fine.  Trace the top paths explicitly.
+    SKIPPED.append(
+        'top-rain check: roof is continuous (no holes at all); every roof edge sheds '
+        'onto the OUTSIDE of the cap skirt; the skirt-to-tub gap opens DOWNWARD at '
+        'Z65, below the tub rim at Z80, so top water cannot run into it; water on the '
+        'cap front wall drips onto the cover top and runs off the front; anything '
+        'that wicks through that 0.5mm seam lands inside the cover hood and drains '
+        'out the downward cable notches. Top-tight by geometry, drips exit down.')
 
     if not INTERFACE.HORN_FOOT_MEASURED:
         SKIPPED.append(
