@@ -2,8 +2,53 @@
 # Slide-and-lock front cover: flat port face (280 x 80), 65mm top hood and
 # two end walls.  The open back seats over the BottomLid shelf.
 
+import importlib.util
+import os
+import sys
+
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
+
+def _load_shared_interface():
+    """Load the one mechanical-interface contract in workspace or Fusion."""
+    script_file = globals().get('__file__', '')
+    script_dir = (os.path.dirname(os.path.abspath(script_file))
+                  if script_file else os.getcwd())
+    candidates = []
+    override = os.environ.get('FIR_INTERFACE_PATH')
+    if override:
+        candidates.append(override if override.lower().endswith('.py')
+                          else os.path.join(override, 'FIR_Interface.py'))
+    workspace_source = globals().get('_workspace_source')
+    if workspace_source:
+        candidates.append(os.path.join(
+            os.path.dirname(os.path.abspath(workspace_source)), '..',
+            '_shared', 'FIR_Interface.py'))
+    candidates.extend((
+        os.path.join(script_dir, 'FIR_Interface.py'),
+        os.path.join(script_dir, '..', '_shared', 'FIR_Interface.py'),
+    ))
+    for candidate in candidates:
+        path = os.path.realpath(os.path.abspath(candidate))
+        if not os.path.isfile(path):
+            continue
+        sys.modules.pop('_freeisp_shared_interface', None)
+        spec = importlib.util.spec_from_file_location(
+            '_freeisp_shared_interface', path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules['_freeisp_shared_interface'] = module
+            spec.loader.exec_module(module)
+            return module
+    raise ImportError(
+        'FIR_Interface.py not found. Deploy fusion/_shared beside the Fusion scripts.')
+
+
+INTERFACE = _load_shared_interface()
+
+# The cover's local Y is the shell Z minus this: its lower edge sits at shell
+# Z=3 and its local Y=-40.  Used to line the horn window up with the BottomLid.
+COVER_Y_TO_SHELL_Z = 43.0
 LEN, HEIGHT, DEPTH = 280.0, 80.0, 65.0
 WALL = 2.5
 SKIN = 0.55
@@ -100,6 +145,14 @@ def build(comp):
     for rx in RJ45_X:
         notch(rx, HOLE_D)
     notch(POWER_CABLE_X, PWR_D)
+
+    # ALARM HORN sound window: the same slots the BottomLid carries, so the
+    # two line up once the cover is slid home.  Without this the sound would
+    # only reach the 65mm hood cavity and stop there.
+    for gz0, gz1 in INTERFACE.horn_grille_slots():
+        cy = (gz0 + gz1) / 2.0 - COVER_Y_TO_SHELL_Z
+        box(comp, INTERFACE.HORN_GRILLE_CX, cy, -1.0,
+            INTERFACE.HORN_GRILLE_W, gz1 - gz0, WALL + 2.0, CUT, [front])
 
     # Top wall and its tolerant locating tongue.
     box(comp, 0, HEIGHT / 2.0 - WALL / 2.0, 0, LEN, WALL, DEPTH, JOIN, [front])

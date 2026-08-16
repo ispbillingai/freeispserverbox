@@ -3,7 +3,7 @@
     "type": "script",
     "author": "FREEISPRADIUS",
     "description": {
-        "": "Integrated outer front port lid: confirmed 82x52x23 PoE switch frame with one 68.8x11.5 long service opening, measured MikroTik ports, power routes, six lid screws and cover rails."
+        "": "Flat integrated port face: measured 951 openings, the confirmed 68.8 x 11.5mm Tenda service slot, the power section, and the slotted alarm-horn sound window in the blank land above the switch. Cut flat, prints face-up."
     },
     "supportedOS": "windows|mac",
     "editEnabled": true

@@ -103,8 +103,10 @@ CAP_ROOF_INNER_Z = CAP_TOP_Z - CAP_ROOF_TH                        # 117 assemble
 # the cap, not by the tub.  Anything in the tub that rises into this box is an
 # interference the all-up view would otherwise only show as a faint overlap.
 BRAIN_CASE_BOTTOM_Z = CAP_ROOF_INNER_Z - BRAIN_CAP_BOSS_H - INTERFACE.CASE_BODY_Z
+BRAIN_CASE_TO_CAP_X = INTERFACE.CASE_TO_CAP_X
 BRAIN_CASE_KEEPOUT = (
-    -INTERFACE.CASE_OUTER_W / 2.0, INTERFACE.CASE_OUTER_W / 2.0,
+    BRAIN_CASE_TO_CAP_X - INTERFACE.CASE_OUTER_W / 2.0,
+    BRAIN_CASE_TO_CAP_X + INTERFACE.CASE_OUTER_W / 2.0,
     BRAIN_CASE_TO_CAP_Y - INTERFACE.CASE_OUTER_H / 2.0,
     BRAIN_CASE_TO_CAP_Y + INTERFACE.CASE_OUTER_H / 2.0,
     BRAIN_CASE_BOTTOM_Z - 1.0,                   # keep a 1mm air gap under it
@@ -119,12 +121,13 @@ POE_PLUG_D = INTERFACE.POE_PLUG_D
 # to a height that clears the plug wherever it actually sits on that face.
 POE_JACK_POST_MAX_H = 8.0
 
-# ---- external alarm horn on the cap (shared contract) ----------------------
-HORN_BOLT_CLEAR_D = INTERFACE.HORN_BOLT_CLEAR_D
+# ---- alarm horn, INSIDE on the floor behind the switch (shared contract) ---
+# It does not touch the cap at all any more.  The only reason a 102mm horn has
+# anywhere to stand is that the brain case moved +47mm off centre; if that
+# shift is ever dialled back, FIR_Interface.validate() refuses to load.
 HORN_PAD_D, HORN_PAD_H = INTERFACE.HORN_PAD_D, INTERFACE.HORN_PAD_H
-HORN_PAD_EMBED = INTERFACE.HORN_PAD_EMBED
-HORN_WIRE_D = INTERFACE.HORN_WIRE_D
-HORN_WIRE_PAD_D, HORN_WIRE_PAD_H = INTERFACE.HORN_WIRE_PAD_D, INTERFACE.HORN_WIRE_PAD_H
+HORN_PILOT_D, HORN_PILOT_DEPTH = INTERFACE.HORN_PILOT_D, INTERFACE.HORN_PILOT_DEPTH
+HORN_FOOT_D = INTERFACE.HORN_FOOT_D
 
 SHOW_PARTS = False                               # False = print-ready (no display components/cables)
 
@@ -473,6 +476,10 @@ def build(comp):
             .format(poe_jack_air, INTERFACE.POE_PLUG_STRAIGHT_L,
                     INTERFACE.POE_PLUG_RIGHT_ANGLE_L))
 
+    # ================= ALARM HORN: floor mount behind the switch =================
+    horn_floor_mount(comp, sh)
+    horn_clearances()
+
     # ================= BRAIN MODULE: bolts to the LID (zero shelf) =================
     # No shelf, no ledges - the brain hangs from the lid; bolt bosses live on the lid.
 
@@ -548,7 +555,8 @@ def build_cables(comp):
     # middle of the box where it was drawn before.
     jack_x = POE_CX + POE_JACK_SIDE * (POE_W / 2.0 + 5.0)
     w('~DC to PoE', jack_x, m_back - 60, FLOOR + 2, 4, 110, 4)           # adapter -> switch jack (along floor)
-    w('~horn lead', -96, -12, FLOOR + 2, 4, 4, 100)                      # cap gland -> brain (rises to the cap)
+    hx, hy = INTERFACE.horn_foot_centre()
+    w('~horn lead', hx, hy + 45, FLOOR + 2, 4, 90, 4)                    # horn -> brain (along the floor)
     for rx in (-100, -84, -68, -52, -36):                               # LAN leads out the front (951)
         w('~LAN', MIK_CX + (rx + 68), FRONT_Y + 8, FLOOR + 16, 4, 22, 4)
     for rx in (38, 54, 70):                                              # LAN leads out the front (PoE)
@@ -602,31 +610,46 @@ def build_poe_plate(comp, ox, oy):
     return plate
 
 
-def horn_mount(comp, lid, ox):
-    # EXTERNAL ALARM HORN mount, cut into the deep cap's roof.
-    #
-    # PRINT-ORIENTATION WARNING: the cap is built roof-DOWN (its outer face is local z=0) and is
-    # physically FLIPPED left/right on assembly, so a feature at local +X ends up at assembled -X.
-    # The four brain bosses never showed this up because their pattern is symmetric; the horn is
-    # not, so its assembled X is mirrored here exactly once.
-    #
-    # The horn is THROUGH-BOLTED, never self-tapped: it is a 104mm x 102mm lump and a 3mm printed
-    # roof will not hold a thread under it. Each of the three measured axes gets an internal
-    # load-spreading pad embedded 0.5mm into the roof, so it prints as one fused solid and the
-    # locknut pulls against 6mm of material instead of 3mm. Fit each bolt with a washer both sides.
-    pad_z = CAP_ROOF_TH - HORN_PAD_EMBED                     # pad starts INSIDE the roof
-    for index, (hx, hy) in enumerate(INTERFACE.horn_mount_points()):
-        lx = ox - hx                                         # assembled -X -> cap local +X
-        cyl(comp, lx, hy, pad_z, HORN_PAD_D, HORN_PAD_H, JOIN, [lid])
-        cyl(comp, lx, hy, -1.0, HORN_BOLT_CLEAR_D,
-            HORN_PAD_H + CAP_ROOF_TH + 2.0, CUT, [lid])
-    # WIRE ENTRY: a PG7 gland under the horn body but clear of its 69mm flange, offset toward the
-    # box back so the lead drops into free air beside the brain case instead of onto its roof.
-    wx, wy = INTERFACE.horn_wire_point()
-    cyl(comp, ox - wx, wy, pad_z, HORN_WIRE_PAD_D, HORN_WIRE_PAD_H, JOIN, [lid])
-    cyl(comp, ox - wx, wy, -1.0, HORN_WIRE_D,
-        HORN_WIRE_PAD_H + CAP_ROOF_TH + 2.0, CUT, [lid])
+def horn_floor_mount(comp, sh):
+    """Three floor pads the alarm horn's bracket foot bolts down onto.
+
+    The horn lies on the floor behind the switch with its mouth facing the
+    front panel.  It cannot be tilted in here - a 20 degree tilt already wants
+    more headroom than the 114mm cavity has - so the sound leaves through the
+    slotted window both front parts carry above the switch.
+
+    The pads raise the foot clear of the floor's corner fillets and give an M4
+    self-tapper 8mm of material without breaking through the 3mm floor.
+    """
+    for px, py in INTERFACE.horn_mount_points():
+        cyl(comp, px, py, FLOOR, HORN_PAD_D, HORN_PAD_H, JOIN, [sh])
+        cyl(comp, px, py, FLOOR + HORN_PAD_H - HORN_PILOT_DEPTH,
+            HORN_PILOT_D, HORN_PILOT_DEPTH, CUT, [sh])
+    if not INTERFACE.HORN_FOOT_MEASURED:
+        SKIPPED.append(
+            'horn foot position is ASSUMED {:.0f}mm back from the mouth. Measure mouth '
+            'face -> foot centre and set HORN_FOOT_FROM_MOUTH; the three pads follow it.'
+            .format(INTERFACE.HORN_FOOT_FROM_MOUTH))
     return
+
+
+def horn_clearances():
+    """Report what the horn is actually touching, in the tub's own build."""
+    hx0, hx1, hy0, hy1, hz0, hz1 = INTERFACE.horn_body()
+    checks = (
+        ('-X side wall', hx0 - (-HALF + WALL)),
+        ('cap side-bolt bosses, which stand 12mm off that wall',
+         hx0 - (-HALF + WALL + 12.0)),
+        ('brain case', (BRAIN_CASE_TO_CAP_X - INTERFACE.CASE_OUTER_W / 2.0) - hx1),
+        ('switch cradle', (FRONT_Y - 0.5 - POE_D - 3.0) - hy1),
+        ('extension retainer',
+         (hy0 - INTERFACE.HORN_BOLT_TAIL) - (EXT_CY + EXT_D / 2.0 + 3.0)),
+        ('cap roof underside', CAP_ROOF_INNER_Z - hz1),
+    )
+    for name, air in checks:
+        if air < 1.0:
+            SKIPPED.append('HORN INTERFERENCE: {:.1f}mm to the {}'.format(air, name))
+    return checks
 
 
 def build_top_lid(comp, ox):
@@ -652,12 +675,18 @@ def build_top_lid(comp, ox):
     # with a 13mm root flange fused into the cap roof.  FIR_ModuleGadget's
     # four easy-access roof holes map here when its case is installed +10mm
     # toward +Y.  No case screw sits at a rounded case corner.
+    # PRINT-ORIENTATION WARNING: this cap is built roof-DOWN and is physically
+    # FLIPPED left/right on assembly, so a feature at cap-local +X lands at
+    # assembled -X. The boss pattern used to be symmetric, which hid that
+    # completely; now the brain case sits +47mm off centre it does not, so the
+    # assembled X is mirrored here exactly once.
     for bx, byo in BRAIN_CAP_MOUNT:
-        cyl(comp, ox + bx, byo, 3.0,
+        lx = ox - bx
+        cyl(comp, lx, byo, 3.0,
             BRAIN_CAP_FLANGE_D, BRAIN_CAP_FLANGE_H, JOIN, [lid])
-        cyl(comp, ox + bx, byo, 3.0,
+        cyl(comp, lx, byo, 3.0,
             BRAIN_CAP_BOSS_D, BRAIN_CAP_BOSS_H, JOIN, [lid])
-        cyl(comp, ox + bx, byo, 3.0,
+        cyl(comp, lx, byo, 3.0,
             BRAIN_CAP_PILOT, BRAIN_CAP_BOSS_H + 1.0, CUT, [lid])
     # click ribs: TRUE crush ribs - 0.8mm proud of the skirt inner face, 0.3mm bite into the
     # tub wall (the old ones bulged 4mm inboard = 3.5mm bite, the cap could never slide on).
@@ -677,15 +706,13 @@ def build_top_lid(comp, ox):
     for sxs in (-1, 1):
         for byy in (-75, 0, 75):
             cyl_x(comp, byy, LH - 4, ox + sxs * (inner / 2 + 1.5), 3.4, 6, CUT, [lid])
-    # EXTERNAL ALARM HORN: three reinforced through-bolt mounts + the gland wire entry.
-    horn_mount(comp, lid, ox)
     if SHOW_PARTS:
         box(comp, ox, 0, 16, 135, 120, 40, NEW).bodies.item(0).name = '=brain (bolts to lid)'
     return lid
 
 
-VERSION = ('v25: horn through-bolt mounts + PG7 wire entry cut into the cap roof, switch DC-jack '
-           'clearance in the PoE cradle, MikroTik cradle trimmed under the hanging brain case '
+VERSION = ('v26: alarm horn moved INSIDE onto the floor behind the switch, brain case shifted '
+           '+47mm to open the column for it, cap bosses mirrored for the print flip '
            '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 

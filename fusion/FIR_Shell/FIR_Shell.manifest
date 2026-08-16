@@ -3,7 +3,7 @@
     "type": "script",
     "author": "FREEISPRADIUS",
     "description": {
-        "": "The real 280x280 FreeISP tub and deep cap: 951 mounting, confirmed 82x52x23 Tenda cradle with DC-jack clearance, cradle trimmed clear of the hanging brain case, BottomLid seat, extension/adapter zone, wall keyholes, cap-to-tub fastening, and the external alarm horn through-bolt mounts plus PG7 wire entry in the cap roof."
+        "": "The real 280x280 FreeISP tub and deep cap: 951 mounting, confirmed 82x52x23 Tenda cradle with DC-jack clearance, alarm-horn floor mount behind the switch, brain case hung 47mm off centre to clear it, BottomLid seat, extension/adapter zone, wall keyholes and cap-to-tub fastening."
     },
     "supportedOS": "windows|mac",
     "editEnabled": true

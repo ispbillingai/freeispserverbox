@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-16.2'
+INTERFACE_VERSION = '2026-08-16.3'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -63,8 +63,17 @@ PCB_HOLE_PATTERN = tuple(
 )
 
 # Small brain case -> large top cap.
-# The case is installed 10 mm toward +Y.  Its symmetric local holes at
-# Y=-40/+40 therefore land on the cap bosses at Y=-30/+50.
+# The case is installed 10 mm toward +Y and 47 mm toward +X.  The +X move is
+# what opens the full-height column on the switch side that the alarm horn
+# lives in; without it there is no 102 mm-wide space anywhere in the box.
+# Its symmetric local holes therefore land on the cap bosses at X=-11.5/+105.5
+# and Y=-30/+50.
+#
+# WARNING: the cap-boss pattern is no longer symmetric in X.  FIR_Shell prints
+# the cap roof-down and flips it left/right on assembly, so it must mirror
+# these X values when placing them.  While the pattern was symmetric that bug
+# was invisible.
+CASE_TO_CAP_X = 47.0
 CASE_TO_CAP_Y = 10.0
 CASE_MOUNT = (
     (-58.5, -40.0),
@@ -73,7 +82,7 @@ CASE_MOUNT = (
     (58.5, 40.0),
 )
 CAP_BOSS_PATTERN = tuple(
-    (x, y + CASE_TO_CAP_Y) for x, y in CASE_MOUNT
+    (x + CASE_TO_CAP_X, y + CASE_TO_CAP_Y) for x, y in CASE_MOUNT
 )
 
 # Small brain case outer envelope.  ``FIR_ModuleGadget`` builds to these, and
@@ -104,55 +113,83 @@ POE_PLUG_RIGHT_ANGLE_L = 10.0     # right-angle plug body
 POE_PLUG_MIN_AIR = POE_PLUG_RIGHT_ANGLE_L + 1.0
 
 # ---------------------------------------------------------------------------
-# External alarm horn on the large top cap
+# Alarm horn: INSIDE the box, on the floor behind the switch
 # ---------------------------------------------------------------------------
+# The bought part is a 12V 15W siren horn on a swivel foot.  Owner-measured
+# bounding box, with the tightening bolts standing off the back of it.  It is
+# mounted lying down, axis front-to-back, mouth facing the front panel; it
+# cannot be tilted inside the box because a 20-degree tilt already needs more
+# headroom than the 114 mm cavity has.
+#
 # All values are ASSEMBLED shell coordinates (origin at the footprint centre,
-# +Y front, +Z up).  FIR_Shell prints the cap roof-down and physically flips it
-# left/right on assembly, so it mirrors HORN_CX itself -- never mirror it twice.
-HORN_CX, HORN_CY = -96.0, 28.0
-HORN_FLANGE_D = 69.0
-HORN_BODY_D, HORN_BODY_H = 104.0, 102.0
-HORN_HOLE_D = 6.0                 # measured holes in the horn's own flange
+# +Y front, +Z up).
+HORN_W, HORN_L, HORN_H = 102.0, 105.0, 102.0
+HORN_BOLT_TAIL = 15.0             # tightening bolts standing off the back
+HORN_CX = -73.0                   # body centre; -124..-22 clears the wall bosses
+HORN_MOUTH_Y = 79.5               # mouth face, 2 mm behind the switch cradle
+HORN_FOOT_D = 69.0                # circular bracket foot, measured
+HORN_HOLE_D = 6.0                 # measured holes in that foot
 HORN_BASE_C2C, HORN_SIDE_C2C = 38.5, 50.0
-# Through-bolted, never self-tapped: a 104mm horn is far too heavy to hang off
-# a 3mm printed roof.  Each bolt gets an internal load-spreading pad that is
-# embedded into the roof so it prints as one fused solid.
-HORN_BOLT_CLEAR_D = 6.5
-HORN_PAD_D, HORN_PAD_H, HORN_PAD_EMBED = 14.0, 3.5, 0.5
-# Wire entry: a PG7 gland (3-6.5mm cable) sitting under the 104mm body but
-# outside the 69mm flange, so the horn shades it and the flange cannot cover it.
-HORN_WIRE_D = 12.5
-# Radius is measured to the gland CENTRE, but what matters is its edges: the
-# whole hole has to clear the flange rim and still sit under the body rim.
-HORN_WIRE_R = 43.0
-HORN_WIRE_PAD_D, HORN_WIRE_PAD_H = 24.0, 2.0
+# NOT MEASURED: how far back the foot's centre sits from the mouth face.  The
+# three floor pads move with this one number, so it is worth a tape measure.
+HORN_FOOT_FROM_MOUTH = 99.0
+HORN_FOOT_MEASURED = False
+# Floor mounting: three pads raise the foot clear of the floor fillets and give
+# an M4 self-tapper 8 mm of material without breaking through the 3 mm floor.
+HORN_PAD_D, HORN_PAD_H = 14.0, 5.0
+HORN_PILOT_D, HORN_PILOT_DEPTH = 3.4, 6.0
+# Sound exit: the mouth stares at the front panel, so both front parts carry a
+# matching slotted window in the blank land above the switch.
+HORN_GRILLE_CX = HORN_CX
+HORN_GRILLE_W = 80.0
+HORN_GRILLE_Z0, HORN_GRILLE_Z1 = 34.0, 66.0   # clear of the switch and the Z72 bolts
+HORN_GRILLE_SLOTS = 5
+HORN_GRILLE_SLOT_H = 4.0
+
+
+def horn_body():
+    """Return the horn's assembled envelope (x0, x1, y0, y1, z0, z1)."""
+    z0 = 3.0 + HORN_PAD_H                      # floor top + mounting pads
+    return (HORN_CX - HORN_W / 2.0, HORN_CX + HORN_W / 2.0,
+            HORN_MOUTH_Y - HORN_L, HORN_MOUTH_Y,
+            z0, z0 + HORN_H)
+
+
+def horn_foot_centre():
+    """Centre of the 69 mm bracket foot on the tub floor."""
+    return (HORN_CX, HORN_MOUTH_Y - HORN_FOOT_FROM_MOUTH)
 
 
 def horn_mount_points():
-    """Return the three horn bolt centres in assembled shell coordinates.
+    """The three floor-pad centres, in assembled shell coordinates.
 
-    The flange centre is the triangle circumcentre of the measured isosceles
-    pattern.  Its single apex points outboard (-X), which keeps both inboard
-    bolts, their washers and their locknuts clear of the hanging brain case.
+    The foot centre is the circumcentre of the measured isosceles triangle.
+    Its single apex points toward the back of the box, so the two base bolts
+    stay under the horn where a driver can still reach them.
     """
+    cx, cy = horn_foot_centre()
     half_base = HORN_BASE_C2C / 2.0
     altitude = math.sqrt(HORN_SIDE_C2C ** 2 - half_base ** 2)
-    base_x = (altitude ** 2 - half_base ** 2) / (2.0 * altitude)
-    apex_x = altitude - base_x
+    base_y = (altitude ** 2 - half_base ** 2) / (2.0 * altitude)
+    apex_y = altitude - base_y
     return (
-        (HORN_CX - apex_x, HORN_CY),
-        (HORN_CX + base_x, HORN_CY - half_base),
-        (HORN_CX + base_x, HORN_CY + half_base),
+        (cx, cy - apex_y),
+        (cx - half_base, cy + base_y),
+        (cx + half_base, cy + base_y),
     )
 
 
-def horn_wire_point():
-    """Return the horn cable-gland centre in assembled shell coordinates.
-
-    It is offset toward the box back so the wire drops into free air beside the
-    brain case rather than onto its roof.
-    """
-    return (HORN_CX, HORN_CY - HORN_WIRE_R)
+def horn_grille_slots():
+    """Slot rectangles (z0, z1) for the front sound window, bottom-up."""
+    span = HORN_GRILLE_Z1 - HORN_GRILLE_Z0
+    gaps = HORN_GRILLE_SLOTS - 1
+    rib = (span - HORN_GRILLE_SLOTS * HORN_GRILLE_SLOT_H) / gaps if gaps else 0.0
+    out = []
+    z = HORN_GRILLE_Z0
+    for _ in range(HORN_GRILLE_SLOTS):
+        out.append((z, z + HORN_GRILLE_SLOT_H))
+        z += HORN_GRILLE_SLOT_H + rib
+    return out
 
 
 def validate():
@@ -184,7 +221,7 @@ def validate():
         errors.append('case mount pattern must contain four unique centres')
     if len(CAP_BOSS_PATTERN) != 4 or len(set(CAP_BOSS_PATTERN)) != 4:
         errors.append('cap-boss pattern must contain four unique centres')
-    expected_cap_pattern = tuple((x, y + CASE_TO_CAP_Y)
+    expected_cap_pattern = tuple((x + CASE_TO_CAP_X, y + CASE_TO_CAP_Y)
                                  for x, y in CASE_MOUNT)
     if CAP_BOSS_PATTERN != expected_cap_pattern:
         errors.append('cap-boss pattern no longer maps from the case pattern')
@@ -200,20 +237,35 @@ def validate():
         errors.append('switch jack hole must be positive and no larger than the plug body')
     if POE_JACK_FROM_REAR <= 0.0 or POE_JACK_FROM_BASE <= 0.0:
         errors.append('switch jack offsets must be positive')
-    # The isosceles horn triangle must actually close, and its bolt circle has
-    # to sit inside the horn's own mounting flange.
+    # The isosceles horn triangle must close, and its bolt circle has to sit
+    # inside the horn's own bracket foot.
     if HORN_SIDE_C2C <= HORN_BASE_C2C / 2.0:
         errors.append('horn triangle sides are too short to close on the measured base')
-    bolt_radius = max(math.hypot(x - HORN_CX, y - HORN_CY)
-                      for x, y in horn_mount_points())
-    if bolt_radius + HORN_HOLE_D / 2.0 > HORN_FLANGE_D / 2.0:
-        errors.append('horn bolt circle does not fit inside the measured 69mm flange')
-    if HORN_PAD_D <= HORN_BOLT_CLEAR_D or HORN_BOLT_CLEAR_D < HORN_HOLE_D:
-        errors.append('horn pad/bolt clearance diameters are inconsistent')
-    if HORN_WIRE_R - HORN_WIRE_D / 2.0 <= HORN_FLANGE_D / 2.0:
-        errors.append('horn wire gland overlaps the 69mm flange and would be blocked by it')
-    if HORN_WIRE_R + HORN_WIRE_D / 2.0 >= HORN_BODY_D / 2.0:
-        errors.append('horn wire gland reaches past the 104mm body and would be left exposed')
+    fx, fy = horn_foot_centre()
+    bolt_radius = max(math.hypot(x - fx, y - fy) for x, y in horn_mount_points())
+    if bolt_radius + HORN_HOLE_D / 2.0 > HORN_FOOT_D / 2.0:
+        errors.append('horn bolt circle does not fit inside the measured 69mm foot')
+    if HORN_PAD_D <= HORN_PILOT_D:
+        errors.append('horn floor pad is not wider than its own pilot')
+    if HORN_PILOT_DEPTH >= HORN_PAD_H + 3.0:
+        errors.append('horn floor pilot would break through the 3mm tub floor')
+    if min(HORN_W, HORN_L, HORN_H, HORN_BOLT_TAIL) <= 0.0:
+        errors.append('horn envelope must be positive')
+    # The horn only fits because the brain case moved; if someone dials that
+    # shift back without moving the horn, say so here rather than in a print.
+    horn_x1 = HORN_CX + HORN_W / 2.0
+    case_x0 = -CASE_OUTER_W / 2.0 + CASE_TO_CAP_X
+    if case_x0 < horn_x1:
+        errors.append(
+            'brain case (from X{:.1f}) overlaps the horn (to X{:.1f}): raise '
+            'CASE_TO_CAP_X or move the horn'.format(case_x0, horn_x1))
+    if case_x0 - horn_x1 < 2.0:
+        errors.append('brain case leaves under 2mm beside the horn')
+    if CASE_OUTER_W / 2.0 + CASE_TO_CAP_X > 137.0 - 15.0:
+        errors.append('brain case is pushed so far +X that its J4/J5 wires have no room')
+    slots = horn_grille_slots()
+    if slots and slots[-1][1] > HORN_GRILLE_Z1 + 1e-9:
+        errors.append('horn grille slots overrun their window')
     return errors
 
 

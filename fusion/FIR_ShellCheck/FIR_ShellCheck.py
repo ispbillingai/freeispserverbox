@@ -63,12 +63,16 @@ POE_W, POE_D, POE_H, POE_CX = 82.0, 52.0, 23.0, -85.0
 EXT_CY, DIV_Y, PLATE_TH = -110.0, -82.0, 3.0
 EXT_W, EXT_D, EXT_H, EXT_FRONT_RETAINER_H = 240.0, 47.0, 29.0, 29.0
 # Shared brain-stack interface.  The cap-boss pattern is derived in
-# FIR_Interface from the case holes + CASE_TO_CAP_Y, so this inspection model
+# FIR_Interface from the case holes + CASE_TO_CAP_X/Y, so this inspection model
 # cannot silently use a different mounting pattern from the printed parts.
+# The case is 47mm off centre toward the MikroTik: that is what makes room for
+# the alarm horn on the switch side, and it is why the cap-boss pattern is no
+# longer symmetric in X.
 TRAY_W, TRAY_H, TRAY_TH = INTERFACE.TRAY_W, INTERFACE.TRAY_H, INTERFACE.TRAY_TH
 TRAY_MOUNT = INTERFACE.TRAY_MOUNT
 PCB_W, PCB_H, PCB_TH = INTERFACE.PCB_W, INTERFACE.PCB_H, INTERFACE.PCB_TH
 PCB_HOLE_PATTERN = INTERFACE.PCB_HOLE_PATTERN
+CASE_TO_CAP_X = INTERFACE.CASE_TO_CAP_X
 CASE_TO_CAP_Y = INTERFACE.CASE_TO_CAP_Y
 CASE_MOUNT = INTERFACE.CASE_MOUNT
 BRAIN_CAP_MOUNT = INTERFACE.CAP_BOSS_PATTERN
@@ -95,31 +99,27 @@ POE_JACK_SIDE = INTERFACE.POE_JACK_SIDE
 POE_PLUG_D = INTERFACE.POE_PLUG_D
 POE_PLUG_STRAIGHT_L = INTERFACE.POE_PLUG_STRAIGHT_L
 POE_PLUG_RIGHT_ANGLE_L = INTERFACE.POE_PLUG_RIGHT_ANGLE_L
-# ---- external alarm horn (now a real cap cut, made by FIR_Shell) ----
-# The horn cannot fit inside the tub behind the PoE switch: its 104mm body
-# would collide with the switch, hanging brain case or rear adapter bank.
-# This is the safe top-cap position directly behind the switch side.  The
-# 104mm body has a small 5mm outboard overhang, which preserves clearance for
-# the internal mounting hardware beside the brain case.
-# The confirmed 52mm-deep switch ends at Y=84.5, so this body envelope ends
-# at Y=80.0: a deliberate 4.5mm behind-switch gap.
-# The bolt pads, through-holes and gland hole are NOT drawn here any more:
-# FIR_Shell cuts them into the printable cap, and this view imports that cap.
-HORN_CX, HORN_CY = INTERFACE.HORN_CX, INTERFACE.HORN_CY
-HORN_FLANGE_D = INTERFACE.HORN_FLANGE_D
-HORN_BODY_D, HORN_BODY_H = INTERFACE.HORN_BODY_D, INTERFACE.HORN_BODY_H
+# ---- alarm horn: INSIDE, on the floor behind the switch ----
+# The bought part is a flared siren horn on a swivel foot, not a drum.  It lies
+# down with its axis front-to-back and its mouth facing the front panel; it
+# cannot be tilted in here, because a 20 degree tilt already needs more than the
+# 114mm cavity has.  The only reason a 102mm-wide part fits at all is that the
+# brain case moved +47mm off centre - that is the whole point of this view.
+HORN_W, HORN_L, HORN_H = INTERFACE.HORN_W, INTERFACE.HORN_L, INTERFACE.HORN_H
+HORN_BOLT_TAIL = INTERFACE.HORN_BOLT_TAIL
+HORN_CX = INTERFACE.HORN_CX
+HORN_FOOT_D = INTERFACE.HORN_FOOT_D
 HORN_HOLE_D = INTERFACE.HORN_HOLE_D
-HORN_PAD_D = INTERFACE.HORN_PAD_D
-HORN_WIRE_D = INTERFACE.HORN_WIRE_D
+HORN_PAD_D, HORN_PAD_H = INTERFACE.HORN_PAD_D, INTERFACE.HORN_PAD_H
 CAP_ROOF_OUTER_Z, CAP_ROOF_TH = 120.0, 3.0  # assembled cap roof faces
 # These are transparent screwdriver-travel illustrations only, not printed
 # posts.  Keep the normal all-up view clean; enable temporarily when checking
 # the three assembly stages.
 SHOW_DRIVER_ACCESS = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v31 all-up: horn now really bolted through the cap roof + switch DC-jack '
-                 'and barrel-plug clearance + MikroTik cradle trimmed clear of the hanging '
-                 'brain case + front-cover port handedness corrected')
+CHECK_VERSION = ('v32 all-up: alarm horn INSIDE on the floor behind the switch, brain case '
+                 'shifted +47mm to clear it, front sound window through both front parts, '
+                 'cap bosses mirrored for the print flip')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -359,6 +359,7 @@ def build_brain_all_up(comp):
     # roof outer face is its local BODY_Z; deriving this keeps CAP_LIFT exact.
     roof_inside_z = 117.0 + CAP_LIFT
     case_z = roof_inside_z - BRAIN_CAP_BOSS_H - gadget.BODY_Z
+    case_x = CASE_TO_CAP_X
     case_y = CASE_TO_CAP_Y
 
     # The case now follows the confirmed 52mm plate-to-PCB stack.  The cap
@@ -386,7 +387,7 @@ def build_brain_all_up(comp):
 
     brain_case = gadget.build(comp)
     brain_case.name = CHECK_PREFIX + ' brain case (actual FIR_ModuleGadget)'
-    translate_body(comp, brain_case, 0.0, case_y, case_z)
+    translate_body(comp, brain_case, case_x, case_y, case_z)
     set_opacity(brain_case, 0.24)
 
     # Use the actual printed tray builder.  Do NOT call ModulePlate.build_parts:
@@ -396,7 +397,7 @@ def build_brain_all_up(comp):
     tray.name = CHECK_PREFIX + ' electronics tray (actual FIR_ModulePlate)'
     # The real tray spans local Z=0..3; its top face contacts the case ledge
     # that begins at local Z=3.  Do not add PLATE_SEAT_Z again here.
-    translate_body(comp, tray, 0.0, case_y, case_z)
+    translate_body(comp, tray, case_x, case_y, case_z)
     set_opacity(tray, 0.50)
 
     # The current PCB and electronics do not have imported manufacturer STEP
@@ -410,12 +411,12 @@ def build_brain_all_up(comp):
                                  gadget.PCB_TOP_Z - PCB_TH)
     pcb_z0 = case_z + pcb_component_face
     make_check_box(comp, 'brain PCB 115x115 (component face DOWN)',
-                   0.0, case_y, pcb_z0, PCB_W, PCB_H, PCB_TH, 0.62)
+                   case_x, case_y, pcb_z0, PCB_W, PCB_H, PCB_TH, 0.62)
     socket_z0 = case_z + pcb_component_face - gadget.PCB_SOCKET_H
     devkit_z0 = socket_z0 - gadget.PCB_DEVKIT_H
-    make_check_box(comp, 'ESP32 socket envelope (downward)', 0.0, case_y,
+    make_check_box(comp, 'ESP32 socket envelope (downward)', case_x, case_y,
                    socket_z0, 28.0, 56.0, gadget.PCB_SOCKET_H, 0.48)
-    make_check_box(comp, 'ESP32 DevKitC envelope (downward)', 0.0, case_y,
+    make_check_box(comp, 'ESP32 DevKitC envelope (downward)', case_x, case_y,
                    devkit_z0, 28.0, 56.0, gadget.PCB_DEVKIT_H, 0.55)
 
     for name, width, length, height, cx, cy, mount in plate_source.MODULES:
@@ -423,21 +424,21 @@ def build_brain_all_up(comp):
             plate_source.PLATE_TOP + plate_source.RAISE
         if name == 'battery cell':
             # 14500 cell axis is along the tray Y direction.
-            feature = cyl_y(comp, cx, case_z + z0 + height / 2.0,
+            feature = cyl_y(comp, case_x + cx, case_z + z0 + height / 2.0,
                             case_y + cy, width, length, NEW)
             item = feature.bodies.item(0)
             item.name = CHECK_PREFIX + ' 14500 cell envelope'
             set_opacity(item, 0.65)
         else:
             make_check_box(comp, 'module envelope: ' + name,
-                           cx, case_y + cy, case_z + z0,
+                           case_x + cx, case_y + cy, case_z + z0,
                            width, length, height, 0.58)
         if name == 'relay':
             # The real relay terminal block extends 12mm beyond the 34mm board
             # toward +X (source envelope reaches X=49 locally).  Include it so
             # the inspection view cannot falsely clear that terminal side.
             make_check_box(comp, 'relay terminal overhang envelope',
-                           cx + width / 2.0 + 6.0, case_y + cy,
+                           case_x + cx + width / 2.0 + 6.0, case_y + cy,
                            case_z + z0, 12.0, length, height, 0.58)
 
     # J4/J5 plugs descend through the free +X margin, then leave through the
@@ -449,23 +450,24 @@ def build_brain_all_up(comp):
         span = y1 - y0
         # The J4/J5 header stacks are on the component face, so they hang
         # down into the plate-side gap rather than rising toward the roof.
-        make_check_box(comp, label, PCB_W / 2.0 + 2.0, cy,
+        make_check_box(comp, label, case_x + PCB_W / 2.0 + 2.0, cy,
                        case_z + pcb_component_face - 4.0,
                        4.0, span, 4.0, 0.62)
         service_top = pcb_component_face - 4.0
         service_bottom = gadget.JUMPER_Z0 + gadget.JUMPER_H
         if service_top > service_bottom:
             make_check_box(comp, label + ' vertical service drop',
-                           PCB_W / 2.0 + 3.5, cy,
+                           case_x + PCB_W / 2.0 + 3.5, cy,
                            case_z + service_bottom,
                            7.0, span, service_top - service_bottom, 0.30)
         make_check_box(comp, label + ' Dupont exit envelope',
-                       PCB_W / 2.0 + 7.0, cy,
+                       case_x + PCB_W / 2.0 + 7.0, cy,
                        case_z + gadget.JUMPER_Z0, 10.0, span, gadget.JUMPER_H, 0.30)
 
     return {
         'gadget': gadget,
         'plate': plate_source,
+        'case_x': case_x,
         'case_y': case_y,
         'case_z': case_z,
         'pcb_z0': pcb_z0,
@@ -556,104 +558,77 @@ def build_extension_and_adapters(comp):
 
 
 def horn_mount_points():
-    """The measured 50 / 50 / 38.5mm horn triangle, in assembled shell axes.
-
-    Solved once in the shared contract so FIR_Shell's cap holes and this
-    inspection view cannot end up on two different triangles.
-    """
+    """The three floor-pad centres, from the one shared solver."""
     return INTERFACE.horn_mount_points()
 
 
 def build_horn_preview(comp, brain):
-    """Show the external horn over the mount FIR_Shell now cuts into the cap.
+    """Draw the horn where it actually sits: on the floor behind the switch.
 
-    The pads, the three 6.5mm through-holes and the PG7 gland hole are real
-    printable geometry made by FIR_Shell.build_top_lid(); this view imports
-    that cap, so only the bought horn, its fasteners and its lead are drawn
-    here.  The checks below are what actually earn the position.
+    FIR_Shell builds the three floor pads it bolts to; this view adds the
+    bought part, its bracket foot, the volume its rear tightening bolts need,
+    and the sound path out through the front window.  Every check below is a
+    real interference the layout only just clears.
     """
-    roof_z = CAP_ROOF_OUTER_Z + CAP_LIFT
-    make_check_cyl(comp, 'horn 69mm external mounting flange',
-                   HORN_CX, HORN_CY, roof_z, HORN_FLANGE_D, 3.0, 0.36)
-    make_check_cyl(comp, 'horn 104mm x 102mm external body envelope',
-                   HORN_CX, HORN_CY, roof_z, HORN_BODY_D, HORN_BODY_H, 0.25)
+    hx0, hx1, hy0, hy1, hz0, hz1 = INTERFACE.horn_body()
+    make_check_box(comp, 'alarm horn body envelope ({:.0f} x {:.0f} x {:.0f})'
+                   .format(HORN_W, HORN_L, HORN_H),
+                   (hx0 + hx1) / 2.0, (hy0 + hy1) / 2.0, hz0,
+                   HORN_W, HORN_L, HORN_H, 0.30)
+    # The mouth is the face the sound leaves from; showing it separately makes
+    # it obvious whether the front window is actually in front of it.
+    make_check_box(comp, 'alarm horn mouth face', (hx0 + hx1) / 2.0,
+                   hy1 - 1.0, hz0, HORN_W, 2.0, HORN_H, 0.55)
+    make_check_box(comp, 'alarm horn rear tightening bolts',
+                   (hx0 + hx1) / 2.0, hy0 - HORN_BOLT_TAIL / 2.0, hz0 + 20.0,
+                   60.0, HORN_BOLT_TAIL, 60.0, 0.35)
+    fx, fy = INTERFACE.horn_foot_centre()
+    make_check_cyl(comp, 'alarm horn 69mm bracket foot', fx, fy,
+                   FLOOR + HORN_PAD_H, HORN_FOOT_D, 3.0, 0.45)
+    for index, (px, py) in enumerate(horn_mount_points()):
+        make_check_cyl(comp, 'horn foot bolt {} (M4 into the floor pad)'.format(index + 1),
+                       px, py, FLOOR, HORN_HOLE_D, HORN_PAD_H + 12.0, 0.20)
 
-    # Roof inner face is 3mm below the exterior; each pad finishes 0.5mm inside
-    # that roof, so it prints fused from the inside rather than sitting on it.
-    pad_z = roof_z - CAP_ROOF_TH - INTERFACE.HORN_PAD_H + INTERFACE.HORN_PAD_EMBED
-    points = horn_mount_points()
-    for index, (px, py) in enumerate(points):
-        # Bolt + washer + locknut: the fastener travels the whole stack, which
-        # is what makes this a through-bolt rather than a thread in 3mm of PETG.
-        make_check_cyl(comp, 'horn through-bolt {} (bolt + washers + locknut)'.format(index + 1),
-                       px, py, pad_z - 6.0, HORN_HOLE_D,
-                       INTERFACE.HORN_PAD_H + CAP_ROOF_TH + 12.0, 0.18)
-        make_check_cyl(comp, 'horn locknut driver access {}'.format(index + 1),
-                       px, py, pad_z - 22.0, 14.0, 22.0, 0.10)
-
-    wx, wy = INTERFACE.horn_wire_point()
-    make_check_cyl(comp, 'horn PG7 cable gland', wx, wy,
-                   pad_z - 14.0, 18.0, CAP_ROOF_TH + 18.0, 0.30)
-    make_check_box(comp, 'horn lead drop (gland -> brain case)', wx, wy,
-                   brain['case_z'], 5.0, 5.0,
-                   pad_z - 14.0 - brain['case_z'], 0.22)
-
-    # These checks are the crucial reason for choosing this slightly outboard
-    # spot: pads must clear the brain case and the cap bosses, the flange must
-    # stay on the roof, and the horn must stay behind the switch.
+    # ---- what the position has to survive -------------------------------
     gadget = brain['gadget']
-    brain_left_edge = -gadget.W / 2.0
-    inboard_pad_edge = max(px + HORN_PAD_D / 2.0 for px, _ in points)
-    if inboard_pad_edge >= brain_left_edge:
+    case_x0 = brain['case_x'] - gadget.W / 2.0
+    switch_rear = FRONT_Y - 0.5 - POE_D
+    for name, air in (
+            ('-X side wall', hx0 - (-HALF + WALL)),
+            ('the cap side-bolt bosses standing 12mm off that wall',
+             hx0 - (-HALF + WALL + 12.0)),
+            ('the brain case', case_x0 - hx1),
+            ('the switch cradle', (switch_rear - 3.0) - hy1),
+            ('the cap roof underside', (117.0 + CAP_LIFT) - hz1)):
+        if air < 1.0:
+            SKIPPED.append('HORN INTERFERENCE: {:.1f}mm to {}'.format(air, name))
+        elif air < 3.0:
+            SKIPPED.append('horn is tight: {:.1f}mm to {}'.format(air, name))
+
+    # ---- can the sound actually get out? --------------------------------
+    slots = INTERFACE.horn_grille_slots()
+    open_area = sum((b - a) for a, b in slots) * INTERFACE.HORN_GRILLE_W
+    mouth_area = math.pi * (HORN_W / 2.0) ** 2
+    SKIPPED.append(
+        'horn sound path: front window is {:.0f} slots giving {:.0f}mm2, against a '
+        '{:.0f}mm mouth of {:.0f}mm2 ({:.0f}% open). It will be quieter than the same '
+        'horn in open air - that is the price of putting it inside the box.'
+        .format(len(slots), open_area, HORN_W, mouth_area,
+                100.0 * open_area / mouth_area))
+    window_lo, window_hi = slots[0][0], slots[-1][1]
+    if window_lo < hz0 or window_hi > hz1:
+        SKIPPED.append('front sound window runs past the horn mouth; it would open into the box')
+    for gz0, gz1 in slots:
+        make_check_box(comp, 'horn sound path through the front window',
+                       INTERFACE.HORN_GRILLE_CX, (hy1 + FRONT_Y + 65.0) / 2.0,
+                       gz0, INTERFACE.HORN_GRILLE_W,
+                       (FRONT_Y + 65.0) - hy1, gz1 - gz0, 0.12)
+
+    if not INTERFACE.HORN_FOOT_MEASURED:
         SKIPPED.append(
-            'horn mount reaches the brain case: move it farther outboard before printing')
-
-    def circle_to_rect_air(px, py, radius, xl, xr, yb, yt):
-        dx = max(xl - px, 0.0, px - xr)
-        dy = max(yb - py, 0.0, py - yt)
-        return math.sqrt(dx * dx + dy * dy) - radius
-
-    case_box = (-gadget.W / 2.0, gadget.W / 2.0,
-                brain['case_y'] - gadget.H / 2.0,
-                brain['case_y'] + gadget.H / 2.0)
-    pad_radius = HORN_PAD_D / 2.0
-    for index, (px, py) in enumerate(points):
-        air = circle_to_rect_air(px, py, pad_radius, *case_box)
-        if air < 2.0:
-            SKIPPED.append(
-                'horn bolt pad {} has only {:.1f}mm brain-case clearance'.format(index + 1, air))
-        for bx, by in BRAIN_CAP_MOUNT:
-            boss_air = math.hypot(px - bx, py - by) - (pad_radius + BRAIN_CAP_FLANGE_D / 2.0)
-            if boss_air < 2.0:
-                SKIPPED.append(
-                    'horn bolt pad {} has only {:.1f}mm cap-boss clearance'.format(index + 1, boss_air))
-
-    # The gland has to drop into free air, not onto the brain-case roof.
-    gland_air = circle_to_rect_air(wx, wy, INTERFACE.HORN_WIRE_PAD_D / 2.0, *case_box)
-    if gland_air < 2.0:
-        SKIPPED.append(
-            'horn cable gland is only {:.1f}mm from the brain case; its lead would land on the '
-            'case roof instead of dropping beside it'.format(gland_air))
-    gland_radius = math.hypot(wx - HORN_CX, wy - HORN_CY)
-    if gland_radius - HORN_WIRE_D / 2.0 < HORN_FLANGE_D / 2.0:
-        SKIPPED.append('horn cable gland is under the 69mm flange and would be blocked by it')
-    if gland_radius + HORN_WIRE_D / 2.0 > HORN_BODY_D / 2.0:
-        SKIPPED.append('horn cable gland sits outside the 104mm body: it would be exposed on the roof')
-
-    flange_radius = HORN_FLANGE_D / 2.0
-    if abs(HORN_CX) + flange_radius > 143.0 or abs(HORN_CY) + flange_radius > 143.0:
-        SKIPPED.append('horn flange extends beyond the top-cap roof; move it before printing')
-    switch_rear_y = FRONT_Y - 0.5 - POE_D
-    horn_to_switch = switch_rear_y - (HORN_CY + HORN_BODY_D / 2.0)
-    if horn_to_switch < 4.0:
-        SKIPPED.append(
-            'horn body is only {:.1f}mm behind the switch; retain at least 4mm'.format(horn_to_switch))
-    pad_to_case_roof = pad_z - (brain['case_z'] + gadget.BODY_Z)
-    if pad_to_case_roof < 2.0:
-        SKIPPED.append(
-            'horn pad has only {:.1f}mm vertical clearance above the brain case'.format(pad_to_case_roof))
-
-    return points
+            'horn foot is ASSUMED {:.0f}mm back from the mouth face; measure that and the '
+            'three floor pads move with it'.format(INTERFACE.HORN_FOOT_FROM_MOUTH))
+    return horn_mount_points()
 
 
 def build_cable_paths(comp, brain):
@@ -679,7 +654,7 @@ def build_cable_paths(comp, brain):
                        4.0, 42.0, 4.0, 0.22)
     # Short, non-committal internal runs show the actual J4/J5 exit direction
     # without claiming an unmeasured destination outside the brain case.
-    make_check_box(comp, 'J4/J5 wire service loop envelope', 76.0,
+    make_check_box(comp, 'J4/J5 wire service loop envelope', brain['case_x'] + 76.0,
                    brain['case_y'] - 25.0,
                    brain['case_z'] + gadget.JUMPER_Z0,
                    18.0, 50.0, gadget.JUMPER_H, 0.22)
@@ -700,13 +675,13 @@ def build_driver_access(comp, brain):
     # before the tray.  They travel upward into the short roof posts.
     for index, (x, y) in enumerate(PCB_HOLE_PATTERN):
         make_check_cyl(comp, 'driver stage 2 PCB screw {}'.format(index + 1),
-                       x, case_y + y, case_z, 4.0,
+                       brain['case_x'] + x, case_y + y, case_z, 4.0,
                        getattr(gadget, 'PCB_COMPONENT_FACE_Z',
                                gadget.PCB_TOP_Z - PCB_TH), 0.14)
     # Stage 3: tray screws enter from the open bottom and only retain the tray.
     for index, (x, y) in enumerate(TRAY_MOUNT):
         make_check_cyl(comp, 'driver stage 3 tray screw {}'.format(index + 1),
-                       x, case_y + y, case_z, 4.0,
+                       brain['case_x'] + x, case_y + y, case_z, 4.0,
                        gadget.PLATE_SEAT_Z + gadget.PLATE_BOSS_H, 0.14)
 
 
@@ -793,10 +768,10 @@ def run(context):
                    'PCB/module envelopes, router, PoE switch, three adapters, connectors and '
                    'cable paths. Driver-access guide cylinders: {}.\n'
                    'Cleared {} prior ShellCheck body(ies).\n'
-                   'Interface {}: tray {}x{}, PCB {}x{}, case offset +Y{}.'
+                   'Interface {}: tray {}x{}, PCB {}x{}, case offset +X{} +Y{}.'
                    .format('shown' if SHOW_DRIVER_ACCESS else 'hidden (set SHOW_DRIVER_ACCESS=True to inspect)',
                            removed, INTERFACE.INTERFACE_VERSION,
-                           TRAY_W, TRAY_H, PCB_W, PCB_H, CASE_TO_CAP_Y))
+                           TRAY_W, TRAY_H, PCB_W, PCB_H, CASE_TO_CAP_X, CASE_TO_CAP_Y))
         message += ('\nHorn preview: external top-cap location X{:.1f}, Y{:.1f}; '
                     '69mm flange, 104mm body x 102mm high; measured 6mm axes at {}.'
                     .format(HORN_CX, HORN_CY,

@@ -4,7 +4,49 @@
 # a lid (no tray/cradles inside); the devices are held by the main box and line up to these
 # openings. Slight locating ridges + clip tabs. Same measured port dims.
 
+import importlib.util
+import os
+import sys
+
 import adsk.core, adsk.fusion, adsk.cam, traceback
+
+
+def _load_shared_interface():
+    """Load the one mechanical-interface contract in workspace or Fusion."""
+    script_file = globals().get('__file__', '')
+    script_dir = (os.path.dirname(os.path.abspath(script_file))
+                  if script_file else os.getcwd())
+    candidates = []
+    override = os.environ.get('FIR_INTERFACE_PATH')
+    if override:
+        candidates.append(override if override.lower().endswith('.py')
+                          else os.path.join(override, 'FIR_Interface.py'))
+    workspace_source = globals().get('_workspace_source')
+    if workspace_source:
+        candidates.append(os.path.join(
+            os.path.dirname(os.path.abspath(workspace_source)), '..',
+            '_shared', 'FIR_Interface.py'))
+    candidates.extend((
+        os.path.join(script_dir, 'FIR_Interface.py'),
+        os.path.join(script_dir, '..', '_shared', 'FIR_Interface.py'),
+    ))
+    for candidate in candidates:
+        path = os.path.realpath(os.path.abspath(candidate))
+        if not os.path.isfile(path):
+            continue
+        sys.modules.pop('_freeisp_shared_interface', None)
+        spec = importlib.util.spec_from_file_location(
+            '_freeisp_shared_interface', path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules['_freeisp_shared_interface'] = module
+            spec.loader.exec_module(module)
+            return module
+    raise ImportError(
+        'FIR_Interface.py not found. Deploy fusion/_shared beside the Fusion scripts.')
+
+
+INTERFACE = _load_shared_interface()
 
 PW, PH, PT = 280.0, 80.0, 3.0                # plate = full front face: width x TUB HEIGHT x thickness
 # BottomLid is X-mirrored when mounted on the tub: local +X is physical
@@ -134,6 +176,15 @@ def build(comp):
     # The opening is 68.8 x 11.5mm (approximately the requested 69 x 11.5),
     # centred in the 82mm switch face and 3.2mm above its lower edge.
     hole(SW_CX, SW_PORT_CY, 'r', SW_PORT_W, SW_PORT_H)
+    # ---- ALARM HORN sound window (switch side) ----
+    # The horn lies on the tub floor behind the switch with its mouth facing
+    # this plate, so this is the on-axis way out for the sound.  Slots, not one
+    # hole: they keep the plate stiff and stop things being poked in.  Local X
+    # is mirrored, so the shell-side window centre becomes -HORN_GRILLE_CX.
+    for gz0, gz1 in INTERFACE.horn_grille_slots():
+        hole(-INTERFACE.HORN_GRILLE_CX, (gz0 + gz1) / 2.0, 'r',
+             INTERFACE.HORN_GRILLE_W, gz1 - gz0)
+
     # ---- POWER section (centre) ----
     hole(-8, BASE + 18, 'r', 19, 13)                     # power switch (rocker)
     hole(-3, BASE + 8, 'c', 7.0, 0)                      # power jack  - moved LEFT below the switch, clear of the PoE support
