@@ -117,10 +117,14 @@ CAP_ROOF_OUTER_Z, CAP_ROOF_TH = 120.0, 3.0  # assembled cap roof faces
 # posts.  Keep the normal all-up view clean; enable temporarily when checking
 # the three assembly stages.
 SHOW_DRIVER_ACCESS = False
+# SHELLS ONLY: build just the four printed shells (tub, deep cap, BottomLid,
+# CurvedLid) plus the screw/click markers, with NO internal components - for
+# inspecting the enclosure and its closures without the clutter.  Set False
+# to get the full all-up model back.
+SHELLS_ONLY = True
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v37 all-up: cap SELF-CLICKS home (6 detents) then bolts with 8 screws - '
-                 'every screw axis and click point shown as a bright marker; measured '
-                 'horn taper; sled-mounted horn')
+CHECK_VERSION = ('v38: SHELLS-ONLY inspection (tub + cap + BottomLid + CurvedLid + screw/click '
+                 'markers, no internals). Set SHELLS_ONLY = False for the full all-up model.')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -871,32 +875,41 @@ def run(context):
         removed = clear_old(comp)
         sh, cap = build_actual_shell_and_cap(comp)
         lid, cover = build_actual_front_closure(comp)
-        build_mikrotik(comp)
-        build_poe_and_front_connectors(comp)
-        build_extension_and_adapters(comp)
-        brain = build_brain_all_up(comp)
-        horn_points = build_horn_preview(comp, brain)
-        build_cable_paths(comp, brain)
+        horn_points = ()
+        if SHELLS_ONLY:
+            SKIPPED.append(
+                'SHELLS-ONLY view: no devices, horn, brain stack or cables drawn. '
+                'Set SHELLS_ONLY = False for the full all-up model.')
+        else:
+            build_mikrotik(comp)
+            build_poe_and_front_connectors(comp)
+            build_extension_and_adapters(comp)
+            brain = build_brain_all_up(comp)
+            horn_points = build_horn_preview(comp, brain)
+            build_cable_paths(comp, brain)
+            if SHOW_DRIVER_ACCESS:
+                build_driver_access(comp, brain)
         build_screw_markers(comp)
-        if SHOW_DRIVER_ACCESS:
-            build_driver_access(comp, brain)
         app.activeViewport.fit()
+        built = ('the four printed shells ONLY (tub, deep cap, BottomLid, CurvedLid)'
+                 if SHELLS_ONLY else
+                 'the assembled tub, BottomLid, CurvedLid, cap, actual brain case, '
+                 'actual tray, PCB/module envelopes, router, PoE switch, three '
+                 'adapters, connectors and cable paths')
         message = (CHECK_VERSION + '\n\n'
-                   'Built the assembled tub, BottomLid, CurvedLid, cap, actual brain case, actual tray, '
-                   'PCB/module envelopes, router, PoE switch, three adapters, connectors and '
-                   'cable paths. Driver-access guide cylinders: {}.\n'
+                   'Built {} plus screw-axis and click-point markers.\n'
                    'Cleared {} prior ShellCheck body(ies).\n'
                    'Interface {}: tray {}x{}, PCB {}x{}, case offset +X{} +Y{}.'
-                   .format('shown' if SHOW_DRIVER_ACCESS else 'hidden (set SHOW_DRIVER_ACCESS=True to inspect)',
-                           removed, INTERFACE.INTERFACE_VERSION,
+                   .format(built, removed, INTERFACE.INTERFACE_VERSION,
                            TRAY_W, TRAY_H, PCB_W, PCB_H, CASE_TO_CAP_X, CASE_TO_CAP_Y))
-        hb = INTERFACE.horn_body()
-        message += ('\nHorn: INSIDE on the floor behind the switch, '
-                    'X{:.1f}..{:.1f} Y{:.1f}..{:.1f} Z{:.1f}..{:.1f}, mouth facing the front. '
-                    'Foot bolts at {}.'
-                    .format(hb[0], hb[1], hb[2], hb[3], hb[4], hb[5],
-                            ', '.join('({:.1f}, {:.1f})'.format(x, y)
-                                      for x, y in horn_points)))
+        if horn_points:
+            hb = INTERFACE.horn_body()
+            message += ('\nHorn: INSIDE on the floor behind the switch, '
+                        'X{:.1f}..{:.1f} Y{:.1f}..{:.1f} Z{:.1f}..{:.1f}, mouth facing the front. '
+                        'Foot bolts at {}.'
+                        .format(hb[0], hb[1], hb[2], hb[3], hb[4], hb[5],
+                                ', '.join('({:.1f}, {:.1f})'.format(x, y)
+                                          for x, y in horn_points)))
         if SKIPPED:
             message += '\n\nInspection notes:\n - ' + '\n - '.join(SKIPPED)
         ui.messageBox(message)
