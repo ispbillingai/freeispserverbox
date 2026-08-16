@@ -118,8 +118,9 @@ CAP_ROOF_OUTER_Z, CAP_ROOF_TH = 120.0, 3.0  # assembled cap roof faces
 # the three assembly stages.
 SHOW_DRIVER_ACCESS = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v36 all-up: horn drawn with its MEASURED bell taper (74/76/83/102) - real '
-                 'clearances, not box-envelope scares; 8-screw cap; sled-mounted horn')
+CHECK_VERSION = ('v37 all-up: cap SELF-CLICKS home (6 detents) then bolts with 8 screws - '
+                 'every screw axis and click point shown as a bright marker; measured '
+                 'horn taper; sled-mounted horn')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -167,6 +168,23 @@ def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(ycenter) > 1e-9:
         ei.startExtent = adsk.fusion.OffsetStartDefinition.create(adsk.core.ValueInput.createByReal(mm(ycenter)))
+    ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
+    if parts:
+        ei.participantBodies = parts
+    return f.add(ei)
+
+
+def cyl_x(comp, cy, cz, xcenter, d, span, op, parts=None):
+    # cylinder along X (circle on the yZ plane), symmetric about xcenter -
+    # used for the side screw-axis markers
+    sk = comp.sketches.add(comp.yZConstructionPlane)
+    sk.sketchCurves.sketchCircles.addByCenterRadius(
+        adsk.core.Point3D.create(mm(cy), mm(cz), 0), mm(d / 2.0))
+    f = comp.features.extrudeFeatures
+    ei = f.createInput(sk.profiles.item(0), op)
+    if abs(xcenter) > 1e-9:
+        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
+            adsk.core.ValueInput.createByReal(mm(xcenter)))
     ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
     if parts:
         ei.participantBodies = parts
@@ -739,6 +757,51 @@ def build_driver_access(comp, brain):
                        gadget.PLATE_SEAT_Z + gadget.PLATE_BOSS_H, 0.14)
 
 
+def build_screw_markers(comp):
+    """Solid marker pins through every cap/lid screw axis.
+
+    The real 3.4mm holes are invisible in a transparent view, which reads as
+    'there are no bolts'.  These pins make each fastener's position and
+    direction unmissable; they are inspection bodies, not printed geometry.
+    """
+    for sxs in (-1.0, 1.0):                     # 6 cap side screws
+        for sy in (-75.0, 0.0, 75.0):
+            body = cyl_x(comp, sy, 72.0 + CAP_LIFT, sxs * 138.0, 3.0, 22.0,
+                         NEW).bodies.item(0)
+            body.name = CHECK_PREFIX + ' cap SIDE screw M3 (Y{:.0f}, {}X wall)'.format(
+                sy, '+' if sxs > 0 else '-')
+            set_opacity(body, 0.85)
+    for bx in (-115.0, 115.0):                  # 2 cap back screws
+        body = cyl_y(comp, bx, 72.0 + CAP_LIFT, -138.0, 3.0, 22.0,
+                     NEW).bodies.item(0)
+        body.name = CHECK_PREFIX + ' cap BACK screw M3 (X{:.0f})'.format(bx)
+        set_opacity(body, 0.85)
+    for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72),
+                     (-132, 44), (132, 44)):    # 6 BottomLid screws
+        body = cyl_y(comp, bx, bz, FRONT_Y + 2.0, 3.0, 22.0, NEW).bodies.item(0)
+        body.name = CHECK_PREFIX + ' BottomLid screw M3 (X{}, Z{})'.format(bx, bz)
+        set_opacity(body, 0.85)
+    # snap detents: mark each click point so the self-lock is visible too
+    for sy in INTERFACE.CAP_SNAP_SIDE_Y:
+        for sxs in (-1.0, 1.0):
+            body = box(comp, sxs * 141.0, sy, INTERFACE.CAP_SNAP_Z0 + CAP_LIFT,
+                       4.0, INTERFACE.CAP_SNAP_W, INTERFACE.CAP_SNAP_Z1
+                       - INTERFACE.CAP_SNAP_Z0, NEW).bodies.item(0)
+            body.name = CHECK_PREFIX + ' self-click detent ({}X wall, Y{:.0f})'.format(
+                '+' if sxs > 0 else '-', sy)
+            set_opacity(body, 0.85)
+    for bx in INTERFACE.CAP_SNAP_BACK_X:
+        body = box(comp, bx, -141.0, INTERFACE.CAP_SNAP_Z0 + CAP_LIFT,
+                   INTERFACE.CAP_SNAP_W, 4.0, INTERFACE.CAP_SNAP_Z1
+                   - INTERFACE.CAP_SNAP_Z0, NEW).bodies.item(0)
+        body.name = CHECK_PREFIX + ' self-click detent (back wall, X{:.0f})'.format(bx)
+        set_opacity(body, 0.85)
+    SKIPPED.append(
+        'cap closure: push straight down - at the last 1mm the six wall detents click '
+        'into their skirt windows (the cap holds itself), then 8 M3 screws lock it. '
+        'Bright pins mark every screw axis; bright pads mark every click point.')
+
+
 def build_actual_shell_and_cap(comp):
     """Use FIR_Shell's print builders, transforming its cap into assembly."""
     shell_source = _load_active_builder('FIR_Shell')
@@ -814,6 +877,7 @@ def run(context):
         brain = build_brain_all_up(comp)
         horn_points = build_horn_preview(comp, brain)
         build_cable_paths(comp, brain)
+        build_screw_markers(comp)
         if SHOW_DRIVER_ACCESS:
             build_driver_access(comp, brain)
         app.activeViewport.fit()

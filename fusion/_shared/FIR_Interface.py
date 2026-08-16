@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-16.9'
+INTERFACE_VERSION = '2026-08-16.10'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -124,6 +124,26 @@ POE_PLUG_D = 9.5                  # 5.5/2.1 barrel plug body
 POE_PLUG_STRAIGHT_L = 14.0        # straight plug body
 POE_PLUG_RIGHT_ANGLE_L = 10.0     # right-angle plug body
 POE_PLUG_MIN_AIR = POE_PLUG_RIGHT_ANGLE_L + 1.0
+
+# ---------------------------------------------------------------------------
+# Cap-to-tub SELF-CLICK detents
+# ---------------------------------------------------------------------------
+# The owner wants the cap to positively CLICK home, not just rest until the
+# screws go in.  Standard snap detent: a stepped bump on the tub's outer wall
+# rides the descending skirt (which flexes ~0.7mm over it) and pops into a
+# through-window in the skirt at full seat.  The bump's flat underside then
+# catches the window's lower edge, so the cap resists lifting even with no
+# screws fitted.  The 8 screws remain the permanent lock.
+#   sides: two detents per wall at Y = +-45 (clear of the screw row at
+#   -75/0/+75 and of the crush rib at Y0);  back: two at X = +-45 (clear of
+#   the back screws at +-115 and the keyholes at +-60).
+CAP_SNAP_SIDE_Y = (-45.0, 45.0)
+CAP_SNAP_BACK_X = (-45.0, 45.0)
+CAP_SNAP_W = 8.0                  # bump width along the wall
+CAP_SNAP_PROUD = 1.2              # bump stand-off from the wall outer face
+CAP_SNAP_Z0, CAP_SNAP_Z1 = 71.0, 76.0   # bump band (flat catch at the bottom)
+CAP_SNAP_WIN_W = 10.0             # skirt window, 1mm clearance each side
+CAP_SNAP_WIN_Z0, CAP_SNAP_WIN_Z1 = 70.0, 76.5
 
 # ---------------------------------------------------------------------------
 # Alarm horn: INSIDE the box, on the floor behind the switch
@@ -357,6 +377,18 @@ def validate():
         errors.append('horn profile must flare outward toward the mouth')
     if HORN_SLED_PILOT_DEPTH > HORN_SLED_TH + HORN_SLED_BOSS_H - 0.5:
         errors.append('horn sled pilot would pierce the sled bottom')
+    # Snap detents must stay clear of the screw rows, the keyholes and the
+    # crush ribs, and their window must fully swallow the bump.
+    for sy in CAP_SNAP_SIDE_Y:
+        if min(abs(sy - r) for r in (-75.0, 0.0, 75.0)) < 20.0:
+            errors.append('side snap at Y{:.0f} crowds a screw row or crush rib'.format(sy))
+    for sx in CAP_SNAP_BACK_X:
+        if abs(abs(sx) - 115.0) < 20.0 or abs(abs(sx) - 60.0) < 12.0:
+            errors.append('back snap at X{:.0f} crowds a back screw or keyhole'.format(sx))
+    if not (CAP_SNAP_WIN_Z0 < CAP_SNAP_Z0 and CAP_SNAP_Z1 < CAP_SNAP_WIN_Z1):
+        errors.append('snap window does not swallow the bump')
+    if CAP_SNAP_WIN_W < CAP_SNAP_W + 1.5:
+        errors.append('snap window too narrow for the bump')
     # The horn only fits because the brain case moved; if someone dials that
     # shift back without moving the horn, say so here rather than in a print.
     horn_x1 = HORN_CX + HORN_W / 2.0

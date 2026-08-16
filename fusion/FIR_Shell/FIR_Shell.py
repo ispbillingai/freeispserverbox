@@ -540,6 +540,29 @@ def build(comp):
         box(comp, bx, -HALF + WALL + 6, BOX_H - 14, 12, 12, 12, JOIN, [sh])
         cyl_y(comp, bx, BOX_H - 8, -HALF + WALL, 2.6, 30, CUT, [sh])
 
+    # ================= SELF-CLICK DETENTS (cap snaps onto the tub) =================
+    # Stepped bumps on the OUTER wall faces: the descending cap skirt flexes
+    # ~0.7mm over them and pops home into its windows - an audible, positive
+    # click that holds the cap even before any screw goes in.  The step
+    # (full-proud low band, half-proud upper band) is the printable ramp; the
+    # flat underside at Z71 is the catch.
+    z0, z1 = INTERFACE.CAP_SNAP_Z0, INTERFACE.CAP_SNAP_Z1
+    zm = (z0 + z1) / 2.0
+    for sy in INTERFACE.CAP_SNAP_SIDE_Y:                      # side walls
+        for sxs in (-1.0, 1.0):
+            wall = sxs * HALF
+            box(comp, wall + sxs * INTERFACE.CAP_SNAP_PROUD / 2.0, sy, z0,
+                INTERFACE.CAP_SNAP_PROUD, INTERFACE.CAP_SNAP_W, zm - z0, JOIN, [sh])
+            box(comp, wall + sxs * INTERFACE.CAP_SNAP_PROUD / 4.0, sy, zm,
+                INTERFACE.CAP_SNAP_PROUD / 2.0, INTERFACE.CAP_SNAP_W,
+                z1 - zm, JOIN, [sh])
+    for sx in INTERFACE.CAP_SNAP_BACK_X:                      # back wall
+        box(comp, sx, -HALF - INTERFACE.CAP_SNAP_PROUD / 2.0, z0,
+            INTERFACE.CAP_SNAP_W, INTERFACE.CAP_SNAP_PROUD, zm - z0, JOIN, [sh])
+        box(comp, sx, -HALF - INTERFACE.CAP_SNAP_PROUD / 4.0, zm,
+            INTERFACE.CAP_SNAP_W, INTERFACE.CAP_SNAP_PROUD / 2.0,
+            z1 - zm, JOIN, [sh])
+
     # ===== seat + bolt the integrated BOTTOM LID into the front opening =====
     build_lid_seat(comp, sh)
     return sh
@@ -774,14 +797,26 @@ def build_top_lid(comp, ox):
     # assembly flip cannot misplace them)
     for bx in CAP_BACK_SCREW_X:
         cyl_y(comp, ox + bx, LH - 4, -(inner / 2 + 1.5), 3.4, 6, CUT, [lid])
+    # SELF-CLICK windows: through-cuts in the skirt that swallow the tub's
+    # detent bumps at full seat.  Assembled Z70..76.5 -> print z 43.5..50.
+    # All positions are symmetric, so the assembly flip cannot misplace them.
+    wz0 = 120.0 - INTERFACE.CAP_SNAP_WIN_Z1          # assembled Z = 120 - print z
+    wh = INTERFACE.CAP_SNAP_WIN_Z1 - INTERFACE.CAP_SNAP_WIN_Z0
+    for sy in INTERFACE.CAP_SNAP_SIDE_Y:
+        for sxs in (-1, 1):
+            box(comp, ox + sxs * (LW / 2.0 - 1.5), sy, wz0,
+                5.0, INTERFACE.CAP_SNAP_WIN_W, wh, CUT, [lid])
+    for bx in INTERFACE.CAP_SNAP_BACK_X:
+        box(comp, ox + bx, -(LW / 2.0 - 1.5), wz0,
+            INTERFACE.CAP_SNAP_WIN_W, 5.0, wh, CUT, [lid])
     if SHOW_PARTS:
         box(comp, ox, 0, 16, 135, 120, 40, NEW).bodies.item(0).name = '=brain (bolts to lid)'
     return lid
 
 
-VERSION = ('v29: cap now bolts on THREE sides (8 screws, back pair added); horn bench-bolts '
-           'all three foot bolts to a printed SLED that drops into a floor curb and clamps '
-           'with two open wing screws / interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v30: cap SELF-CLICKS onto the tub (6 stepped detents snap into skirt windows) '
+           'and bolts on three sides with 8 screws; sled-mounted horn '
+           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):
