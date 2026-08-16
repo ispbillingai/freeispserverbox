@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-16.8'
+INTERFACE_VERSION = '2026-08-16.9'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -138,6 +138,10 @@ POE_PLUG_MIN_AIR = POE_PLUG_RIGHT_ANGLE_L + 1.0
 # +Y front, +Z up).
 HORN_W, HORN_L, HORN_H = 102.0, 105.0, 102.0
 HORN_BOLT_TAIL = 15.0             # tightening bolts standing off the back
+# Owner-measured bell taper, rear -> mouth: the body is a flared cone, only
+# reaching 102mm at the very mouth.  (fraction of length from the rear, dia)
+HORN_PROFILE = ((0.0, 74.0), (0.5, 76.0), (0.75, 83.0), (1.0, 102.0))
+HORN_ARM_W = 29.0                 # bracket stand width at the rear (approx)
 HORN_CX = -73.0                   # body centre; -124..-22 clears the wall bosses
 # 4 mm behind the switch cradle's back wall: the cradle's rear snap hooks need
 # ~3 mm of backward flex to click the switch in or out, so the switch stays
@@ -242,6 +246,30 @@ def horn_foot_plane_z():
     return 3.0 + HORN_SLED_TH + HORN_SLED_BOSS_H
 
 
+def horn_axis_z():
+    """Bell axis height: the 102mm mouth just grazes the foot plane."""
+    return horn_foot_plane_z() + HORN_H / 2.0
+
+
+def horn_profile_segments():
+    """Measured bell taper as (y0, y1, diameter) segments in shell Y.
+
+    Each measured station's diameter carries the quarter of the length it was
+    taken in, so the drawn shape stays conservative between stations without
+    inflating the whole body to the 102mm mouth diameter.
+    """
+    rear = HORN_MOUTH_Y - HORN_L
+    stations = HORN_PROFILE
+    out = []
+    prev_f = 0.0
+    for index, (frac, dia) in enumerate(stations):
+        next_f = (stations[index + 1][0] + frac) / 2.0             if index + 1 < len(stations) else 1.0
+        seg0 = prev_f if index else 0.0
+        out.append((rear + seg0 * HORN_L, rear + next_f * HORN_L, dia))
+        prev_f = next_f
+    return tuple(out)
+
+
 def validate():
     """Return interface-definition errors; empty means the contract is sound."""
     errors = []
@@ -323,6 +351,10 @@ def validate():
             errors.append('horn wing screw is not behind the sled plate')
     if 3.0 + HORN_CURB_H > horn_foot_plane_z() - 0.5:
         errors.append('horn curb rises into the bell envelope')
+    if abs(HORN_PROFILE[-1][1] - HORN_W) > 1e-9 or HORN_PROFILE[-1][0] != 1.0:
+        errors.append('horn profile must end at the measured 102mm mouth')
+    if any(b[1] < a[1] for a, b in zip(HORN_PROFILE, HORN_PROFILE[1:])):
+        errors.append('horn profile must flare outward toward the mouth')
     if HORN_SLED_PILOT_DEPTH > HORN_SLED_TH + HORN_SLED_BOSS_H - 0.5:
         errors.append('horn sled pilot would pierce the sled bottom')
     # The horn only fits because the brain case moved; if someone dials that

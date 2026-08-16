@@ -118,9 +118,8 @@ CAP_ROOF_OUTER_Z, CAP_ROOF_TH = 120.0, 3.0  # assembled cap roof faces
 # the three assembly stages.
 SHOW_DRIVER_ACCESS = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v35 all-up: cap bolts on THREE sides (8 screws); horn bench-bolted to its '
-                 'sled with all three foot bolts, clamped by two open wing screws; '
-                 'top-rain shedding verified; no vents')
+CHECK_VERSION = ('v36 all-up: horn drawn with its MEASURED bell taper (74/76/83/102) - real '
+                 'clearances, not box-envelope scares; 8-screw cap; sled-mounted horn')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -573,14 +572,20 @@ def build_horn_preview(comp, brain):
     real interference the layout only just clears.
     """
     hx0, hx1, hy0, hy1, hz0, hz1 = INTERFACE.horn_body()
-    make_check_box(comp, 'alarm horn body envelope ({:.0f} x {:.0f} x {:.0f})'
-                   .format(HORN_W, HORN_L, HORN_H),
-                   (hx0 + hx1) / 2.0, (hy0 + hy1) / 2.0, hz0,
-                   HORN_W, HORN_L, HORN_H, 0.30)
-    # The mouth is the face the sound leaves from; showing it separately makes
-    # it obvious whether the front window is actually in front of it.
-    make_check_box(comp, 'alarm horn mouth face', (hx0 + hx1) / 2.0,
-                   hy1 - 1.0, hz0, HORN_W, 2.0, HORN_H, 0.55)
+    # The bell drawn as the owner measured it: D74 rear, D76 middle, D83 at
+    # three-quarters, D102 only at the mouth.  Stepped cylinders along the
+    # axis - no more fat 102mm box pretending the whole horn is mouth-sized.
+    axis_z = INTERFACE.horn_axis_z()
+    for index, (sy0, sy1, dia) in enumerate(INTERFACE.horn_profile_segments()):
+        seg = cyl_y(comp, HORN_CX, axis_z, (sy0 + sy1) / 2.0,
+                    dia, sy1 - sy0, NEW).bodies.item(0)
+        seg.name = (CHECK_PREFIX +
+                    ' alarm horn bell D{:.0f} (Y{:.0f}..{:.0f}, measured taper)'
+                    .format(dia, sy0, sy1))
+        set_opacity(seg, 0.30)
+    make_check_box(comp, 'alarm horn bracket stand (~29mm wide, unmeasured depth)',
+                   HORN_CX, hy0 + 15.0, hz0, INTERFACE.HORN_ARM_W, 30.0,
+                   axis_z - hz0, 0.30)
     fx, fy = INTERFACE.horn_foot_centre()
     make_check_cyl(comp, 'alarm horn 69mm bracket foot', fx, fy,
                    FLOOR + HORN_PAD_H, HORN_FOOT_D, 3.0, 0.45)
@@ -624,17 +629,35 @@ def build_horn_preview(comp, brain):
     gadget = brain['gadget']
     case_x0 = brain['case_x'] - gadget.W / 2.0
     switch_rear = FRONT_Y - 0.5 - POE_D
-    for name, air in (
-            ('-X side wall', hx0 - (-HALF + WALL)),
-            ('the cap side-bolt bosses standing 12mm off that wall',
-             hx0 - (-HALF + WALL + 12.0)),
-            ('the brain case', case_x0 - hx1),
-            ('the switch cradle', (switch_rear - 3.0) - hy1),
-            ('the cap roof underside', (117.0 + CAP_LIFT) - hz1)):
+    # Radial clearances from the measured taper, evaluated where each
+    # neighbour actually stands - not from the old bounding box.
+    def bell_edge(py):
+        for sy0, sy1, dia in INTERFACE.horn_profile_segments():
+            if sy0 <= py <= sy1:
+                return dia / 2.0
+        return HORN_W / 2.0
+    checks = []
+    for by in (-75.0, 0.0, 75.0):        # wall boss rows (Z66-78, face X-125)
+        if hy0 <= by <= hy1:
+            checks.append(('cap side-bolt boss row at Y{:.0f}'.format(by),
+                           (HORN_CX - bell_edge(by)) - (-HALF + WALL + 12.0)))
+    case_span = [max(hy0, brain['case_y'] - gadget.H / 2.0),
+                 min(hy1, brain['case_y'] + gadget.H / 2.0)]
+    if case_span[0] < case_span[1]:
+        worst = min(case_x0 - (HORN_CX + bell_edge(py))
+                    for py in (case_span[0], case_span[1],
+                               (case_span[0] + case_span[1]) / 2.0, hy1))
+        checks.append(('the brain case (worst point of the taper)', worst))
+    checks.append(('the switch cradle', (switch_rear - 3.0) - hy1))
+    checks.append(('the cap roof underside (mouth top)',
+                   (117.0 + CAP_LIFT) - (axis_z + HORN_W / 2.0)))
+    for name, air in checks:
         if air < 1.0:
             SKIPPED.append('HORN INTERFERENCE: {:.1f}mm to {}'.format(air, name))
         elif air < 3.0:
             SKIPPED.append('horn is tight: {:.1f}mm to {}'.format(air, name))
+        else:
+            SKIPPED.append('horn clearance: {:.1f}mm to {}'.format(air, name))
 
     # ---- sound exit: none, on purpose ----------------------------------
     # A slotted window was cut through both front parts and then removed at the
