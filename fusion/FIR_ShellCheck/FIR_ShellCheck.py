@@ -118,8 +118,9 @@ CAP_ROOF_OUTER_Z, CAP_ROOF_TH = 120.0, 3.0  # assembled cap roof faces
 # the three assembly stages.
 SHOW_DRIVER_ACCESS = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v34 all-up: horn foot = two reachable extension-side bolts + printed peg '
-                 'under the body; top-rain shedding verified; switch at X-71; no vents')
+CHECK_VERSION = ('v35 all-up: cap bolts on THREE sides (8 screws); horn bench-bolted to its '
+                 'sled with all three foot bolts, clamped by two open wing screws; '
+                 'top-rain shedding verified; no vents')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -580,26 +581,44 @@ def build_horn_preview(comp, brain):
     # it obvious whether the front window is actually in front of it.
     make_check_box(comp, 'alarm horn mouth face', (hx0 + hx1) / 2.0,
                    hy1 - 1.0, hz0, HORN_W, 2.0, HORN_H, 0.55)
-    make_check_box(comp, 'alarm horn rear tightening bolts',
-                   (hx0 + hx1) / 2.0, hy0 - HORN_BOLT_TAIL / 2.0, hz0 + 20.0,
-                   60.0, HORN_BOLT_TAIL, 60.0, 0.35)
     fx, fy = INTERFACE.horn_foot_centre()
     make_check_cyl(comp, 'alarm horn 69mm bracket foot', fx, fy,
                    FLOOR + HORN_PAD_H, HORN_FOOT_D, 3.0, 0.45)
-    for index, (px, py) in enumerate(INTERFACE.horn_bolt_points()):
-        make_check_cyl(comp, 'horn foot bolt {} (M4, reachable behind the body)'.format(index + 1),
-                       px, py, FLOOR, HORN_HOLE_D, HORN_PAD_H + 12.0, 0.20)
-        make_check_cyl(comp, 'horn bolt {} driver corridor'.format(index + 1),
-                       px, py, FLOOR + HORN_PAD_H + 12.0, 12.0, 90.0, 0.10)
-    gx, gy = INTERFACE.horn_peg_point()
-    make_check_cyl(comp, 'horn locating peg (printed, no bolt)', gx, gy,
-                   FLOOR + HORN_PAD_H, INTERFACE.HORN_PEG_D,
-                   INTERFACE.HORN_FOOT_PLATE_TH + INTERFACE.HORN_PEG_PROUD, 0.45)
-    # Both driver corridors must be genuinely open above the bolts.
-    for index, (px, py) in enumerate(INTERFACE.horn_bolt_points()):
+    # The sled: bench-assembled with ALL THREE measured foot bolts, then the
+    # whole horn+sled drops into the tub's curb pocket and clamps with two
+    # wing screws.  Show the assembled sled and prove the wing corridors open.
+    sled_cx = (INTERFACE.HORN_SLED_X0 + INTERFACE.HORN_SLED_X1) / 2.0
+    sled_cy = (INTERFACE.HORN_SLED_Y0 + INTERFACE.HORN_SLED_Y1) / 2.0
+    make_check_box(comp, 'horn SLED (bench-bolted adapter plate)',
+                   sled_cx, sled_cy, FLOOR,
+                   INTERFACE.HORN_SLED_X1 - INTERFACE.HORN_SLED_X0,
+                   INTERFACE.HORN_SLED_Y1 - INTERFACE.HORN_SLED_Y0,
+                   INTERFACE.HORN_SLED_TH, 0.50)
+    for index, (px, py) in enumerate(INTERFACE.horn_mount_points()):
+        make_check_cyl(comp, 'horn foot bolt {} (driven on the BENCH into the sled)'
+                       .format(index + 1), px, py,
+                       INTERFACE.horn_foot_plane_z() - INTERFACE.HORN_SLED_BOSS_H,
+                       HORN_HOLE_D, INTERFACE.HORN_SLED_BOSS_H
+                       + INTERFACE.HORN_FOOT_PLATE_TH + 4.0, 0.30)
+    for index, (px, py) in enumerate(INTERFACE.horn_wing_points()):
+        make_check_cyl(comp, 'horn wing screw {} (M4x10, in-box clamp)'.format(index + 1),
+                       px, py, FLOOR, 4.0, HORN_PAD_H + 12.0, 0.30)
+        make_check_cyl(comp, 'horn wing screw {} driver corridor'.format(index + 1),
+                       px, py, FLOOR + HORN_PAD_H + 12.0, 12.0, 85.0, 0.10)
+        # the corridor must dodge the horn body AND the hanging brain case
         if hy0 < py < hy1 and hx0 < px < hx1:
-            SKIPPED.append('horn bolt {} is under the body after all - '
-                           'triangle orientation is wrong'.format(index + 1))
+            SKIPPED.append('horn wing screw {} is under the body - move the wing line'
+                           .format(index + 1))
+        case_y0 = brain['case_y'] - brain['gadget'].H / 2.0
+        if py + 6.0 > case_y0 and brain['case_x'] - brain['gadget'].W / 2.0 < px + 6.0:
+            SKIPPED.append('horn wing corridor {} runs into the hanging brain case'
+                           .format(index + 1))
+    # The bracket arm / tightening-bolt zone above the rear foot holes is NOT
+    # measured; nothing of ours may claim that space.  This zone is exactly why
+    # in-box foot bolts were impossible and the sled exists.
+    make_check_box(comp, 'horn bracket arm + tightening bolts (UNMEASURED zone)',
+                   (hx0 + hx1) / 2.0, hy0 - HORN_BOLT_TAIL / 2.0,
+                   INTERFACE.horn_foot_plane_z(), 60.0, HORN_BOLT_TAIL, 60.0, 0.15)
 
     # ---- what the position has to survive -------------------------------
     gadget = brain['gadget']

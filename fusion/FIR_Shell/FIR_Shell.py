@@ -133,6 +133,15 @@ POE_JACK_POST_MAX_H = 8.0
 HORN_PAD_D, HORN_PAD_H = INTERFACE.HORN_PAD_D, INTERFACE.HORN_PAD_H
 HORN_PILOT_D, HORN_PILOT_DEPTH = INTERFACE.HORN_PILOT_D, INTERFACE.HORN_PILOT_DEPTH
 HORN_FOOT_D = INTERFACE.HORN_FOOT_D
+SLED_X0, SLED_X1 = INTERFACE.HORN_SLED_X0, INTERFACE.HORN_SLED_X1
+SLED_Y0, SLED_Y1 = INTERFACE.HORN_SLED_Y0, INTERFACE.HORN_SLED_Y1
+SLED_TH, SLED_BOSS_H = INTERFACE.HORN_SLED_TH, INTERFACE.HORN_SLED_BOSS_H
+CURB_TH, CURB_H = INTERFACE.HORN_CURB_TH, INTERFACE.HORN_CURB_H
+CURB_CLR = INTERFACE.HORN_CURB_CLEAR
+# Cap-to-tub fastening: three screws per SIDE wall plus a BACK pair, X chosen
+# to land between the adapter bank (|X| < 103) and the corner radius.
+CAP_SIDE_SCREW_Y = (-75.0, 0.0, 75.0)
+CAP_BACK_SCREW_X = (-115.0, 115.0)
 
 SHOW_PARTS = False                               # False = print-ready (no display components/cables)
 
@@ -520,9 +529,16 @@ def build(comp):
     # side through the lid skirt, not from the top.
     for sx in (-HALF + WALL, HALF - WALL):                  # +-137 (wall inner face)
         s = 1.0 if sx > 0 else -1.0
-        for sy in (-75, 0, 75):
+        for sy in CAP_SIDE_SCREW_Y:
             box(comp, sx - s * 6, sy, BOX_H - 14, 12, 12, 12, JOIN, [sh])     # boss block on the wall inner
             cyl_x(comp, sy, BOX_H - 8, sx, 2.6, 30, CUT, [sh])               # HORIZONTAL X self-tap pilot
+    # BACK pair: the back wall previously had only a crush rib holding it, so
+    # the cap now bolts on all three closed sides - 8 screws in total.  X=+-115
+    # lands between the adapter bank (|X|<103) and the corner radius, above
+    # the keyhole slots.  Drive these two before hanging the box on its wall.
+    for bx in CAP_BACK_SCREW_X:
+        box(comp, bx, -HALF + WALL + 6, BOX_H - 14, 12, 12, 12, JOIN, [sh])
+        cyl_y(comp, bx, BOX_H - 8, -HALF + WALL, 2.6, 30, CUT, [sh])
 
     # ===== seat + bolt the integrated BOTTOM LID into the front opening =====
     build_lid_seat(comp, sh)
@@ -616,40 +632,69 @@ def build_poe_plate(comp, ox, oy):
 
 
 def horn_floor_mount(comp, sh):
-    """Three floor pads the alarm horn's bracket foot bolts down onto.
+    """Curb pocket + two clamp-screw pads for the horn's printed SLED.
 
-    The horn lies on the floor behind the switch with its mouth facing the
-    front panel.  It cannot be tilted in here - a 20 degree tilt already wants
-    more headroom than the 114mm cavity has - so the sound leaves through the
-    slotted window both front parts carry above the switch.
-
-    Only the TWO holes behind the horn body are bolted - both on the
-    extension side, where a driver comes straight down with the horn still on
-    its bracket.  The third hole, under the body where no tool fits, drops
-    over a printed locating peg: the peg takes shear, the bolts clamp.
-
-    Pad 6mm + pilot 7mm: an M4 x 10 bottoms exactly at the pilot floor with
-    2mm of tub floor under it.  Never use longer than M4 x 10 here.
+    The horn's own bracket arm and tightening bolts hang over its rear foot
+    holes, so no driver reaches ANY foot bolt inside the box.  All three foot
+    bolts are therefore driven on the bench, into the separate FIR HORN SLED
+    part.  In the tub there is only: a four-sided curb the bolted-up sled
+    drops into (takes every sideways knock), and two 14mm pads whose M4 x 10
+    wing screws sit at Y-65 - behind the foot, the bell and the bracket, with
+    nothing above them all the way to the roof.
     """
-    for px, py in INTERFACE.horn_bolt_points():
+    x0, x1 = SLED_X0 - CURB_CLR, SLED_X1 + CURB_CLR
+    y0, y1 = SLED_Y0 - CURB_CLR, SLED_Y1 + CURB_CLR
+    box(comp, (x0 + x1) / 2.0, y1 + CURB_TH / 2.0, FLOOR,
+        (x1 - x0) + 2 * CURB_TH, CURB_TH, CURB_H, JOIN, [sh])   # front curb
+    for sxs in (x0 - CURB_TH / 2.0, x1 + CURB_TH / 2.0):        # side curbs
+        box(comp, sxs, (y0 + y1) / 2.0, FLOOR, CURB_TH,
+            (y1 - y0), CURB_H, JOIN, [sh])
+    for px, py in INTERFACE.horn_wing_points():
         cyl(comp, px, py, FLOOR, HORN_PAD_D, HORN_PAD_H, JOIN, [sh])
         cyl(comp, px, py, FLOOR + HORN_PAD_H - HORN_PILOT_DEPTH,
             HORN_PILOT_D, HORN_PILOT_DEPTH, CUT, [sh])
-    # Locating peg: same pad, then a 5.5mm post through the 6mm foot hole with
-    # a stepped 3.5mm lead-in tip, so the foot finds it blind under the body.
-    gx, gy = INTERFACE.horn_peg_point()
-    cyl(comp, gx, gy, FLOOR, HORN_PAD_D, HORN_PAD_H, JOIN, [sh])
-    peg_top = FLOOR + HORN_PAD_H + INTERFACE.HORN_FOOT_PLATE_TH
-    cyl(comp, gx, gy, FLOOR + HORN_PAD_H, INTERFACE.HORN_PEG_D,
-        INTERFACE.HORN_FOOT_PLATE_TH, JOIN, [sh])
-    cyl(comp, gx, gy, peg_top, INTERFACE.HORN_PEG_TIP_D,
-        INTERFACE.HORN_PEG_PROUD, JOIN, [sh])
     if not INTERFACE.HORN_FOOT_MEASURED:
         SKIPPED.append(
-            'horn foot position is ASSUMED {:.0f}mm back from the mouth. Measure mouth '
-            'face -> foot centre and set HORN_FOOT_FROM_MOUTH; the three pads follow it.'
+            'horn foot triangle on the SLED assumes the foot centre {:.0f}mm back '
+            'from the mouth. If the measurement differs, only the small sled '
+            'reprints - the tub does not change.'
             .format(INTERFACE.HORN_FOOT_FROM_MOUTH))
     return
+
+
+def build_horn_sled(comp, ox, oy):
+    """The printable adapter plate the horn's foot bolts to ON THE BENCH.
+
+    Plate + three 14mm bosses on the measured foot triangle (M4 x 8 max: the
+    pilot stops 0.5mm above the plate bottom) + two rear wing tabs for the
+    in-box clamp screws.  Shown beside the tub in print orientation.
+    """
+    w, l = SLED_X1 - SLED_X0, SLED_Y1 - SLED_Y0
+    cx, cy = ox, oy
+    sled = box(comp, cx, cy, 0, w, l, SLED_TH, NEW).bodies.item(0)
+    sled.name = 'FIR HORN SLED (bench-bolt the horn to this)'
+    fillet_vertical(comp, sled, 4.0)
+    mid_x = (SLED_X0 + SLED_X1) / 2.0
+    mid_y = (SLED_Y0 + SLED_Y1) / 2.0
+    for hx, hy in INTERFACE.horn_mount_points():            # foot bosses
+        lx, ly = cx + (hx - mid_x), cy + (hy - mid_y)
+        cyl(comp, lx, ly, SLED_TH, HORN_PAD_D, SLED_BOSS_H, JOIN, [sled])
+        cyl(comp, lx, ly, SLED_TH + SLED_BOSS_H - INTERFACE.HORN_SLED_PILOT_DEPTH,
+            INTERFACE.HORN_SLED_PILOT_D, INTERFACE.HORN_SLED_PILOT_DEPTH,
+            CUT, [sled])
+    # Wing tabs reach back past the plate edge; assembled they land on the tub
+    # pads at pad-top height, so each carries its screw with open air above.
+    for wx, wy in INTERFACE.horn_wing_points():
+        lx = cx + (wx - mid_x)
+        tab_len = (SLED_Y0 - wy) + INTERFACE.HORN_WING_L / 2.0
+        tab_cy = cy + (SLED_Y0 - mid_y) - tab_len / 2.0
+        box(comp, lx, tab_cy, HORN_PAD_H, INTERFACE.HORN_WING_W,
+            tab_len, SLED_TH, JOIN, [sled])
+        box(comp, lx, cy + (SLED_Y0 - mid_y) - 1.0, SLED_TH,
+            INTERFACE.HORN_WING_W, 2.0, HORN_PAD_H, JOIN, [sled])   # riser
+        cyl(comp, lx, cy + (wy - mid_y), HORN_PAD_H - 1.0, 4.5,
+            SLED_TH + 2.0, CUT, [sled])
+    return sled
 
 
 def horn_clearances():
@@ -723,22 +768,26 @@ def build_top_lid(comp, ox):
     # 6 clearance holes for the tub's side bolts (3 per side wall @ Y=-75/0/75; tub pilot Z72 ->
     # print z LH-4). Without these the cap could not be bolted down at all.
     for sxs in (-1, 1):
-        for byy in (-75, 0, 75):
+        for byy in CAP_SIDE_SCREW_Y:
             cyl_x(comp, byy, LH - 4, ox + sxs * (inner / 2 + 1.5), 3.4, 6, CUT, [lid])
+    # matching BACK-pair clearance holes (pattern symmetric in X, so the
+    # assembly flip cannot misplace them)
+    for bx in CAP_BACK_SCREW_X:
+        cyl_y(comp, ox + bx, LH - 4, -(inner / 2 + 1.5), 3.4, 6, CUT, [lid])
     if SHOW_PARTS:
         box(comp, ox, 0, 16, 135, 120, 40, NEW).bodies.item(0).name = '=brain (bolts to lid)'
     return lid
 
 
-VERSION = ('v28: horn foot now TWO reachable bolts on the extension side + a printed locating '
-           'peg under the body; switch at X-71 for side plug entry; cap bosses mirrored '
-           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v29: cap now bolts on THREE sides (8 screws, back pair added); horn bench-bolts '
+           'all three foot bolts to a printed SLED that drops into a floor curb and clamps '
+           'with two open wing screws / interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):
     # delete THIS script's bodies from earlier runs so you never look at stale/floating geometry
     old = [b for b in root.bRepBodies
-           if b.name.startswith(('FIR SHELL', 'FIR TOP LID', '=', '~'))]
+           if b.name.startswith(('FIR SHELL', 'FIR TOP LID', 'FIR HORN', '=', '~'))]
     for b in old:
         try:
             b.deleteMe()
@@ -767,6 +816,7 @@ def run(context):
         # (FIR_BottomLid / FIR_CurvedLid) - not rebuilt here; this tub just SEATS + BOLTS them.
         build(design.rootComponent)                                # 1 TUB (now with front lid seat + bolts)
         build_top_lid(design.rootComponent, BOX_W + 50)            # 2 DEEP TOP LID
+        build_horn_sled(design.rootComponent, 0, 220)              # 3 HORN SLED (bench part)
         # (3 old front cover, 4 951 plate, 5 PoE plate REMOVED - replaced by the integrated bottom lid)
         if SHOW_PARTS:
             build_components(design.rootComponent)

@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-16.7'
+INTERFACE_VERSION = '2026-08-16.8'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -150,15 +150,26 @@ HORN_BASE_C2C, HORN_SIDE_C2C = 38.5, 50.0
 # three floor pads move with this one number, so it is worth a tape measure.
 HORN_FOOT_FROM_MOUTH = 99.0
 HORN_FOOT_MEASURED = False
-# Owner decision (16 Aug 2026): only the TWO bolts behind the horn body are
-# real fasteners - both sit on the extension side where a driver reaches them
-# straight down.  The third hole, under the body where no tool fits, drops
-# over a printed locating PEG instead.  0.5mm under the measured 6mm hole so
-# the foot lowers onto it blind; the peg takes shear, the two bolts clamp.
-HORN_PEG_D = 5.5
-HORN_PEG_TIP_D = 3.5              # stepped lead-in tip
-HORN_PEG_PROUD = 3.0              # above the foot plate; bell arch clears it
-HORN_FOOT_PLATE_TH = 3.0
+# Fastening rework (16 Aug 2026, after the owner rejected the peg): ALL THREE
+# measured foot holes get real bolts again.  They are driven ON THE BENCH into
+# a small printed SLED (adapter plate) where nothing hangs over them - the
+# bracket arm and its tightening bolts sit right above the rear foot holes, so
+# no in-box driver path to them exists in any orientation.  The bolted-up
+# horn+sled then drops into a curb pocket on the tub floor and TWO M4 wing
+# screws, on wings that stick out BEHIND everything, clamp it down.  Adapter
+# plates are the standard answer to fastening under an unreachable overhang.
+HORN_FOOT_PLATE_TH = 3.0          # the horn's own steel foot plate
+HORN_SLED_TH = 3.0                # printed sled plate on the tub floor
+HORN_SLED_BOSS_H = 3.0            # foot bosses on the sled -> foot plane Z9
+HORN_SLED_X0, HORN_SLED_X1 = -111.0, -35.0
+HORN_SLED_Y0, HORN_SLED_Y1 = -58.0, 30.0
+HORN_SLED_PILOT_D = 3.4           # bench screws: M4 x 8 max (6mm of plastic)
+HORN_SLED_PILOT_DEPTH = 5.5
+HORN_WING_W, HORN_WING_L = 24.0, 14.0
+HORN_WING_Y = -65.0               # wing screw line, behind the foot and bell
+HORN_WING_SCREW_X = (-93.0, -53.0)
+HORN_CURB_TH, HORN_CURB_H = 2.5, 5.5   # stays 0.5 under the bell envelope
+HORN_CURB_CLEAR = 0.3
 # Floor mounting: three pads raise the foot clear of the floor fillets.  Pad
 # 6 mm + pilot 7 mm is sized so an M4 x 10 (3 mm foot plate + 7 mm of thread)
 # bottoms exactly at the pilot floor with 2 mm of tub floor still under it;
@@ -189,7 +200,7 @@ def poe_jack_air(wall_inner_x=137.0, mikrotik_inner_x=21.0):
 
 def horn_body():
     """Return the horn's assembled envelope (x0, x1, y0, y1, z0, z1)."""
-    z0 = 3.0 + HORN_PAD_H                      # floor top + mounting pads
+    z0 = horn_foot_plane_z()
     return (HORN_CX - HORN_W / 2.0, HORN_CX + HORN_W / 2.0,
             HORN_MOUTH_Y - HORN_L, HORN_MOUTH_Y,
             z0, z0 + HORN_H)
@@ -215,20 +226,20 @@ def horn_mount_points():
     base_y = (altitude ** 2 - half_base ** 2) / (2.0 * altitude)
     apex_y = altitude - base_y
     return (
-        (cx, cy + apex_y),                     # 0: PEG, under the body
-        (cx - half_base, cy - base_y),         # 1: bolt, behind the body
-        (cx + half_base, cy - base_y),         # 2: bolt, behind the body
+        (cx, cy + apex_y),                     # apex, under the body
+        (cx - half_base, cy - base_y),
+        (cx + half_base, cy - base_y),
     )
 
 
-def horn_bolt_points():
-    """Only the two real fasteners."""
-    return horn_mount_points()[1:]
+def horn_wing_points():
+    """The two in-box clamp screws, on wings clear of everything above."""
+    return tuple((wx, HORN_WING_Y) for wx in HORN_WING_SCREW_X)
 
 
-def horn_peg_point():
-    """The printed locating peg the third foot hole drops over."""
-    return horn_mount_points()[0]
+def horn_foot_plane_z():
+    """Where the horn's steel foot sits: floor + sled + bosses."""
+    return 3.0 + HORN_SLED_TH + HORN_SLED_BOSS_H
 
 
 def validate():
@@ -296,20 +307,24 @@ def validate():
         errors.append('horn floor pilot would break through the 3mm tub floor')
     if min(HORN_W, HORN_L, HORN_H, HORN_BOLT_TAIL) <= 0.0:
         errors.append('horn envelope must be positive')
-    # The whole point of the peg layout: both real bolts must land BEHIND the
-    # horn body where a vertical driver reaches them, and the peg must land
-    # under the foot disc it locates.
+    # The sled layout only works if (a) every foot hole lands on the sled,
+    # (b) both wing screws sit behind the horn body AND behind the sled plate,
+    # clear for a straight-down driver, and (c) the curb stays under the bell.
     body_rear = HORN_MOUTH_Y - HORN_L
-    for bx, by in horn_bolt_points():
-        if by > body_rear - 2.0:
-            errors.append('horn bolt at Y{:.1f} is not clear behind the body '
-                          '(rear {:.1f})'.format(by, body_rear))
-    px, py = horn_peg_point()
-    fx, fy = horn_foot_centre()
-    if math.hypot(px - fx, py - fy) + HORN_PEG_D / 2.0 > HORN_FOOT_D / 2.0:
-        errors.append('horn peg misses the foot disc')
-    if HORN_PEG_D >= HORN_HOLE_D:
-        errors.append('horn peg must be smaller than the measured 6mm foot hole')
+    for hx_, hy_ in horn_mount_points():
+        if not (HORN_SLED_X0 + 7.0 <= hx_ <= HORN_SLED_X1 - 7.0
+                and HORN_SLED_Y0 + 2.0 <= hy_ <= HORN_SLED_Y1 - 7.0):
+            errors.append('horn foot hole ({:.1f},{:.1f}) misses the sled'
+                          .format(hx_, hy_))
+    for wx_, wy_ in horn_wing_points():
+        if wy_ > body_rear - 2.0:
+            errors.append('horn wing screw at Y{:.1f} is under the body'.format(wy_))
+        if wy_ > HORN_SLED_Y0 - HORN_WING_L / 2.0 + 1e-9:
+            errors.append('horn wing screw is not behind the sled plate')
+    if 3.0 + HORN_CURB_H > horn_foot_plane_z() - 0.5:
+        errors.append('horn curb rises into the bell envelope')
+    if HORN_SLED_PILOT_DEPTH > HORN_SLED_TH + HORN_SLED_BOSS_H - 0.5:
+        errors.append('horn sled pilot would pierce the sled bottom')
     # The horn only fits because the brain case moved; if someone dials that
     # shift back without moving the horn, say so here rather than in a print.
     horn_x1 = HORN_CX + HORN_W / 2.0
