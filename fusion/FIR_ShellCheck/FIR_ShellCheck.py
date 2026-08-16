@@ -122,9 +122,16 @@ SHOW_DRIVER_ACCESS = False
 # inspecting the enclosure and its closures without the clutter.  Set False
 # to get the full all-up model back.
 SHELLS_ONLY = True
+# Screw-axis / click-point marker pins.  They deliberately stick out past the
+# shells so a fastener cannot be missed, which also makes them read as loose
+# bars floating beside the box.  OFF by default: the real clearance holes and
+# 2.6mm pilots are in the printed parts either way.  Set True only when you
+# want to see where every fastener runs.
+SHOW_SCREW_MARKERS = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v38: SHELLS-ONLY inspection (tub + cap + BottomLid + CurvedLid + screw/click '
-                 'markers, no internals). Set SHELLS_ONLY = False for the full all-up model.')
+CHECK_VERSION = ('v39: SHELLS-ONLY inspection - the four printed shells, nothing else. '
+                 'SHELLS_ONLY=False restores the internals; SHOW_SCREW_MARKERS=True '
+                 'adds the fastener marker pins.')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -802,8 +809,7 @@ def build_screw_markers(comp):
         set_opacity(body, 0.85)
     SKIPPED.append(
         'cap closure: push straight down - at the last 1mm the six wall detents click '
-        'into their skirt windows (the cap holds itself), then 8 M3 screws lock it. '
-        'Bright pins mark every screw axis; bright pads mark every click point.')
+        'into their skirt windows (the cap holds itself), then 8 M3 screws lock it.')
 
 
 def build_actual_shell_and_cap(comp):
@@ -889,7 +895,8 @@ def run(context):
             build_cable_paths(comp, brain)
             if SHOW_DRIVER_ACCESS:
                 build_driver_access(comp, brain)
-        build_screw_markers(comp)
+        if SHOW_SCREW_MARKERS:
+            build_screw_markers(comp)
         app.activeViewport.fit()
         built = ('the four printed shells ONLY (tub, deep cap, BottomLid, CurvedLid)'
                  if SHELLS_ONLY else
@@ -897,7 +904,7 @@ def run(context):
                  'actual tray, PCB/module envelopes, router, PoE switch, three '
                  'adapters, connectors and cable paths')
         message = (CHECK_VERSION + '\n\n'
-                   'Built {} plus screw-axis and click-point markers.\n'
+                   'Built {}.\n'
                    'Cleared {} prior ShellCheck body(ies).\n'
                    'Interface {}: tray {}x{}, PCB {}x{}, case offset +X{} +Y{}.'
                    .format(built, removed, INTERFACE.INTERFACE_VERSION,
