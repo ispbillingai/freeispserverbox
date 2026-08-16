@@ -58,8 +58,9 @@ INTERFACE = _load_shared_interface()
 BOX_W, BOX_D, BOX_H = 280.0, 280.0, 80.0
 WALL, FLOOR, CORNER_R, HALF, FRONT_Y = 3.0, 3.0, 10.0, 140.0, 137.0
 MIK_W, MIK_D, MIK_H, MIK_CX, ST_H = 114.0, 139.0, 29.0, 78.0, 3.5
-# Confirmed PoE switch envelope: 82mm face x 52mm deep x 23mm high.
-POE_W, POE_D, POE_H, POE_CX = 82.0, 52.0, 23.0, -85.0
+# Confirmed Tenda switch: envelope and mounted position from the one contract.
+POE_W, POE_D, POE_H = INTERFACE.POE_W, INTERFACE.POE_D, INTERFACE.POE_H
+POE_CX = INTERFACE.POE_CX
 EXT_CY, DIV_Y, PLATE_TH = -110.0, -82.0, 3.0
 EXT_W, EXT_D, EXT_H, EXT_FRONT_RETAINER_H = 240.0, 47.0, 29.0, 29.0
 # Shared brain-stack interface.  The cap-boss pattern is derived in
@@ -80,10 +81,10 @@ BRAIN_CAP_BOSS_D, BRAIN_CAP_BOSS_H = 9.0, 10.8
 BRAIN_CAP_FLANGE_D, BRAIN_CAP_FLANGE_H = 13.0, 3.0
 BRAIN_CAP_PILOT = 2.6
 # ---- front device reference positions (for connector envelopes only) ----
-SW_CX, BASE = 85.0, 6.5
-SW_PORT_SIDE_LAND = 6.6
-SW_PORT_W, SW_PORT_H = 82.0 - 2.0 * SW_PORT_SIDE_LAND, 11.5
-SW_PORT_FROM_BOTTOM = 3.2
+BASE = 6.5
+SW_PORT_SIDE_LAND = INTERFACE.POE_PORT_SIDE_LAND
+SW_PORT_W, SW_PORT_H = INTERFACE.POE_PORT_W, INTERFACE.POE_PORT_H
+SW_PORT_FROM_BOTTOM = INTERFACE.POE_PORT_FROM_BOTTOM
 SW_PORT_Z0 = BASE + SW_PORT_FROM_BOTTOM
 # ---- top cap (FIR_Shell build_top_lid, assembled) ----
 CAP_LIFT = 0.0        # 0 = fully seated. Set to e.g. 40.0 to HOVER the cap above the tub and
@@ -117,9 +118,9 @@ CAP_ROOF_OUTER_Z, CAP_ROOF_TH = 120.0, 3.0  # assembled cap roof faces
 # the three assembly stages.
 SHOW_DRIVER_ACCESS = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v32 all-up: alarm horn INSIDE on the floor behind the switch, brain case '
-                 'shifted +47mm to clear it, front sound window through both front parts, '
-                 'cap bosses mirrored for the print flip')
+CHECK_VERSION = ('v33 all-up: alarm horn INSIDE on the floor behind the switch, brain case '
+                 'shifted +47mm to clear it, switch moved inboard to X-71 for a straight '
+                 'barrel plug, no sound vents (owner decision), cap bosses mirrored')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -527,8 +528,9 @@ def build_poe_and_front_connectors(comp):
     # switch now has one measured 68.8 x 11.5mm service slot, not five guessed
     # individual RJ45 openings.  This is an external plug/service envelope,
     # not an additional cut in the printable parts.
-    make_check_box(comp, 'PoE 68.8 x 11.5 long-port service envelope',
-                   -SW_CX, front + 4.0, SW_PORT_Z0,
+    make_check_box(comp, 'PoE {:.1f} x {:.1f} long-port service envelope'
+                   .format(SW_PORT_W, SW_PORT_H),
+                   POE_CX, front + 4.0, SW_PORT_Z0,
                    SW_PORT_W, 8.0, SW_PORT_H, 0.40)
 
     build_poe_dc_jack(comp)
@@ -605,24 +607,15 @@ def build_horn_preview(comp, brain):
         elif air < 3.0:
             SKIPPED.append('horn is tight: {:.1f}mm to {}'.format(air, name))
 
-    # ---- can the sound actually get out? --------------------------------
-    slots = INTERFACE.horn_grille_slots()
-    open_area = sum((b - a) for a, b in slots) * INTERFACE.HORN_GRILLE_W
-    mouth_area = math.pi * (HORN_W / 2.0) ** 2
-    SKIPPED.append(
-        'horn sound path: front window is {:.0f} slots giving {:.0f}mm2, against a '
-        '{:.0f}mm mouth of {:.0f}mm2 ({:.0f}% open). It will be quieter than the same '
-        'horn in open air - that is the price of putting it inside the box.'
-        .format(len(slots), open_area, HORN_W, mouth_area,
-                100.0 * open_area / mouth_area))
-    window_lo, window_hi = slots[0][0], slots[-1][1]
-    if window_lo < hz0 or window_hi > hz1:
-        SKIPPED.append('front sound window runs past the horn mouth; it would open into the box')
-    for gz0, gz1 in slots:
-        make_check_box(comp, 'horn sound path through the front window',
-                       INTERFACE.HORN_GRILLE_CX, (hy1 + FRONT_Y + 65.0) / 2.0,
-                       gz0, INTERFACE.HORN_GRILLE_W,
-                       (FRONT_Y + 65.0) - hy1, gz1 - gz0, 0.12)
+    # ---- sound exit: none, on purpose ----------------------------------
+    # A slotted window was cut through both front parts and then removed at the
+    # owner's request: this siren is loud enough that a plastic box will not
+    # meaningfully muffle it.  Stated here so a later pass does not helpfully
+    # re-open the panel.
+    if not INTERFACE.HORN_VENTS:
+        SKIPPED.append(
+            'horn fires into a closed box by owner decision - no vents in the front '
+            'panel, the cover or the lid. Do not re-add a grille without asking.')
 
     if not INTERFACE.HORN_FOOT_MEASURED:
         SKIPPED.append(
@@ -772,9 +765,11 @@ def run(context):
                    .format('shown' if SHOW_DRIVER_ACCESS else 'hidden (set SHOW_DRIVER_ACCESS=True to inspect)',
                            removed, INTERFACE.INTERFACE_VERSION,
                            TRAY_W, TRAY_H, PCB_W, PCB_H, CASE_TO_CAP_X, CASE_TO_CAP_Y))
-        message += ('\nHorn preview: external top-cap location X{:.1f}, Y{:.1f}; '
-                    '69mm flange, 104mm body x 102mm high; measured 6mm axes at {}.'
-                    .format(HORN_CX, HORN_CY,
+        hb = INTERFACE.horn_body()
+        message += ('\nHorn: INSIDE on the floor behind the switch, '
+                    'X{:.1f}..{:.1f} Y{:.1f}..{:.1f} Z{:.1f}..{:.1f}, mouth facing the front. '
+                    'Foot bolts at {}.'
+                    .format(hb[0], hb[1], hb[2], hb[3], hb[4], hb[5],
                             ', '.join('({:.1f}, {:.1f})'.format(x, y)
                                       for x, y in horn_points)))
         if SKIPPED:

@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-16.3'
+INTERFACE_VERSION = '2026-08-16.5'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -100,6 +100,19 @@ CASE_BODY_Z = 69.6
 # barrel jack lives here, because the tub cradle (FIR_Shell) and the all-up
 # clearance check (FIR_ShellCheck) must agree on exactly where the plug needs
 # air, and getting that wrong is not visible until the switch is wired.
+# Envelope and mounted position.  These used to be hand-entered separately in
+# FIR_Shell, FIR_BottomLid, FIR_CurvedLid and FIR_ShellCheck; the switch cannot
+# be moved safely while four files each hold their own copy of where it is.
+POE_W, POE_D, POE_H = 82.0, 52.0, 23.0
+# Moved inboard from -85 so a STRAIGHT barrel plug can go in from the side:
+# that leaves 25.0mm off its end face instead of the old 11.0mm.
+POE_CX = -71.0
+POE_PORT_SIDE_LAND = 6.6          # measured land each side of the port opening
+POE_PORT_W = POE_W - 2.0 * POE_PORT_SIDE_LAND
+POE_PORT_H = 11.5
+POE_PORT_FROM_BOTTOM = 3.2
+POE_CABLE_NOTCH_PITCH = 16.0      # front-cover cable notches under the switch
+POE_CABLE_NOTCH_COUNT = 5
 POE_JACK_D = 6.0                  # measured hole in the switch case
 POE_JACK_FROM_REAR = 8.3          # jack centre, measured from the switch REAR face
 POE_JACK_FROM_BASE = 11.5         # ASSUMED mid-height -- this one is NOT measured
@@ -138,13 +151,26 @@ HORN_FOOT_MEASURED = False
 # an M4 self-tapper 8 mm of material without breaking through the 3 mm floor.
 HORN_PAD_D, HORN_PAD_H = 14.0, 5.0
 HORN_PILOT_D, HORN_PILOT_DEPTH = 3.4, 6.0
-# Sound exit: the mouth stares at the front panel, so both front parts carry a
-# matching slotted window in the blank land above the switch.
-HORN_GRILLE_CX = HORN_CX
-HORN_GRILLE_W = 80.0
-HORN_GRILLE_Z0, HORN_GRILLE_Z1 = 34.0, 66.0   # clear of the switch and the Z72 bolts
-HORN_GRILLE_SLOTS = 5
-HORN_GRILLE_SLOT_H = 4.0
+# NO SOUND VENTS, by owner decision (16 Aug 2026): this siren is loud enough
+# that a plastic box will not meaningfully muffle it, so the front panel and the
+# lid both stay closed.  Do not re-add a grille to FIR_BottomLid, FIR_CurvedLid
+# or the cap without asking - it was tried and deliberately taken back out.
+HORN_VENTS = False
+
+
+def poe_cable_notch_x():
+    """Front-cover cable notch centres under the switch, in shell X."""
+    span = (POE_CABLE_NOTCH_COUNT - 1) * POE_CABLE_NOTCH_PITCH
+    return tuple(POE_CX - span / 2.0 + i * POE_CABLE_NOTCH_PITCH
+                 for i in range(POE_CABLE_NOTCH_COUNT))
+
+
+def poe_jack_air(wall_inner_x=137.0, mikrotik_inner_x=21.0):
+    """Air off the switch's jack end face before something stops the plug."""
+    face = POE_CX + POE_JACK_SIDE * POE_W / 2.0
+    if POE_JACK_SIDE < 0:
+        return face - (-wall_inner_x)
+    return mikrotik_inner_x - face
 
 
 def horn_body():
@@ -177,19 +203,6 @@ def horn_mount_points():
         (cx - half_base, cy + base_y),
         (cx + half_base, cy + base_y),
     )
-
-
-def horn_grille_slots():
-    """Slot rectangles (z0, z1) for the front sound window, bottom-up."""
-    span = HORN_GRILLE_Z1 - HORN_GRILLE_Z0
-    gaps = HORN_GRILLE_SLOTS - 1
-    rib = (span - HORN_GRILLE_SLOTS * HORN_GRILLE_SLOT_H) / gaps if gaps else 0.0
-    out = []
-    z = HORN_GRILLE_Z0
-    for _ in range(HORN_GRILLE_SLOTS):
-        out.append((z, z + HORN_GRILLE_SLOT_H))
-        z += HORN_GRILLE_SLOT_H + rib
-    return out
 
 
 def validate():
@@ -233,6 +246,12 @@ def validate():
         errors.append('brain case cannot be smaller than the tray pocket it holds')
     if POE_JACK_SIDE not in (-1.0, 1.0):
         errors.append('switch jack side must be -1.0 or +1.0')
+    if poe_jack_air() < POE_PLUG_STRAIGHT_L + 5.0:
+        errors.append(
+            'switch is too close to its end obstruction for a straight plug: '
+            '{:.1f}mm'.format(poe_jack_air()))
+    if len(set(poe_cable_notch_x())) != POE_CABLE_NOTCH_COUNT:
+        errors.append('switch cable-notch pattern is degenerate')
     if POE_JACK_D <= 0.0 or POE_JACK_D > POE_PLUG_D:
         errors.append('switch jack hole must be positive and no larger than the plug body')
     if POE_JACK_FROM_REAR <= 0.0 or POE_JACK_FROM_BASE <= 0.0:
@@ -263,9 +282,6 @@ def validate():
         errors.append('brain case leaves under 2mm beside the horn')
     if CASE_OUTER_W / 2.0 + CASE_TO_CAP_X > 137.0 - 15.0:
         errors.append('brain case is pushed so far +X that its J4/J5 wires have no room')
-    slots = horn_grille_slots()
-    if slots and slots[-1][1] > HORN_GRILLE_Z1 + 1e-9:
-        errors.append('horn grille slots overrun their window')
     return errors
 
 

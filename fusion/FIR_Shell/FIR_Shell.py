@@ -68,7 +68,12 @@ ST_H = 3.5                                       # 951 standoff -> port face z6.
 # Confirmed physical PoE switch: 82mm port face x 52mm depth x 23mm high.
 # Its front face remains against the BottomLid, so only its rear edge moves
 # forward; the centre stays aligned with the 68.8mm long BottomLid opening.
-POE_W, POE_D, POE_H, POE_CX = 82.0, 52.0, 23.0, -85.0
+# Owner moved the switch inboard so a STRAIGHT barrel plug goes in from the
+# side: 25mm off its jack end face instead of 11mm.  Position and envelope come
+# from the shared contract now, because the BottomLid slot and the front-cover
+# cable notches have to move with it.
+POE_W, POE_D, POE_H = INTERFACE.POE_W, INTERFACE.POE_D, INTERFACE.POE_H
+POE_CX = INTERFACE.POE_CX
 EXT_CY = -110.0                                  # extension/adapter zone (back)
 EXT_W, EXT_D, EXT_H = 240.0, 47.0, 29.0
 EXT_FRONT_RETAINER_H = EXT_H                     # internal front retainer; wedges attach to back casing wall
@@ -711,8 +716,9 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v26: alarm horn moved INSIDE onto the floor behind the switch, brain case shifted '
-           '+47mm to open the column for it, cap bosses mirrored for the print flip '
+VERSION = ('v27: alarm horn INSIDE on the floor behind the switch, brain case shifted +47mm to '
+           'open the column for it, switch moved inboard to X-71 so a straight barrel plug '
+           'goes in from the side, cap bosses mirrored for the print flip '
            '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 

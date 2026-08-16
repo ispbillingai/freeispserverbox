@@ -47,8 +47,10 @@ def _load_shared_interface():
 INTERFACE = _load_shared_interface()
 
 # The cover's local Y is the shell Z minus this: its lower edge sits at shell
-# Z=3 and its local Y=-40.  Used to line the horn window up with the BottomLid.
+# Z=3 and its local Y=-40.  Keep it written down - the handedness fault came
+# from exactly this kind of undocumented frame mapping.
 COVER_Y_TO_SHELL_Z = 43.0
+# No alarm-horn vents here either: see HORN_VENTS in the shared contract.
 LEN, HEIGHT, DEPTH = 280.0, 80.0, 65.0
 WALL = 2.5
 SKIN = 0.55
@@ -65,7 +67,8 @@ NOTCH_H = 7.0
 # X. No notch size and no physical position changed; only the sign is fixed.
 #   MikroTik (shell +X): five LAN notches under its measured RJ45 columns.
 #   Tenda switch (shell -X): five cable notches under its 68.8mm service slot.
-RJ45_X = [90.5, 76.5, 62.5, 48.5, 34.5, -53.0, -69.0, -85.0, -101.0, -117.0]
+MIKROTIK_LAN_X = [90.5, 76.5, 62.5, 48.5, 34.5]
+RJ45_X = MIKROTIK_LAN_X + list(INTERFACE.poe_cable_notch_x())
 # Dedicated cable-route centreline. It matches BottomLid's 10mm pass-through,
 # which sits at shell X=-10 once that plate is turned over.
 POWER_CABLE_X = -10.0
@@ -145,14 +148,6 @@ def build(comp):
     for rx in RJ45_X:
         notch(rx, HOLE_D)
     notch(POWER_CABLE_X, PWR_D)
-
-    # ALARM HORN sound window: the same slots the BottomLid carries, so the
-    # two line up once the cover is slid home.  Without this the sound would
-    # only reach the 65mm hood cavity and stop there.
-    for gz0, gz1 in INTERFACE.horn_grille_slots():
-        cy = (gz0 + gz1) / 2.0 - COVER_Y_TO_SHELL_Z
-        box(comp, INTERFACE.HORN_GRILLE_CX, cy, -1.0,
-            INTERFACE.HORN_GRILLE_W, gz1 - gz0, WALL + 2.0, CUT, [front])
 
     # Top wall and its tolerant locating tongue.
     box(comp, 0, HEIGHT / 2.0 - WALL / 2.0, 0, LEN, WALL, DEPTH, JOIN, [front])

@@ -51,16 +51,19 @@ INTERFACE = _load_shared_interface()
 PW, PH, PT = 280.0, 80.0, 3.0                # plate = full front face: width x TUB HEIGHT x thickness
 # BottomLid is X-mirrored when mounted on the tub: local +X is physical
 # shell -X.  Keep this source datum so the switch remains at shell X=-85.
-SW_CX = 85.0
+# Local +X is physical shell -X, so the switch's shell position is negated
+# here.  It moved inboard for barrel-plug clearance; taking it from the shared
+# contract is what keeps this slot on the real switch.
+SW_CX = -INTERFACE.POE_CX
 MIK_X0 = -135.0                              # MikroTik port-face left edge in lid coordinates
 BASE = 6.5                                   # device base height -> port Y = BASE + measured_z
 # Confirmed PoE switch: its port face is 82mm wide x 23mm high; it is 52mm
 # deep inside the tub.  Francis measured 6.6mm side lands, so the printed
 # slot is the exact 68.8mm (= 82 - 2*6.6) rather than five guessed RJ45 cuts.
-SW_W, SW_D, SW_H = 82.0, 52.0, 23.0
-SW_PORT_SIDE_LAND = 6.6
-SW_PORT_W, SW_PORT_H = SW_W - 2.0 * SW_PORT_SIDE_LAND, 11.5
-SW_PORT_FROM_BOTTOM = 3.2
+SW_W, SW_D, SW_H = INTERFACE.POE_W, INTERFACE.POE_D, INTERFACE.POE_H
+SW_PORT_SIDE_LAND = INTERFACE.POE_PORT_SIDE_LAND
+SW_PORT_W, SW_PORT_H = INTERFACE.POE_PORT_W, INTERFACE.POE_PORT_H
+SW_PORT_FROM_BOTTOM = INTERFACE.POE_PORT_FROM_BOTTOM
 SW_PORT_CY = BASE + SW_PORT_FROM_BOTTOM + SW_PORT_H / 2.0
 # Dedicated power-cable route only.  It shares the CurvedLid power-notch
 # centreline; the router, switch, RJ45, jack and other measured port openings
@@ -154,6 +157,9 @@ def frame_grip(comp, plate, xl, xr, yb, yt, depth, wt):
 
 
 def build(comp):
+    # The land above the switch is intentionally BLANK. A slotted alarm-horn
+    # window was cut here and then removed at the owner's request: the siren is
+    # loud enough that plastic will not muffle it, so the panel stays closed.
     plate = box(comp, 0, PH / 2, 0, PW, PH, PT, NEW).bodies.item(0)
     plate.name = 'FIR Bottom Lid (flat port face)'
     fillet_vertical(comp, plate, 6.0)
@@ -176,15 +182,6 @@ def build(comp):
     # The opening is 68.8 x 11.5mm (approximately the requested 69 x 11.5),
     # centred in the 82mm switch face and 3.2mm above its lower edge.
     hole(SW_CX, SW_PORT_CY, 'r', SW_PORT_W, SW_PORT_H)
-    # ---- ALARM HORN sound window (switch side) ----
-    # The horn lies on the tub floor behind the switch with its mouth facing
-    # this plate, so this is the on-axis way out for the sound.  Slots, not one
-    # hole: they keep the plate stiff and stop things being poked in.  Local X
-    # is mirrored, so the shell-side window centre becomes -HORN_GRILLE_CX.
-    for gz0, gz1 in INTERFACE.horn_grille_slots():
-        hole(-INTERFACE.HORN_GRILLE_CX, (gz0 + gz1) / 2.0, 'r',
-             INTERFACE.HORN_GRILLE_W, gz1 - gz0)
-
     # ---- POWER section (centre) ----
     hole(-8, BASE + 18, 'r', 19, 13)                     # power switch (rocker)
     hole(-3, BASE + 8, 'c', 7.0, 0)                      # power jack  - moved LEFT below the switch, clear of the PoE support
