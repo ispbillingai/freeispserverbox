@@ -714,7 +714,7 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v31', any('v31' in m for m in msgs))
+    c.check('FIR_Shell popup states v32', any('v32' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -723,7 +723,7 @@ def check_tree(root, label):
 
     # tub: one 12x12 boss and one horizontal pilot per wall per row
     pilots = [s for s in tub.solids('cut', 'circle', 'yZ')
-              if near(s.shape[2], interface.M3_BOSS_PILOT_D / 2.0)]
+              if near(s.shape[2], interface.CAP_BOSS_PILOT_D / 2.0)]
     ok_rows = []
     for sy in rows:
         for wall in (-137.0, 137.0):
@@ -736,7 +736,7 @@ def check_tree(root, label):
             'rows {}'.format(rows))
     c.check('tub: no back-wall cap screws remain',
             not [s for s in tub.solids('cut', 'circle', 'xZ')
-                 if near(s.shape[2], interface.M3_BOSS_PILOT_D / 2.0)
+                 if near(s.shape[2], interface.CAP_BOSS_PILOT_D / 2.0)
                  and s.a0 < -130.0 and near(s.shape[1], z72)])
     c.check('tub: keyholes removed',
             not [s for s in tub.solids('cut', 'circle', 'xZ')
@@ -845,11 +845,23 @@ def check_tree(root, label):
             'assembled Z{:.0f}, seat face |X|143, pad to |X|{:.1f}'
             .format(z72, 143.0 + interface.CAP_SEAT_PAD_H))
 
+    # 18 Aug review additions on the cap: lead-in chamfer (3 wedge cuts) and
+    # the engraved, mirror-safe front arrow in the roof's inner face
+    chamfers = [s for s in cap.solids('cut', 'poly')
+                if s.plane in ('xZ', 'yZ')]
+    arrows = [s for s in cap.solids('cut', 'poly', 'xY')]
+    c.check('cap: 3 lead-in chamfer wedges + 1 engraved front arrow',
+            len(chamfers) == 3 and len(arrows) == 1)
+    if arrows:
+        c.check('cap: arrow engraves 0.6mm, leaves {:.1f}mm of roof'
+                .format(3.0 - (3.0 - arrows[0].a0)),
+                near(arrows[0].a0, 2.4) and arrows[0].a1 > 3.0)
+
     shell_notes = '\n'.join(msgs)
     c.check('FIR_Shell: no interference notes',
             'INTERFERENCE' not in shell_notes)
-    c.check('FIR_Shell: heat-set decision is raised in the popup',
-            'HEAT_SET_INSERTS' in shell_notes or 'heat-set' in shell_notes)
+    c.check('FIR_Shell: insert decision is raised in the popup',
+            'DECISION PENDING' in shell_notes and 'insert' in shell_notes)
     c.check('FIR_Shell: wall-mount install order is stated',
             'THEN fit' in shell_notes.replace('\n', ' '))
 
@@ -858,7 +870,7 @@ def check_tree(root, label):
         world, p('FIR_BottomLid'), 'bottomlid')
     c.check('FIR_BottomLid run() completed',
             msgs and 'failed' not in msgs[-1])
-    c.check('FIR_BottomLid popup states v2', any('v2' in m for m in msgs))
+    c.check('FIR_BottomLid popup states v3', any('v3' in m for m in msgs))
     lid = body_named(lid_design, 'FIR Bottom Lid')
     lpads = [s for s in lid.solids('join', 'circle', 'xY')
              if near(s.shape[2], interface.M3_SEAT_PAD_D / 2.0)]
@@ -890,6 +902,22 @@ def check_tree(root, label):
             'the turn-over', lid_xy == sorted(
                 ((-120.0, 72.0), (-40.0, 72.0), (40.0, 72.0), (120.0, 72.0),
                  (-132.0, 44.0), (132.0, 44.0))))
+    # 18 Aug review: flush end-stop bosses (10 wide at +-COVER_LOCK_X, face
+    # exactly on the cover's inner face) and the rail-top orientation key
+    # block at lid-local -X (= shell +X, this plate is turned over)
+    stops = [s for s in lid.solids('join', 'rect', 'xY')
+             if near(s.shape[2], interface.COVER_LOCK_BOSS_W / 2.0)
+             and near(abs(s.shape[0]), interface.COVER_LOCK_X)
+             and s.a0 > 50.0]
+    c.check('BottomLid: 2 widened lock bosses end flush at Z65.5 (hard stop)',
+            len(stops) == 2 and all(near(s.a1, 65.5) for s in stops))
+    keys = [s for s in lid.solids('join', 'rect', 'xY')
+            if near(s.shape[0], -interface.COVER_RAIL_X)
+            and near(s.shape[1], 3 + interface.COVER_RAIL_H
+                     + interface.COVER_KEY_BLOCK_H / 2.0)]
+    c.check('BottomLid: orientation key block on the lid-local -X rail '
+            '(shell +X)', len(keys) == 1 and
+            near(keys[0].a1, 3.0 + interface.COVER_KEY_BLOCK_LEN))
 
     # ---------------- FIR_CurvedLid --------------------------------------
     cov_mod, cov_design, msgs = run_script(
@@ -899,14 +927,44 @@ def check_tree(root, label):
     cover = body_named(cov_design, 'FIR Lid Cover')
     seats = [s for s in cover.solids('cut', 'circle', 'xY')
              if near(s.shape[2], interface.COVER_SEAT_D / 2.0)]
-    c.check('CurvedLid: 2 dished lock-screw seats at (+-125, -31)',
+    c.check('CurvedLid: 2 dished lock-screw seats at (+-{:.0f}, -31)'
+            .format(interface.COVER_LOCK_X),
             len(seats) == 2 and
-            all(near(abs(s.shape[0]), 125.0) and near(s.shape[1], -31.0)
-                for s in seats))
+            all(near(abs(s.shape[0]), interface.COVER_LOCK_X)
+                and near(s.shape[1], -31.0) for s in seats))
     if seats:
         depth_left = 2.5 - max(s.a1 for s in seats)
         c.check('CurvedLid: {:.1f}mm of face left under the head'
                 .format(depth_left), depth_left >= 1.4)
+    # 18 Aug review: four short locator tabs, two anti-rattle nubs, and the
+    # +X channel key relief that makes a reversed cover refuse to seat
+    tabs = [s for s in cover.solids('join', 'rect', 'xY')
+            if near(s.shape[1], 38.5) and near(s.shape[3], 0.5)]
+    c.check('CurvedLid: locator tongue is now {} short tabs'
+            .format(len(interface.COVER_TAB_X)),
+            sorted(round(s.shape[0], 1) for s in tabs) ==
+            sorted(interface.COVER_TAB_X)
+            and all(near(2 * s.shape[2], interface.COVER_TAB_LEN)
+                    for s in tabs))
+    nubs = [s for s in cover.solids('join', 'rect', 'xY')
+            if near(2 * s.shape[3],
+                    interface.COVER_RAIL_CLR + interface.COVER_NUB_PROUD)]
+    c.check('CurvedLid: 2 anti-rattle nubs biting {:.2f}mm into the rails'
+            .format(interface.COVER_NUB_PROUD),
+            len(nubs) == 2 and
+            sorted(round(s.shape[0], 1) for s in nubs) ==
+            [-interface.COVER_RAIL_X, interface.COVER_RAIL_X])
+    relief = [s for s in cover.solids('cut', 'rect', 'xY')
+              if near(s.shape[0], interface.COVER_RAIL_X)
+              and s.a0 > 40.0]
+    web_tip_shell_y = 205.0 - (63.0 - interface.COVER_KEY_RELIEF_LEN)
+    block_end_shell_y = 140.0 + interface.COVER_KEY_BLOCK_LEN
+    c.check('CurvedLid: key relief on the +X channel only; relieved web '
+            'clears the block by {:.1f}mm, a REVERSED cover hits it'
+            .format(web_tip_shell_y - block_end_shell_y),
+            len(relief) == 1
+            and web_tip_shell_y - block_end_shell_y >= 1.5
+            and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
     # ---------------- FIR_WallPlate --------------------------------------
     wp_mod, wp_design, msgs = run_script(
@@ -966,6 +1024,16 @@ def check_tree(root, label):
                          - interface.WALL_SCREW_HEAD_DEPTH)
                     for s in wpockets))
 
+    # ---------------- FIR_FitCoupons -------------------------------------
+    fc_mod, fc_design, msgs = run_script(
+        world, p('FIR_FitCoupons'), 'fitcoupons')
+    c.check('FIR_FitCoupons run() completed',
+            msgs and 'failed' not in msgs[-1])
+    coupon_names = [b.name for b in fc_design.rootComponent.bodies_list]
+    c.check('FitCoupons: all 6 coupon bodies built',
+            sum(1 for n in coupon_names if n.startswith('COUPON')) == 6,
+            '; '.join(sorted(coupon_names)))
+
     # ---------------- FIR_ShellCheck, both modes -------------------------
     for shells_only in (True, False):
         def tweak(mod, so=shells_only):
@@ -974,6 +1042,11 @@ def check_tree(root, label):
             # printable bodies.  Exercise optional marker geometry in the
             # full all-up run, where it cannot be confused with print parts.
             mod.SHOW_SCREW_MARKERS = not so
+            # and exercise the opaque owner-review mode on the FULL pass,
+            # where marker hardware is expected anyway - the default shells
+            # view must stay exactly the five printable bodies
+            if not so and hasattr(mod, 'PRESENTATION'):
+                mod.PRESENTATION = True
         try:
             chk_mod, chk_design, msgs = run_script(
                 world, p('FIR_ShellCheck'), 'shellcheck', tweak)

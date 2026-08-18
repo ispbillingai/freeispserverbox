@@ -75,16 +75,21 @@ POWER_CABLE_X = -10.0
 
 # The rails guide the cover. The two front M3 screws are the positive lock;
 # there is no pretend snap/detent feature in this part.
-CLR = 0.4
-RAIL_X = 133.0
+# The slide interface (rail position, the ONE clearance value, the key and
+# the anti-rattle nubs) is shared contract data: a reviewer caught this file
+# declaring CLR=0.4 while hard-coding 0.3 in the rail maths - two competing
+# values for one physical gap.  Now there is exactly one, in FIR_Interface.
+CLR = INTERFACE.COVER_RAIL_CLR
+RAIL_X = INTERFACE.COVER_RAIL_X
 SHELF_TOP_Y = -HEIGHT / 2.0
-RAIL_TOP_Y = SHELF_TOP_Y + 5.0
+RAIL_TOP_Y = SHELF_TOP_Y + INTERFACE.COVER_RAIL_H
 TZ0, TZ1 = WALL, DEPTH - 2.0
 
-# BottomLid groove: 250.0mm long x 1.6mm wide x 1.0mm deep. The tongue is
-# only a locator, so it deliberately leaves 0.5mm at each X end and 0.3mm
-# at the groove root for a printable slide.
-TONGUE_LEN, TONGUE_W, TONGUE_D = 249.0, 1.0, 0.7
+# BottomLid groove: 250.0mm long x 1.6mm wide x 1.0mm deep. The locator used
+# to be one continuous 249mm tongue; over that length FDM shrink/bow can jam
+# a 0.3mm slide, so it is now three short tabs on the same line (reviewer
+# agreed).  Same width, depth and clearances.
+TONGUE_W, TONGUE_D = 1.0, 0.7
 
 CM = 0.1
 
@@ -98,8 +103,10 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v2: the 2 lock screws sit in visible 10mm dished seats '
-           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v3: ONE shared rail clearance ({}mm, the 0.4-vs-0.3 conflict is dead), '
+           'tongue split into 3 tabs, anti-rattle nubs, and the +X channel key '
+           'relief so a reversed cover refuses to seat / interface {}'
+           .format(INTERFACE.COVER_RAIL_CLR, INTERFACE.INTERFACE_VERSION))
 
 
 def _ext(comp, prof, z0, sz, op, parts):
@@ -152,26 +159,43 @@ def build(comp):
         notch(rx, HOLE_D)
     notch(POWER_CABLE_X, PWR_D)
 
-    # Top wall and its tolerant locating tongue.
+    # Top wall and its tolerant locating tabs (three short, not one long).
     box(comp, 0, HEIGHT / 2.0 - WALL / 2.0, 0, LEN, WALL, DEPTH, JOIN, [front])
-    box(comp, 0, 38.5, DEPTH, TONGUE_LEN, TONGUE_W, TONGUE_D, JOIN, [front])
+    for tx in INTERFACE.COVER_TAB_X:
+        box(comp, tx, 38.5, DEPTH, INTERFACE.COVER_TAB_LEN, TONGUE_W,
+            TONGUE_D, JOIN, [front])
 
     # Two end walls run back from the front face.
     for sx in (-LEN / 2.0 + WALL / 2.0, LEN / 2.0 - WALL / 2.0):
         box(comp, sx, 0, 0, WALL, HEIGHT, DEPTH, JOIN, [front])
 
-    # Sliding inverted-U rail guides: 0.3mm side/top clearance on each rail.
-    half = 2.0 + 0.3
-    rib_w = 1.6
-    rib_cy = (SHELF_TOP_Y + RAIL_TOP_Y + 0.3) / 2.0
-    rib_h = (RAIL_TOP_Y + 0.3) - SHELF_TOP_Y
+    # Sliding inverted-U rail guides: CLR side/top clearance on each rail.
+    half = INTERFACE.COVER_RAIL_W / 2.0 + CLR
+    rib_w = INTERFACE.COVER_CHANNEL_RIB_W
+    rib_cy = (SHELF_TOP_Y + RAIL_TOP_Y + CLR) / 2.0
+    rib_h = (RAIL_TOP_Y + CLR) - SHELF_TOP_Y
+    web_cy = RAIL_TOP_Y + CLR + 1.5
     for side in (-1, 1):
         sx = side * RAIL_X
-        box(comp, sx, RAIL_TOP_Y + 1.8, TZ0, 2.0 * (half + rib_w),
+        box(comp, sx, web_cy, TZ0, 2.0 * (half + rib_w),
             3.0, TZ1 - TZ0, JOIN, [front])
         for off in (-(half + rib_w / 2.0), half + rib_w / 2.0):
             box(comp, sx + off, rib_cy, TZ0, rib_w, rib_h, TZ1 - TZ0,
                 JOIN, [front])
+        # Anti-rattle nub under the web: 0.15mm bite into the rail top over
+        # 5mm, engaging only near full seat so the slide stays free.  The +X
+        # nub sits below the key relief so the relief cannot delete it.
+        nub_z0 = 46.0 if side > 0 else 57.0
+        nub_h = CLR + INTERFACE.COVER_NUB_PROUD
+        box(comp, sx, RAIL_TOP_Y + (CLR - INTERFACE.COVER_NUB_PROUD) / 2.0,
+            nub_z0, 6.0, nub_h, INTERFACE.COVER_NUB_LEN, JOIN, [front])
+    # ORIENTATION KEY relief: shorten the +shell-X channel web at its tub end
+    # so it clears the BottomLid's key block.  A reversed cover presents its
+    # UNrelieved web to the block and stops ~7mm proud with the lock seats
+    # visibly open - the part refuses to assemble backwards.
+    box(comp, RAIL_X, web_cy + 0.1, TZ1 - INTERFACE.COVER_KEY_RELIEF_LEN,
+        2.0 * (half + rib_w) + 0.4, 3.4,
+        INTERFACE.COVER_KEY_RELIEF_LEN + 1.0, CUT, [front])
 
     # Slide fully home, then drive two M3 screws through the front face into
     # the BottomLid shelf bosses.  These are the outermost screws on the whole
@@ -179,7 +203,7 @@ def build(comp):
     # 1.0mm into the face (this part prints FACE-DOWN, so a proud pad would
     # lift it off the bed - a recess is the printable version of the same
     # visual cue).  1.5mm of face is left under the head.
-    for sx in (-125, 125):
+    for sx in (-INTERFACE.COVER_LOCK_X, INTERFACE.COVER_LOCK_X):
         cyl(comp, sx, -31.0, -1.0, INTERFACE.COVER_SEAT_D,
             INTERFACE.COVER_SEAT_DEPTH + 1.0, CUT, [front])
         cyl(comp, sx, -31.0, -1.0, 3.4, WALL + 2.0, CUT, [front])

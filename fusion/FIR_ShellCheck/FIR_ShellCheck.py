@@ -130,14 +130,20 @@ SHELLS_ONLY = True
 # in the default view: ShellCheck's normal mode is deliberately the five
 # printable shells only.
 SHOW_SCREW_MARKERS = False
+# PRESENTATION mode (18 Aug two-AI review, D6): every shell fully OPAQUE plus
+# the fastener marker pins drawn solid in place.  The transparent inspection
+# view turns attached features (seat pads, the cleat bar, the wall plate)
+# into what look like floating ghosts - that view is for interference
+# checking; THIS one is what the owner should render and react to.  Combine
+# with CAP_LIFT / COVER_TRAVEL above for an exploded view.
+PRESENTATION = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v42: clean five-shell wall-mount inspection - tub, '
-                 'deep cap, BottomLid, CurvedLid, WALL PLATE) with every outside screw '
-                 'in a visible seat. All 8 cap screws are on the side walls now; the '
-                 'keyholes are gone. The printed plate mates to the tub cleat; its two '
-                 'M4 floor-lock holes are in the real parts, not shown as floating screws. '
-                 'SHELLS_ONLY=False restores the internals; SHOW_SCREW_MARKERS=True '
-                 'adds the fastener marker pins.')
+CHECK_VERSION = ('v43: PRESENTATION=True gives an opaque, fastener-marked review view '
+                 '(transparent stays for interference only). Five printed shells - tub, '
+                 'deep cap, BottomLid, CurvedLid, WALL PLATE - with every outside screw '
+                 'in a visible seat. All 8 cap screws are on the side walls; the '
+                 'keyholes are gone. SHELLS_ONLY=False restores the internals; '
+                 'SHOW_SCREW_MARKERS=True adds the fastener marker pins.')
 # ---- 951 measured ports (x from left edge, z from base) ----
 MPORTS = [('c', 11, 15, 6.5, 0), ('c', 19, 10, 2.5, 0), ('r', 25, 9.5, 4, 3), ('r', 33, 9.5, 4, 3),
           ('r', 44.5, 16, 13.5, 12.5), ('r', 58.5, 16, 13.5, 12.5), ('r', 72.5, 16, 13.5, 12.5),
@@ -230,6 +236,10 @@ def yport(comp, body, cx, cz, kind, a, b, y_face, span):
 
 
 def set_opacity(body, o):
+    # PRESENTATION forces every body solid: transparency is for interference
+    # hunting, and it is exactly what made attached features read as floating.
+    if PRESENTATION:
+        o = 1.0
     try:
         body.opacity = o
     except Exception as e:
@@ -799,7 +809,7 @@ def build_screw_markers(comp):
         body = cyl_y(comp, bx, bz, FRONT_Y + 2.0, 3.0, 22.0, NEW).bodies.item(0)
         body.name = CHECK_PREFIX + ' BottomLid screw M3 (X{}, Z{})'.format(bx, bz)
         set_opacity(body, 0.85)
-    for sx in (-125.0, 125.0):                  # 2 CurvedLid lock screws
+    for sx in (-INTERFACE.COVER_LOCK_X, INTERFACE.COVER_LOCK_X):   # 2 CurvedLid lock screws
         body = cyl_y(comp, sx, 12.0, 206.0, 3.0, 22.0, NEW).bodies.item(0)
         body.name = CHECK_PREFIX + ' CurvedLid lock screw M3 (X{:.0f})'.format(sx)
         set_opacity(body, 0.85)
@@ -943,7 +953,7 @@ def run(context):
             build_cable_paths(comp, brain)
             if SHOW_DRIVER_ACCESS:
                 build_driver_access(comp, brain)
-        if SHOW_SCREW_MARKERS:
+        if SHOW_SCREW_MARKERS or PRESENTATION:
             build_screw_markers(comp)
         app.activeViewport.fit()
         built = ('the five printed shells ONLY (tub, deep cap, BottomLid, CurvedLid, '

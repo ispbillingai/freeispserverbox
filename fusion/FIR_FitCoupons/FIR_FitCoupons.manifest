@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Fit-test coupon pairs for the FreeISP box: cap/tub perimeter ring, cap wall section with detent + seated screw, and the BottomLid/CurvedLid rail-lock slice with the orientation key. Print and pass these before any full 280mm part."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

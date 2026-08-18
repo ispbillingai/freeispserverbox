@@ -258,6 +258,42 @@ def poly_x(comp, pts_yz, xcenter, span, op, parts=None):
     return f.add(ei)
 
 
+def poly_y(comp, pts_xz, ycenter, span, op, parts=None):
+    # closed polygon on the xZ plane (points are (x, z) mm), extruded along Y
+    # symmetric about ycenter - used for the skirt lead-in chamfer wedges.
+    sk = comp.sketches.add(comp.xZConstructionPlane)
+    lines = sk.sketchCurves.sketchLines
+    n = len(pts_xz)
+    for i in range(n):
+        x0, z0 = pts_xz[i]
+        x1, z1 = pts_xz[(i + 1) % n]
+        lines.addByTwoPoints(adsk.core.Point3D.create(mm(x0), mm(z0), 0),
+                             adsk.core.Point3D.create(mm(x1), mm(z1), 0))
+    f = comp.features.extrudeFeatures
+    ei = f.createInput(sk.profiles.item(0), op)
+    if abs(ycenter) > 1e-9:
+        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
+            adsk.core.ValueInput.createByReal(mm(ycenter)))
+    ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
+    if parts:
+        ei.participantBodies = parts
+    return f.add(ei)
+
+
+def poly_z(comp, pts_xy, z0, sz, op, parts=None):
+    # closed polygon on the xY plane, extruded along Z - used for the engraved
+    # front arrow (a triangle survives the assembly mirror; text would not).
+    sk = comp.sketches.add(comp.xYConstructionPlane)
+    lines = sk.sketchCurves.sketchLines
+    n = len(pts_xy)
+    for i in range(n):
+        x0, y0 = pts_xy[i]
+        x1, y1 = pts_xy[(i + 1) % n]
+        lines.addByTwoPoints(adsk.core.Point3D.create(mm(x0), mm(y0), 0),
+                             adsk.core.Point3D.create(mm(x1), mm(y1), 0))
+    return _ext(comp, sk.profiles.item(0), z0, sz, op, parts)
+
+
 def fillet_corners(comp, body, r, cx=0.0, half=None, back_only=False):
     # round ONLY the 4 outer vertical corners (at cx+-half in X, +-half in Y). Call AFTER the
     # walls/skirt so the FULL-HEIGHT corner is rounded, not just the base plate. cx/half let it
@@ -300,7 +336,7 @@ def build_lid_seat(comp, sh):
         bw = 10 if abs(bx) == 132 else 9
         box(comp, bx, FRONT_Y - 4.5, bz - 4, bw, 9, 8, JOIN, [sh])      # boss block behind the lid
         cyl_y(comp, bx, bz, FRONT_Y - 4.5,
-              INTERFACE.M3_BOSS_PILOT_D, 16, CUT, [sh])                 # pilot (self-tap or insert bore)
+              INTERFACE.BOTTOM_LID_BOSS_PILOT_D, 16, CUT, [sh])         # pilot (self-tap or insert bore)
     return
 
 
@@ -587,7 +623,7 @@ def build(comp):
         for sy in CAP_SIDE_SCREW_Y:
             box(comp, sx - s * 6, sy, BOX_H - 14, 12, 12, 12, JOIN, [sh])     # boss block on the wall inner
             cyl_x(comp, sy, CAP_SCREW_Z, sx,
-                  INTERFACE.M3_BOSS_PILOT_D, 30, CUT, [sh])                   # HORIZONTAL X pilot
+                  INTERFACE.CAP_BOSS_PILOT_D, 30, CUT, [sh])                  # HORIZONTAL X pilot
 
     # ================= SELF-CLICK DETENTS (cap snaps onto the tub) =================
     # Stepped bumps on the OUTER wall faces: the descending cap skirt flexes
@@ -614,12 +650,14 @@ def build(comp):
 
     # ===== seat + bolt the integrated BOTTOM LID into the front opening =====
     build_lid_seat(comp, sh)
-    if not INTERFACE.HEAT_SET_INSERTS:
+    if not (INTERFACE.CAP_BOSS_INSERTS and INTERFACE.COVER_LOCK_INSERTS):
         SKIPPED.append(
-            'DECISION PENDING: all lid/cap screws are M3 self-tappers into 2.6mm '
-            'printed pilots. A lid opened many times will strip PETG; brass M3 '
-            'heat-set inserts are the durable answer. Flip HEAT_SET_INSERTS in '
-            'FIR_Interface.py to convert every boss to the 4.0mm insert bore.')
+            'DECISION PENDING: the often-opened closures (8 cap screws, 2 cover '
+            'locks) are M3 self-tappers into 2.6mm printed pilots; repeated '
+            'opening strips PETG. Agreed plan: brass inserts for those two '
+            'closures only (flip CAP_BOSS_INSERTS / COVER_LOCK_INSERTS in '
+            'FIR_Interface.py AFTER setting M3_INSERT_BORE_D from the bought '
+            'insert\'s datasheet). BottomLid stays self-tap.')
     return sh
 
 
@@ -863,6 +901,28 @@ def build_top_lid(comp, ox):
             cyl_x(comp, byy, LH - 4, ox + sxs * (inner / 2 + 1.5), 3.4, 6, CUT, [lid])
             cyl_x(comp, byy, LH - 4, ox + sxs * (LW / 2 + pad_h),
                   INTERFACE.M3_SEAT_CBORE_D, 2 * pad_h, CUT, [lid])    # head counterbore
+    # LEAD-IN CHAMFER (18 Aug review): a 1.2mm 45-degree bevel on the skirt's
+    # lower inner edge - print z = 3+LH is the skirt's top face roof-down,
+    # which is the edge that meets the tub rim first at assembly.  The 0.5mm
+    # per-side slide fit starts itself instead of biting the rim.  Two side
+    # walls + the back (the front wall does not reach this height); the wedge
+    # runs the full span, so the corners get the same bevel.
+    ch = INTERFACE.CAP_LEADIN_CH
+    top = 3.0 + LH
+    for sxs in (-1, 1):
+        poly_y(comp, ((ox + sxs * inner / 2, top),
+                      (ox + sxs * (inner / 2 + ch), top),
+                      (ox + sxs * inner / 2, top - ch)),
+               0.0, inner + 4, CUT, [lid])
+    poly_x(comp, ((-(inner / 2), top),
+                  (-(inner / 2 + ch), top),
+                  (-(inner / 2), top - ch)),
+           ox, inner + 4, CUT, [lid])
+    # FRONT ARROW, engraved 0.6mm into the roof's INNER face (print z3, up in
+    # print).  A triangle survives the left/right assembly flip that would
+    # mirror any text; it always points at the short front wall.
+    poly_z(comp, ((ox, 126.0), (ox - 7.0, 112.0), (ox + 7.0, 112.0)),
+           2.4, 1.0, CUT, [lid])
     # SELF-CLICK windows: through-cuts in the skirt that swallow the tub's
     # detent bumps at full seat.  Assembled Z70..76.5 -> print z 43.5..50.
     # All positions are symmetric, so the assembly flip cannot misplace them.
@@ -880,9 +940,10 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v31: every cap screw sits in a VISIBLE 12mm counterbored pad (8 total, '
-           'four per side wall - the undrivable back pair moved to Y-118); keyholes '
-           'replaced by the FIR WALL PLATE cleat bar + two in-box M4 floor locks '
+VERSION = ('v32: cap gets a 1.2mm lead-in chamfer on the skirt inner edge and an '
+           'engraved front arrow inside the roof (18 Aug review); every cap screw '
+           'in a visible 12mm counterbored pad, 4 per side wall; wall mount = '
+           'FIR WALL PLATE cleat + two in-box M4 floor locks '
            '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 

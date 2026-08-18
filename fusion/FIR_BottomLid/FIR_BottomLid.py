@@ -79,8 +79,9 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v2: all 6 face screws sit in visible 12mm counterbored pads '
-           '(head land 0.8 -> 1.9mm) / interface {}'
+VERSION = ('v3: cover gets a HARD end stop (flush lock bosses) + the rail-top '
+           'orientation key block; rails now derive from the shared contract; '
+           '6 face screws in visible counterbored pads / interface {}'
            .format(INTERFACE.INTERFACE_VERSION))
 
 
@@ -223,15 +224,32 @@ def build(comp):
     # ===== STEP 1: 65mm horizontal SHELF sticking OUT from the bottom-OUTSIDE, full length =====
     box(comp, 0, 1.5, PT, PW, 3, 65, JOIN, [plate])           # Y 0-3 (bottom), out 65mm
     # ===== RAILS the curved cover slides onto + clips down to (run along Z = the slide dir) =====
-    # 5mm tall on the shelf top (Y 3-8), X=±133, Z 3-65; the cover's cap hooks over these.
-    for rx in (-133, 133):
-        box(comp, rx, 5.5, PT, 4, 5, 62, JOIN, [plate])       # rail: X±133, Y3-8, Z3-65 (slide guide)
+    # Rail position/size and the one slide clearance are shared contract data
+    # now - the cover's channels and the fit coupons derive from the same
+    # numbers, so the two parts can no longer disagree about this interface.
+    rail_x = INTERFACE.COVER_RAIL_X
+    for rx in (-rail_x, rail_x):
+        box(comp, rx, 3 + INTERFACE.COVER_RAIL_H / 2.0, PT,
+            INTERFACE.COVER_RAIL_W, INTERFACE.COVER_RAIL_H, 62,
+            JOIN, [plate])                                    # rail: Y3-8, Z3-65 (slide guide)
+    # ORIENTATION KEY block, on top of the rail at lid-local -X = SHELL +X
+    # (this plate is turned over on assembly).  The RIGHT cover's relieved
+    # channel web stops 2.5mm short of it; a REVERSED cover's unrelieved web
+    # hits it and stands ~7mm proud - backwards assembly refuses itself.
+    box(comp, -rail_x, 3 + INTERFACE.COVER_RAIL_H
+        + INTERFACE.COVER_KEY_BLOCK_H / 2.0, PT,
+        INTERFACE.COVER_RAIL_W, INTERFACE.COVER_KEY_BLOCK_H,
+        INTERFACE.COVER_KEY_BLOCK_LEN, JOIN, [plate])
     # LOCK SCREWS: cover slides on, then 2 screws hold it CLOSED -> minimal screw bosses at the shelf front
-    for sx in (-125, 125):
-        # boss stops at z65 = 0.5 clear of the cover's INNER face (65.5); 11 deep it poked 2.5mm
-        # THROUGH the cover front wall and the cover could not close
-        box(comp, sx, 9.5, PT + 54, 7, 13, 8, JOIN, [plate])  # SMALL boss, just enough around the screw
-        cyl(comp, sx, 12, PT + 54, INTERFACE.M3_BOSS_PILOT_D, 8,
+    for sx in (-INTERFACE.COVER_LOCK_X, INTERFACE.COVER_LOCK_X):
+        # Boss face at z65.5 = flush contact with the cover's inner face:
+        # this is the cover's HARD END STOP, and the two lock screws clamp
+        # the cover against it (18 Aug review - there was no defined stop).
+        # 10mm wide and at X+-122 (was 7 wide at +-125): a boss that can one
+        # day take a brass insert, clear of the cover channel rib at 129.1.
+        box(comp, sx, 9.5, PT + 54, INTERFACE.COVER_LOCK_BOSS_W, 13, 8.5,
+            JOIN, [plate])                                    # boss = end stop
+        cyl(comp, sx, 12, PT + 54, INTERFACE.COVER_LOCK_BOSS_PILOT_D, 8,
             CUT, [plate])                                     # pilot (self-tap or insert bore)
     # ===== TOP GROOVE: build OUT 3mm at the top (lid top now meets cover top) + a 1mm channel =====
     box(comp, 0, PH + 1.5, 0, PW, 3, PT, JOIN, [plate])       # extend lid top UP 3mm -> Y 80-83

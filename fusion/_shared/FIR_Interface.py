@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-17.11'
+INTERFACE_VERSION = '2026-08-18.12'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -168,17 +168,70 @@ LID_SEAT_CBORE_DEPTH = 2.6        # from pad top -> 1.9mm land in the 3mm plate
 COVER_SEAT_D = 10.0
 COVER_SEAT_DEPTH = 1.0            # leaves 1.5mm of the 2.5mm cover face
 # Repeat-opening screws thread into printed plastic today.  Brass M3 heat-set
-# inserts are the durable answer for a lid that will be opened many times;
-# that is an OWNER DECISION not yet taken.  Flipping this one flag converts
-# every tub/lid boss pilot from a 2.6mm self-tap to the 4.0mm insert bore.
-HEAT_SET_INSERTS = False
-M3_BOSS_PILOT_D = 4.0 if HEAT_SET_INSERTS else 2.6
+# inserts are the durable answer for lids opened many times; that is an OWNER
+# DECISION not yet taken.  Per the 18 Aug two-AI review the conversion is
+# PER CLOSURE, not global: the cap and the cover lock open often (insert
+# candidates), the BottomLid rarely (self-tap stays fine).  Flip a closure's
+# flag once Francis buys inserts - and set M3_INSERT_BORE_D from the actual
+# insert's datasheet FIRST; 4.0 is a typical value, not a chosen one.
+M3_SELF_TAP_PILOT_D = 2.6
+M3_INSERT_BORE_D = 4.0            # PLACEHOLDER until a real insert is bought
+CAP_BOSS_INSERTS = False
+COVER_LOCK_INSERTS = False
+BOTTOM_LID_INSERTS = False
+CAP_BOSS_PILOT_D = M3_INSERT_BORE_D if CAP_BOSS_INSERTS else M3_SELF_TAP_PILOT_D
+COVER_LOCK_BOSS_PILOT_D = (M3_INSERT_BORE_D if COVER_LOCK_INSERTS
+                           else M3_SELF_TAP_PILOT_D)
+BOTTOM_LID_BOSS_PILOT_D = (M3_INSERT_BORE_D if BOTTOM_LID_INSERTS
+                           else M3_SELF_TAP_PILOT_D)
+# The cover-lock boss was 7mm wide - fine around a 2.6 self-tap pilot, far
+# too narrow to ever take a brass insert.  It is now 10mm wide, which forced
+# the lock screws inboard from X+-125 to X+-122 so the boss clears the
+# cover's channel rib (inner face at 129.1) with 2.1mm of air.
+COVER_LOCK_X = 122.0
+COVER_LOCK_BOSS_W = 10.0
 # Cap fastening: EIGHT horizontal M3 at Z72, now ALL through the side walls.
 # The old back pair at X=+-115 could not be driven with the box hanging on a
 # wall (8mm of air behind it), so it moved to the side walls at Y=-118 - the
 # back edge is held by its two snap detents plus these corner-adjacent screws.
 CAP_SCREW_Z = 72.0
 CAP_SIDE_SCREW_Y = (-118.0, -75.0, 0.0, 75.0)
+# Lead-in: a 45-degree chamfer on the skirt's lower inner edge (two sides +
+# back) so the 0.5mm-per-side slide fit starts itself instead of biting the
+# tub rim.  Agreed in the 18 Aug two-AI design review.
+CAP_LEADIN_CH = 1.2
+
+# ---------------------------------------------------------------------------
+# CurvedLid <-> BottomLid slide interface (18 Aug 2026 two-AI review)
+# ---------------------------------------------------------------------------
+# These numbers were hand-duplicated between FIR_BottomLid (rails) and
+# FIR_CurvedLid (channels) - the same disease that broke the switch position
+# once.  Now both derive from here, as do the fit-test coupons.
+#   COVER_RAIL_CLR is the ONE slide clearance (the old scripts declared
+#   CLR=0.4 and then hard-coded 0.3 - a real reviewer catch).
+COVER_RAIL_X = 133.0              # rail centres, +- in BottomLid local X
+COVER_RAIL_W = 4.0
+COVER_RAIL_H = 5.0
+COVER_RAIL_CLR = 0.3              # side/top guide clearance per face
+COVER_CHANNEL_RIB_W = 1.6
+# Anti-rattle: one nub under each channel web presses 0.15mm into the rail
+# top, engaging only over the last ~5mm of travel so the slide stays free.
+COVER_NUB_PROUD = 0.15
+COVER_NUB_LEN = 5.0
+# Locator tongue, split into four short tabs (a 249mm continuous tongue
+# bows/shrinks on FDM and can jam; four 25mm tabs is the agreed answer).
+COVER_TAB_X = (-90.0, -30.0, 30.0, 90.0)
+COVER_TAB_LEN = 25.0
+# ORIENTATION KEY: a block on top of the BottomLid rail that is at SHELL +X
+# (lid-local -X, because the lid is turned over), plus a matching relief cut
+# in the cover's shell +X channel web.  Correct cover: the relieved web stops
+# 1.5mm short of the block.  Reversed cover: the unrelieved web hits the
+# block and the cover stands ~7mm proud with its lock seats visibly open.
+# Wordless, mirror-proof, and cheaper than trusting labels through three
+# different assembly flips.
+COVER_KEY_BLOCK_H = 2.5           # on the rail top
+COVER_KEY_BLOCK_LEN = 9.0         # from the lid plate face
+COVER_KEY_RELIEF_LEN = 9.5        # web shortened by this at the tub end
 
 # ---------------------------------------------------------------------------
 # Wall mounting: printed wall plate + French cleat (replaces the keyholes)
@@ -511,8 +564,33 @@ def validate():
                       .format(lid_land))
     if COVER_SEAT_DEPTH > 1.2:
         errors.append('cover seat recess cuts too deep into the 2.5mm face')
-    if M3_BOSS_PILOT_D not in (2.6, 4.0):
-        errors.append('M3 boss pilot must be 2.6 (self-tap) or 4.0 (heat-set insert)')
+    if not 3.8 <= M3_INSERT_BORE_D <= 4.8:
+        errors.append('M3 insert bore outside the plausible 3.8..4.8 range')
+    for name, pilot in (('cap', CAP_BOSS_PILOT_D),
+                        ('cover-lock', COVER_LOCK_BOSS_PILOT_D),
+                        ('BottomLid', BOTTOM_LID_BOSS_PILOT_D)):
+        if pilot not in (M3_SELF_TAP_PILOT_D, M3_INSERT_BORE_D):
+            errors.append('{} boss pilot is neither self-tap nor insert bore'.format(name))
+    if COVER_LOCK_BOSS_W < COVER_LOCK_BOSS_PILOT_D + 5.0:
+        errors.append('cover-lock boss too narrow around its pilot/insert')
+    # The widened boss must clear the cover channel's inner rib (X129.1).
+    if COVER_LOCK_X + COVER_LOCK_BOSS_W / 2.0 > COVER_RAIL_X - COVER_RAIL_W / 2.0 \
+            - COVER_RAIL_CLR - COVER_CHANNEL_RIB_W - 1.5:
+        errors.append('cover-lock boss runs into the cover channel rib')
+    # Cover slide interface: the nub must bite less than the guide clearance,
+    # the key relief must clear the key block when the cover is fully home
+    # (the fully-home web tip sits 2.0mm behind the lid plate face), and a
+    # reversed cover's unrelieved web must positively hit the block.
+    if not 0.0 < COVER_NUB_PROUD < COVER_RAIL_CLR:
+        errors.append('anti-rattle nub must bite less than the rail clearance')
+    if 2.0 + COVER_KEY_RELIEF_LEN - COVER_KEY_BLOCK_LEN < 1.5:
+        errors.append('cover key relief too short: the RIGHT cover would hit the block')
+    if COVER_KEY_BLOCK_H - COVER_RAIL_CLR < 1.0:
+        errors.append('cover key block too low: a REVERSED cover would ride over it')
+    if len(COVER_TAB_X) != len(set(COVER_TAB_X)):
+        errors.append('cover locator tabs are degenerate')
+    if max(COVER_TAB_X) + COVER_TAB_LEN / 2.0 > 125.0 - 8.0:
+        errors.append('a cover locator tab runs off the BottomLid groove')
     # Cap screw rows: all four on each side wall, clear of each other, of the
     # snap detents, and inside the straight wall (corner radius starts |Y|133).
     rows = sorted(CAP_SIDE_SCREW_Y)

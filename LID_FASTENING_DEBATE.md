@@ -130,9 +130,11 @@ hood's bottom notches, keeping the rain story; the two parts print flat and face
 respectively, both cleanly.
 
 **Weaknesses:** it is the most complicated region of the box — plate + shelf + rails +
-tongue + groove + clip tabs + 8 screws across two parts; most of the fit problems in
-this project's history have been here; Francis has repeatedly found it confusing, and a
-confusing assembly is a legitimate design defect, not a user error.
+tongue + groove + the BottomLid's top-edge locating tabs + 8 screws across two parts
+(correction from review: the *CurvedLid* itself has no snap/clip feature — only rails,
+locator tongue and its two screws); most of the fit problems in this project's history
+have been here; Francis has repeatedly found it confusing, and a confusing assembly is
+a legitimate design defect, not a user error.
 
 **Alternatives:** (a) **merge into one front door** — one 280 × 80 part carrying the
 port openings *and* the hood, 4–6 screws total. Loses the "service the cables without
@@ -217,3 +219,52 @@ reasoning + concrete numbers**. If you propose new geometry, state where it live
 the coordinate frame of §1 and which §2 constraint it touches. Francis then picks the
 winners, and the surviving decisions get built, verified offline, and re-rendered in
 the D6 presentation view before he looks again.
+
+---
+
+## 6. AGREEMENT RECORD — settled 18 Aug 2026, round 2 (built and verified)
+
+The reviewing AI responded twice; the following is the reconciled outcome, **already
+implemented, offline-verified (106 checks, both trees) and deployed**:
+
+1. **D1 (cap closure): AGREED as designed** — slide fit + snap-to-hold + 8 side
+   screws; snaps position, screws carry load. Added from review: a **1.2 mm 45°
+   lead-in chamfer** on the skirt's lower inner edge, and an **engraved arrow** inside
+   the roof pointing at the front (a triangle survives the assembly mirror; text
+   would not).
+2. **D2 (inserts): AGREED, selective and per-closure** — the single global flag was
+   replaced by `CAP_BOSS_INSERTS` / `COVER_LOCK_INSERTS` / `BOTTOM_LID_INSERTS`, all
+   defaulting to 2.6 mm self-tap. The cover-lock boss was **widened 7 → 10 mm** and its
+   screws moved **X ±125 → ±122** (clearing the cover channel rib at 129.1 by 2.1 mm)
+   so it can take a real insert later. Per review: `M3_INSERT_BORE_D = 4.0` is a
+   **placeholder** — set it from the bought insert's datasheet before flipping any
+   flag. *Pending Francis: buy the inserts.*
+3. **D3 (tongue): AGREED, reviewer's version** — the 249 mm tongue is replaced by
+   **four 25 mm tabs at X −90/−30/+30/+90**, same 0.3 mm clearances. The `CLR = 0.4`
+   vs hard-coded `0.3` conflict is dead: **one shared `COVER_RAIL_CLR = 0.3`** in the
+   contract now drives the BottomLid rails, the CurvedLid channels and the coupons.
+4. **D4 (cover lock): AGREED with additions** — 2 screws kept; the lock bosses now end
+   **flush at the cover's inner face = a hard end stop** the screws clamp against, and
+   each channel carries a **0.15 mm anti-rattle nub** that engages only over the last
+   5 mm of travel.
+5. **D5 (wall mount): AGREED, keep the cleat** — it is tamper-resistance, not
+   vault-grade security; its job is "cannot be removed without first opening the box",
+   which it does. Conditions adopted: wall anchors appropriate to the real wall, and a
+   **9 kg / 24 h hang test** on a printed plate before deployment (box weighs 2–3 kg).
+6. **D6 (legibility): BUILT** — `FIR_ShellCheck` now has `PRESENTATION = True`: all
+   shells opaque + solid fastener markers; combine with `CAP_LIFT` / `COVER_TRAVEL`
+   for an exploded view. Transparent stays for interference hunting only.
+7. **Orientation (C): mechanically keyed, not just labeled** — a block on the
+   BottomLid rail (shell +X) plus a matching relief in the cover's shell +X channel:
+   the correct cover clears it by 2.5 mm; a reversed cover hits it and stands ~7 mm
+   proud with its lock seats visibly open. The cap was already keyed by its short
+   front wall; the BottomLid by its asymmetric ports.
+8. **Coupons before any 280 mm print: BUILT as `FIR_FitCoupons`** — three pairs:
+   full-perimeter cap/tub fit rings (the 281/280 slide + warp test), a 70 mm cap-wall
+   section (detent click + seated screw), and a 65 mm rail-lock end slice (slide,
+   flush stop, nub click, lock screw, and the flipped-cover refusal test). Pass
+   criteria are in the script's popup. *Pending Francis: print them.*
+
+Open items after this round: buy inserts → measure → set the bore → flip the two
+flags; print the coupons; hang-test the wall plate at 9 kg/24 h; and the §6.3
+measurements from HANDOVER.md (horn foot distance, switch jack height, adapter dims).
