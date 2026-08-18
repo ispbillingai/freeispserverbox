@@ -248,10 +248,11 @@ REED_X = 15.0                     # shell X of the reed/magnet pair
 MAGNET_D = 12.1                   # measured
 MAGNET_POCKET_D = 12.05           # light press; PETG rim is 2mm - do not
                                   # tighten this without a coupon test
-MAGNET_TH = 3.0                   # ASSUMED disc thickness - measure it!
-MAGNET_TH_MEASURED = False
+MAGNET_TH = 4.7                   # measured (owner, 18 Aug)
+MAGNET_TH_MEASURED = True
+MAGNET_POCKET_DEPTH = MAGNET_TH + 0.6   # 0.6 recess keeps the press seated
 MAGNET_PAD_SQ = 16.0              # square pad on the cover's inner face
-MAGNET_PAD_H = 4.5                # proud of the 2.5 face
+MAGNET_PAD_H = 6.5                # proud of the 2.5 face (holds the 4.7 disc)
 MAGNET_CY = -31.0                 # cover-local Y of magnet centre (shell Z12)
 MAGNET_POCKET_FLOOR = 3.7         # cover-local Z: leaves 1.2mm over the
                                   # outer face - nothing shows outside
@@ -262,6 +263,36 @@ REED_SLOT_Z0 = 57.0               # BottomLid-local Z (shell Y194..197.2)
 REED_WIRE_HOLE_XY = (-15.0, 8.0)  # BottomLid-local; shell (+15, Z8), between
                                   # the router frame wall and the port row
 REED_WIRE_HOLE_D = 4.0
+
+
+# ---------------------------------------------------------------------------
+# TOP-CAP tamper sensing: second magnet + reed (owner, 18 Aug)
+# ---------------------------------------------------------------------------
+# Same D12.1 x 4.7 magnet, press-fit into a pillar hanging from the cap roof
+# at assembled (X-60, Y+125) - over the switch bay, in front of the tub's top
+# rail, clear of the brain case (Y<=77), the cradle hooks (Z<=48) and the
+# rail itself (Y134..137).  The pocket opens DOWNWARD, which prints as a
+# clean vertical bore in the roof-down cap.  The reed lies in a groove cut
+# into the rail's FRONT face; lifting the cap pulls the magnet straight up
+# and off.  Wires join the existing tub-to-cap service loop (horn lead).
+# The pillar is asymmetric in X: build_top_lid must mirror it exactly once,
+# like the brain-case bosses.
+CAP_MAGNET_X = -60.0              # assembled shell X
+CAP_MAGNET_Y = 125.0
+CAP_MAG_PILLAR_SQ = 16.0
+CAP_MAG_PILLAR_BOT_Z = 75.0       # pillar hangs from the roof (Z117) to here
+CAP_REED_GROOVE_DEPTH = 2.0       # into the 3mm rail front face (1mm left)
+CAP_REED_GROOVE_W = 3.2           # groove height (reed lies along X)
+CAP_REED_GROOVE_LEN = 18.0
+CAP_REED_GROOVE_Z0 = 74.8
+
+
+def cap_reed_magnet_distance():
+    """Centre-to-centre distance of the CAP pair with the cap seated, mm."""
+    magnet_z = CAP_MAG_PILLAR_BOT_Z + 0.6 + MAGNET_TH / 2.0
+    reed_y = 134.0 + 1.25                 # recessed into the rail front face
+    reed_z = CAP_REED_GROOVE_Z0 + CAP_REED_GROOVE_W / 2.0
+    return math.hypot(reed_y - CAP_MAGNET_Y, reed_z - magnet_z)
 
 
 def reed_magnet_distance():
@@ -651,6 +682,26 @@ def validate():
     wx, wy = REED_WIRE_HOLE_XY
     if abs(wx) != REED_X:
         errors.append('reed wire hole is not behind the reed (BottomLid is mirrored)')
+    if 2.5 + MAGNET_PAD_H - MAGNET_POCKET_FLOOR < MAGNET_TH + 0.4:
+        errors.append('cover magnet pocket too shallow for the {:.1f}mm disc'
+                      .format(MAGNET_TH))
+    # Cap pair: the pillar must hang clear of the brain case, the cradle
+    # hooks and the rail; the recessed reed must clear the descending pillar;
+    # and the seated distance must stay in reed pull-in range.
+    if CAP_MAGNET_Y - CAP_MAG_PILLAR_SQ / 2.0 < CASE_TO_CAP_Y + CASE_OUTER_H / 2.0 + 2.0:
+        errors.append('cap magnet pillar runs into the hanging brain case')
+    if CAP_MAGNET_Y + CAP_MAG_PILLAR_SQ / 2.0 > 133.0:
+        errors.append('cap magnet pillar hits the tub top rail (Y134)')
+    if CAP_MAG_PILLAR_BOT_Z < 50.0:
+        errors.append('cap magnet pillar descends into the cradle hook zone')
+    reed_proud = 2.5 - CAP_REED_GROOVE_DEPTH
+    if 134.0 - reed_proud - (CAP_MAGNET_Y + CAP_MAG_PILLAR_SQ / 2.0) < 0.4:
+        errors.append('descending cap pillar would strike the rail-mounted reed')
+    if CAP_REED_GROOVE_DEPTH > 2.0:
+        errors.append('cap reed groove leaves under 1mm of rail behind it')
+    if cap_reed_magnet_distance() > 13.0:
+        errors.append('cap reed..magnet distance {:.1f}mm - too far for pull-in'
+                      .format(cap_reed_magnet_distance()))
     if max(COVER_TAB_X) + COVER_TAB_LEN / 2.0 > 125.0 - 8.0:
         errors.append('a cover locator tab runs off the BottomLid groove')
     # Cap screw rows: all four on each side wall, clear of each other, of the

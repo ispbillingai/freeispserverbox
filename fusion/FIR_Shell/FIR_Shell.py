@@ -503,6 +503,21 @@ def build(comp):
     box(comp,  HALF - WALL / 2, -WALL / 2, FLOOR, WALL, BOX_D - WALL, BOX_H - FLOOR, JOIN, [sh]) # right wall (ends Y137)
     box(comp, 0, -HALF + WALL / 2, FLOOR, BOX_W, WALL, BOX_H - FLOOR, JOIN, [sh]) # back wall
     box(comp, 0, FRONT_Y - 1.5, BOX_H - 8, BOX_W - 2 * WALL, 3, 8, JOIN, [sh])    # top rail BEHIND the lid (Y134-137)
+    # TOP-CAP TAMPER REED (owner, 18 Aug): a groove in the rail's FRONT face
+    # holds the reed (glue it in, recessed so the cap's descending magnet
+    # pillar passes 0.5mm in front of it).  Wires join the tub-to-cap
+    # service loop alongside the horn lead.
+    box(comp, INTERFACE.CAP_MAGNET_X,
+        FRONT_Y - 3.0 + INTERFACE.CAP_REED_GROOVE_DEPTH / 2.0,
+        INTERFACE.CAP_REED_GROOVE_Z0, INTERFACE.CAP_REED_GROOVE_LEN,
+        INTERFACE.CAP_REED_GROOVE_DEPTH, INTERFACE.CAP_REED_GROOVE_W,
+        CUT, [sh])
+    SKIPPED.append(
+        'tamper sensing (cap): magnet pillar bottoms at Z{:.0f}, reed in the top-rail '
+        'groove {:.1f}mm away when seated. BENCH-TEST the reed+magnet pair at that '
+        'distance (magnet face-down, reed beside it) before printing.'
+        .format(INTERFACE.CAP_MAG_PILLAR_BOT_Z,
+                INTERFACE.cap_reed_magnet_distance()))
     fillet_corners(comp, sh, CORNER_R - WALL, 0, HALF - WALL, back_only=True)     # inner cavity corners R7 FIRST (corner-gap bug)
     fillet_corners(comp, sh, CORNER_R)                                            # then the 2 back outer corners R10 full height
 
@@ -923,6 +938,22 @@ def build_top_lid(comp, ox):
     # mirror any text; it always points at the short front wall.
     poly_z(comp, ((ox, 126.0), (ox - 7.0, 112.0), (ox + 7.0, 112.0)),
            2.4, 1.0, CUT, [lid])
+    # TOP-CAP TAMPER MAGNET (owner, 18 Aug): a pillar hangs from the roof to
+    # assembled Z75 with a downward-opening press pocket for the D12.1 x 4.7
+    # disc - a clean vertical bore in this roof-down print.  Assembled it
+    # stands at (X-60, Y+125), just in front of the tub's top rail where the
+    # reed lies in its groove ~10mm away; lifting the cap breaks the field
+    # immediately.  ASYMMETRIC cap feature -> the X is mirrored exactly once,
+    # same as the brain-case bosses above.
+    mag_lx = ox - INTERFACE.CAP_MAGNET_X
+    pillar_h = (CAP_ROOF_INNER_Z - INTERFACE.CAP_MAG_PILLAR_BOT_Z)
+    box(comp, mag_lx, INTERFACE.CAP_MAGNET_Y, 3.0,
+        INTERFACE.CAP_MAG_PILLAR_SQ, INTERFACE.CAP_MAG_PILLAR_SQ,
+        pillar_h, JOIN, [lid])
+    cyl(comp, mag_lx, INTERFACE.CAP_MAGNET_Y,
+        3.0 + pillar_h - INTERFACE.MAGNET_POCKET_DEPTH,
+        INTERFACE.MAGNET_POCKET_D, INTERFACE.MAGNET_POCKET_DEPTH + 1.0,
+        CUT, [lid])
     # SELF-CLICK windows: through-cuts in the skirt that swallow the tub's
     # detent bumps at full seat.  Assembled Z70..76.5 -> print z 43.5..50.
     # All positions are symmetric, so the assembly flip cannot misplace them.
@@ -940,11 +971,11 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v32: cap gets a 1.2mm lead-in chamfer on the skirt inner edge and an '
-           'engraved front arrow inside the roof (18 Aug review); every cap screw '
-           'in a visible 12mm counterbored pad, 4 per side wall; wall mount = '
-           'FIR WALL PLATE cleat + two in-box M4 floor locks '
-           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v33: TOP-CAP tamper pair - magnet pillar (D12.1x4.7 press pocket, '
+           'opens down) at assembled (X-60, Y125) + reed groove in the tub top '
+           'rail; plus lead-in chamfer, roof arrow, 8 seated cap screws, wall '
+           'plate cleat + floor locks / interface {}'
+           .format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):

@@ -714,7 +714,7 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v32', any('v32' in m for m in msgs))
+    c.check('FIR_Shell popup states v33', any('v33' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -856,6 +856,30 @@ def check_tree(root, label):
         c.check('cap: arrow engraves 0.6mm, leaves {:.1f}mm of roof'
                 .format(3.0 - (3.0 - arrows[0].a0)),
                 near(arrows[0].a0, 2.4) and arrows[0].a1 > 3.0)
+
+    # cap tamper pair: pillar + downward pocket on the cap (mirrored once),
+    # reed groove in the tub top rail, and the seated pair distance
+    pillars = [s for s in cap.solids('join', 'rect', 'xY')
+               if near(2 * s.shape[2], interface.CAP_MAG_PILLAR_SQ)
+               and near(s.shape[1], interface.CAP_MAGNET_Y)]
+    cpockets = [s for s in cap.solids('cut', 'circle', 'xY')
+                if near(s.shape[2], interface.MAGNET_POCKET_D / 2.0)]
+    c.check('cap: magnet pillar (mirrored to assembled X{:.0f}) + D{:.2f} '
+            'pocket, seated reed..magnet {:.1f}mm'
+            .format(interface.CAP_MAGNET_X, interface.MAGNET_POCKET_D,
+                    interface.cap_reed_magnet_distance()),
+            len(pillars) == 1 and len(cpockets) == 1
+            and near(pillars[0].shape[0] - cap_ox, -interface.CAP_MAGNET_X)
+            and near(120.0 - pillars[0].a1, interface.CAP_MAG_PILLAR_BOT_Z)
+            and near(cpockets[0].a0,
+                     pillars[0].a1 - interface.MAGNET_POCKET_DEPTH)
+            and interface.cap_reed_magnet_distance() <= 13.0)
+    rail_grooves = [s for s in tub.solids('cut', 'rect', 'xY')
+                    if near(s.shape[0], interface.CAP_MAGNET_X)
+                    and near(s.a0, interface.CAP_REED_GROOVE_Z0)]
+    c.check('tub: cap-reed groove in the top rail front face',
+            len(rail_grooves) == 1
+            and near(rail_grooves[0].shape[1] - rail_grooves[0].shape[3], 134.0))
 
     shell_notes = '\n'.join(msgs)
     c.check('FIR_Shell: no interference notes',
