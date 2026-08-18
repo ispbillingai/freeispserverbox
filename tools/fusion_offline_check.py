@@ -80,16 +80,19 @@ class Solid(object):
         self.op = op              # 'new' | 'join' | 'cut'
 
     def uvw(self, p):
+        # MEASURED conventions (tools/plane_probe_result.txt, 18 Aug 2026):
+        #   xY: U=+X  V=+Y  extrude=+Z
+        #   xZ: U=+X  V=-Z  extrude=+Y
+        #   yZ: U=-Z  V=+Y  extrude=+X
+        # Each non-xY plane FLIPS Z.  The stub models what Fusion measurably
+        # does, never what the calling code intended - modelling the intent is
+        # exactly how misplaced screws passed every check while floating.
         x, y, z = p
         if self.plane == 'xY':
             return x, y, z
         if self.plane == 'xZ':
-            return x, z, y
-        # yZ: REAL Fusion maps sketch-X to world Z and sketch-Y to world Y
-        # (probe-verified 18 Aug 2026).  The stub MUST model reality, not the
-        # author's intention - modelling the intention is exactly how the
-        # misplaced side screws passed every check while floating in Fusion.
-        return z, y, x            # yZ
+            return x, -z, y
+        return -z, y, x           # yZ
 
     def contains(self, p, tol=1e-6):
         u, v, w = self.uvw(p)
@@ -127,9 +130,20 @@ class Solid(object):
         w0, w1 = self.a0, self.a1
         if self.plane == 'xY':
             return (u0, u1, v0, v1, w0, w1)
-        if self.plane == 'xZ':
-            return (u0, u1, w0, w1, v0, v1)
-        return (w0, w1, v0, v1, u0, u1)   # yZ: u is world Z, v is world Y
+        if self.plane == 'xZ':                 # U=+X, V=-Z, extrude=+Y
+            return (u0, u1, w0, w1, -v1, -v0)
+        return (w0, w1, v0, v1, -u1, -u0)      # yZ: U=-Z, V=+Y, extrude=+X
+
+    def world_centre(self):
+        """Centre of this solid in WORLD mm - convention-independent.
+
+        Checks must be written against THIS, never against raw sketch
+        coordinates: sketch coordinates change meaning whenever a plane
+        convention is corrected, and that is precisely how the misplaced
+        side screws survived a green test run.
+        """
+        x0, x1, y0, y1, z0, z1 = self.aabb()
+        return ((x0 + x1) / 2.0, (y0 + y1) / 2.0, (z0 + z1) / 2.0)
 
 
 class Body(object):
@@ -718,7 +732,7 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v35', any('v35' in m for m in msgs))
+    c.check('FIR_Shell popup states v36', any('v36' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -731,9 +745,10 @@ def check_tree(root, label):
     ok_rows = []
     for sy in rows:
         for wall in (-137.0, 137.0):
-            # yZ sketches: shape[0] is world Z, shape[1] is world Y
+            # world coordinates only - never raw sketch values
             hit = [s for s in pilots
-                   if near(s.shape[1], sy) and near(s.shape[0], z72)
+                   if near(s.world_centre()[1], sy)
+                   and near(s.world_centre()[2], z72)
                    and s.a0 <= wall <= s.a1]
             ok_rows.append(len(hit) == 1)
     c.check('tub: 8 cap-screw pilots on the side walls at Z72',
@@ -764,9 +779,9 @@ def check_tree(root, label):
                 and near(z1, interface.CLEAT_BAR_TOP_Z))
         c.check('tub: bar top clears the cap skirt (Z65) by {:.1f}mm'
                 .format(65.0 - z1), z1 <= 64.0)
-        # the 45-degree underside: both defining points on z = -y - c
-        # (yZ sketch points are recorded as (z, y) - swap back for checking)
-        bar_pts = [(v, u) for u, v in bar.shape]
+        # the 45-degree underside: both defining points on z = -y - c.
+        # yZ sketch points are (U, V) = (-worldZ, worldY) - map back to world.
+        bar_pts = [(v, -u) for u, v in bar.shape]
         cft = [pt for pt in bar_pts if near(pt[0], -140.0)]
         tip = [pt for pt in bar_pts
                if near(pt[0], -140.0 - interface.CLEAT_BAR_RUN)
@@ -821,7 +836,8 @@ def check_tree(root, label):
                 return (s.a0 + s.a1) / 2.0 - cap_ox
 
             hole = [s for s in through
-                    if near(s.shape[1], sy) and near(s.shape[0], lh - 4.0)
+                    if near(s.world_centre()[1], sy)
+                    and near(s.world_centre()[2], lh - 4.0)
                     and rel_mid(s) * sxs > 0]
             if len(hole) != 1:
                 align.append('missing hole Y{} {}X'.format(sy, sxs))
@@ -831,10 +847,12 @@ def check_tree(root, label):
             if not near(az, z72):
                 align.append('hole Y{} lands at Z{}'.format(sy, az))
             pad = [s for s in pads
-                   if near(s.shape[1], sy) and near(s.shape[0], lh - 4.0)
+                   if near(s.world_centre()[1], sy)
+                   and near(s.world_centre()[2], lh - 4.0)
                    and rel_mid(s) * sxs > 0]
             cb = [s for s in cbores
-                  if near(s.shape[1], sy) and near(s.shape[0], lh - 4.0)
+                  if near(s.world_centre()[1], sy)
+                  and near(s.world_centre()[2], lh - 4.0)
                   and rel_mid(s) * sxs > 0]
             if len(pad) != 1 or len(cb) != 1:
                 align.append('missing seat Y{} {}X'.format(sy, sxs))
@@ -863,6 +881,21 @@ def check_tree(root, label):
         c.check('cap: arrow engraves 0.6mm, leaves {:.1f}mm of roof'
                 .format(3.0 - (3.0 - arrows[0].a0)),
                 near(arrows[0].a0, 2.4) and arrows[0].a1 > 3.0)
+
+    # The tub's SIX front lid-seat pilots (xZ plane) must sit at the real
+    # BottomLid screw heights, ABOVE the floor.  The measured xZ Z-flip had
+    # been mirroring them to -Z, i.e. underground, since the seat was written.
+    seat_pilots = [s for s in tub.solids('cut', 'circle', 'xZ')
+                   if near(s.shape[2], interface.BOTTOM_LID_BOSS_PILOT_D / 2.0)]
+    seat_xz = sorted((round(s.world_centre()[0], 1),
+                      round(s.world_centre()[2], 1)) for s in seat_pilots)
+    c.check('tub: 6 front lid-seat pilots at their real heights (never -Z)',
+            len(seat_pilots) == 6
+            and all(z > 0 for _, z in seat_xz)
+            and seat_xz == sorted(
+                ((-120.0, 72.0), (120.0, 72.0), (-40.0, 72.0), (40.0, 72.0),
+                 (-132.0, 44.0), (132.0, 44.0))),
+            '{}'.format(seat_xz))
 
     # cap tamper pair: pillar + downward pocket on the cap (mirrored once),
     # reed groove in the tub top rail, and the seated pair distance
@@ -1054,7 +1087,7 @@ def check_tree(root, label):
         world, p('FIR_WallPlate'), 'wallplate')
     c.check('FIR_WallPlate run() completed',
             msgs and 'failed' not in msgs[-1])
-    c.check('FIR_WallPlate popup states v2', any('v2' in m for m in msgs))
+    c.check('FIR_WallPlate popup states v3', any('v3' in m for m in msgs))
     plate = body_named(wp_design, 'FIR WALL PLATE')
     slabs = plate.solids('new', 'poly', 'yZ')
     c.check('WallPlate: slab+cleat is one polygon profile', len(slabs) == 1)
@@ -1067,8 +1100,9 @@ def check_tree(root, label):
         # the cleat face, mapped to ASSEMBLED coords, must be COLLINEAR with
         # the tub bar's 45deg underside: assembled y = lz + WALL_FACE_Y,
         # assembled z = -ly.
-        # yZ sketch points are recorded (lz, ly) after the convention fix
-        pts = [(u + interface.WALL_FACE_Y, -v) for u, v in slabs[0].shape]
+        # yZ sketch (U, V) = (-localZ, localY); local Z is the plate's own
+        # depth axis, mapped to shell Y, and local Y maps to shell -Z.
+        pts = [(-u + interface.WALL_FACE_Y, -v) for u, v in slabs[0].shape]
         on_line = [pt for pt in pts
                    if near(pt[1], -pt[0] - (140.0 - interface.CLEAT_FACE_Z0))]
         c.check('WallPlate: plate 45deg face is collinear with the tub bar '
@@ -1087,10 +1121,13 @@ def check_tree(root, label):
     c.check('WallPlate: 2 under-floor arms', len(arms) == 2)
     apilots = [s for s in plate.solids('cut', 'circle', 'xZ')
                if near(s.shape[2], interface.WALL_LOCK_PILOT_D / 2.0)]
+    # world (part-local) coordinates: X = shell X, Z = distance from the wall
+    # face, which is where the tub's lock holes sit
     ok_pilots = (len(apilots) == 2 and all(
-        near(s.shape[0], lx) and
-        near(s.shape[1], interface.WALL_LOCK_Y - interface.WALL_FACE_Y)
-        for s, lx in zip(sorted(apilots, key=lambda s: s.shape[0]),
+        near(s.world_centre()[0], lx)
+        and near(s.world_centre()[2],
+                 interface.WALL_LOCK_Y - interface.WALL_FACE_Y)
+        for s, lx in zip(sorted(apilots, key=lambda s: s.world_centre()[0]),
                          sorted(interface.WALL_LOCK_X))))
     c.check('WallPlate: arm pilots line up under the tub floor holes',
             ok_pilots,

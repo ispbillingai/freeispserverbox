@@ -187,10 +187,13 @@ def cyl(comp, cx, cy, z0, d, sz, op, parts=None):
 
 def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
     # cylinder running along Y (circle on xZ plane), SYMMETRIC about ycenter so it cuts through the
-    # boss regardless of the plane-normal direction - used for the front lid-bolt pilots
+    # boss regardless of the plane-normal direction - used for the front lid-bolt pilots.
+    # MEASURED xZ convention (FIR_PlaneProbe v3, 18 Aug 2026): sketch-U is
+    # world +X, sketch-V is world -Z, offset/extrude is world +Y.  The V flip
+    # is why these pilots used to land BELOW the floor at -Z.
     sk = comp.sketches.add(comp.xZConstructionPlane)
     sk.sketchCurves.sketchCircles.addByCenterRadius(
-        adsk.core.Point3D.create(mm(cx), mm(cz), 0), mm(d / 2.0))
+        adsk.core.Point3D.create(mm(cx), mm(-cz), 0), mm(d / 2.0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(ycenter) > 1e-9:
@@ -203,11 +206,12 @@ def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
 
 
 def box_y(comp, cx, cz, ycenter, sx, sz, span, op, parts=None):
-    # rectangle on the xZ plane, extruded through Y - used for cuts through front/back walls
+    # rectangle on the xZ plane, extruded through Y - used for cuts through front/back walls.
+    # MEASURED xZ convention: sketch-V is world -Z (see cyl_y).
     sk = comp.sketches.add(comp.xZConstructionPlane)
     sk.sketchCurves.sketchLines.addCenterPointRectangle(
-        adsk.core.Point3D.create(mm(cx), mm(cz), 0),
-        adsk.core.Point3D.create(mm(cx + sx / 2.0), mm(cz + sz / 2.0), 0))
+        adsk.core.Point3D.create(mm(cx), mm(-cz), 0),
+        adsk.core.Point3D.create(mm(cx + sx / 2.0), mm(-cz + sz / 2.0), 0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(ycenter) > 1e-9:
@@ -221,13 +225,12 @@ def box_y(comp, cx, cz, ycenter, sx, sz, span, op, parts=None):
 
 def cyl_x(comp, cy, cz, xcenter, d, span, op, parts=None):
     # cylinder running along X (circle on yZ plane), SYMMETRIC about xcenter - for SIDE-wall bolt pilots.
-    # REAL Fusion's yZ plane: sketch-X = world Z, sketch-Y = world Y (the
-    # field-proven FIR_ModuleGadget helpers documented this; the shell code
-    # ignored it and every side screw landed in the wrong place - the bug
-    # Francis kept seeing and the probe finally proved on 18 Aug).
+    # MEASURED yZ convention (FIR_PlaneProbe v3, 18 Aug 2026): sketch-U is
+    # world -Z, sketch-V is world +Y, offset/extrude is world +X.  Getting
+    # only half of this right is what put the seat pads under the box.
     sk = comp.sketches.add(comp.yZConstructionPlane)
     sk.sketchCurves.sketchCircles.addByCenterRadius(
-        adsk.core.Point3D.create(mm(cz), mm(cy), 0), mm(d / 2.0))
+        adsk.core.Point3D.create(mm(-cz), mm(cy), 0), mm(d / 2.0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(xcenter) > 1e-9:
@@ -243,16 +246,15 @@ def poly_x(comp, pts_yz, xcenter, span, op, parts=None):
     # closed polygon on the yZ plane (points are (y, z) mm), extruded along X
     # symmetric about xcenter - used for the 45-degree wall-cleat bar, which a
     # rectangle cannot make and a stepped approximation would not mate.
-    # REAL Fusion's yZ plane: sketch-X = world Z, sketch-Y = world Y, so the
-    # coordinates are swapped at sketch time (probe-verified, 18 Aug).
+    # MEASURED yZ convention: sketch-U = world -Z, sketch-V = world +Y.
     sk = comp.sketches.add(comp.yZConstructionPlane)
     lines = sk.sketchCurves.sketchLines
     n = len(pts_yz)
     for i in range(n):
         y0, z0 = pts_yz[i]
         y1, z1 = pts_yz[(i + 1) % n]
-        lines.addByTwoPoints(adsk.core.Point3D.create(mm(z0), mm(y0), 0),
-                             adsk.core.Point3D.create(mm(z1), mm(y1), 0))
+        lines.addByTwoPoints(adsk.core.Point3D.create(mm(-z0), mm(y0), 0),
+                             adsk.core.Point3D.create(mm(-z1), mm(y1), 0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(xcenter) > 1e-9:
@@ -267,14 +269,15 @@ def poly_x(comp, pts_yz, xcenter, span, op, parts=None):
 def poly_y(comp, pts_xz, ycenter, span, op, parts=None):
     # closed polygon on the xZ plane (points are (x, z) mm), extruded along Y
     # symmetric about ycenter - used for the skirt lead-in chamfer wedges.
+    # MEASURED xZ convention: sketch-U = world +X, sketch-V = world -Z.
     sk = comp.sketches.add(comp.xZConstructionPlane)
     lines = sk.sketchCurves.sketchLines
     n = len(pts_xz)
     for i in range(n):
         x0, z0 = pts_xz[i]
         x1, z1 = pts_xz[(i + 1) % n]
-        lines.addByTwoPoints(adsk.core.Point3D.create(mm(x0), mm(z0), 0),
-                             adsk.core.Point3D.create(mm(x1), mm(z1), 0))
+        lines.addByTwoPoints(adsk.core.Point3D.create(mm(x0), mm(-z0), 0),
+                             adsk.core.Point3D.create(mm(x1), mm(-z1), 0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(ycenter) > 1e-9:
@@ -1007,7 +1010,7 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v35: yZ-PLANE FIX - the 8 side screws, their seat pads and the '
+VERSION = ('v36: PLANE FIX (measured) - the 8 side screws, their seat pads and the '
            'cleat bar now land where they always claimed to (Fusion sketch '
            'axes were swapped; Francis was right, they WERE floating). Plus '
            'the v34 indoor screen/LED roof, tamper pairs, chamfer, wall plate '

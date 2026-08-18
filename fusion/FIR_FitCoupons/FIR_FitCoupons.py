@@ -109,9 +109,10 @@ def cyl(comp, cx, cy, z0, d, sz, op, parts=None):
 
 
 def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
+    # MEASURED xZ convention (FIR_PlaneProbe v3): sketch-V is world -Z.
     sk = comp.sketches.add(comp.xZConstructionPlane)
     sk.sketchCurves.sketchCircles.addByCenterRadius(
-        adsk.core.Point3D.create(mm(cx), mm(cz), 0), mm(d / 2.0))
+        adsk.core.Point3D.create(mm(cx), mm(-cz), 0), mm(d / 2.0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(ycenter) > 1e-9:

@@ -140,7 +140,7 @@ SHOW_SCREW_MARKERS = False
 # interference view.
 PRESENTATION = True
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v44: yZ-plane fix - side screws/pads/cleat bar land correctly now. '
+CHECK_VERSION = ('v45: PLANE FIX (probe-measured) - side screws, pads, cleat bar and the front-lid pilots all land correctly now. '
                  'PRESENTATION=True gives an opaque, fastener-marked review view '
                  '(transparent stays for interference only). Five printed shells - tub, '
                  'deep cap, BottomLid, CurvedLid, WALL PLATE - with every outside screw '
@@ -188,8 +188,9 @@ def cyl(comp, cx, cy, z0, d, sz, op, parts=None):
 
 
 def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
+    # MEASURED xZ convention (FIR_PlaneProbe v3): sketch-V is world -Z.
     sk = comp.sketches.add(comp.xZConstructionPlane)
-    sk.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(mm(cx), mm(cz), 0), mm(d / 2.0))
+    sk.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(mm(cx), mm(-cz), 0), mm(d / 2.0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(ycenter) > 1e-9:
@@ -203,11 +204,11 @@ def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
 def cyl_x(comp, cy, cz, xcenter, d, span, op, parts=None):
     # cylinder along X (circle on the yZ plane), symmetric about xcenter -
     # used for the side screw-axis markers.
-    # REAL Fusion's yZ plane: sketch-X = world Z, sketch-Y = world Y
-    # (probe-verified, 18 Aug) - coordinates swapped at sketch time.
+    # MEASURED yZ convention (FIR_PlaneProbe v3): sketch-U = world -Z,
+    # sketch-V = world +Y, offset/extrude = world +X.
     sk = comp.sketches.add(comp.yZConstructionPlane)
     sk.sketchCurves.sketchCircles.addByCenterRadius(
-        adsk.core.Point3D.create(mm(cz), mm(cy), 0), mm(d / 2.0))
+        adsk.core.Point3D.create(mm(-cz), mm(cy), 0), mm(d / 2.0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(xcenter) > 1e-9:
@@ -220,18 +221,19 @@ def cyl_x(comp, cy, cz, xcenter, d, span, op, parts=None):
 
 
 def yport(comp, body, cx, cz, kind, a, b, y_face, span):
-    # robust port cut into a +Y face: sketch on an offset plane AT the face, symmetric extrude
+    # robust port cut into a +Y face: sketch on an offset plane AT the face, symmetric extrude.
+    # The offset plane inherits the xZ convention, so world -Z applies here too.
     try:
         pin = comp.constructionPlanes.createInput()
         pin.setByOffset(comp.xZConstructionPlane, adsk.core.ValueInput.createByReal(mm(y_face)))
         plane = comp.constructionPlanes.add(pin)
         sk = comp.sketches.add(plane)
         if kind == 'c':
-            sk.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(mm(cx), mm(cz), 0), mm(a / 2.0))
+            sk.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(mm(cx), mm(-cz), 0), mm(a / 2.0))
         else:
             sk.sketchCurves.sketchLines.addCenterPointRectangle(
-                adsk.core.Point3D.create(mm(cx), mm(cz), 0),
-                adsk.core.Point3D.create(mm(cx + a / 2.0), mm(cz + b / 2.0), 0))
+                adsk.core.Point3D.create(mm(cx), mm(-cz), 0),
+                adsk.core.Point3D.create(mm(cx + a / 2.0), mm(-cz + b / 2.0), 0))
         ei = comp.features.extrudeFeatures.createInput(sk.profiles.item(0), CUT)
         ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
         ei.participantBodies = [body]

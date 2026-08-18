@@ -1,0 +1,25 @@
+FIR_PlaneProbe v2 - MEASURED sketch-plane conventions.
+Send this whole text back.
+
+yZ PLANE (used by the cap side screws, their seat pads and the wall cleat bar)
+    sketched at U=60 V=30, offset 85
+    ACTUAL centre  X85.0  Y30.0  Z-60.0
+    ACTUAL span    X[75.0..95.0] Y[25.0..35.0] Z[-65.0..-55.0]
+    => offset(85) -> world X = extrude axis; sketch-V(30) -> world Y
+
+xZ PLANE (used by the BottomLid screw pilots)
+    sketched at U=60 V=30, offset 85
+    ACTUAL centre  X60.0  Y85.0  Z-30.0
+    ACTUAL span    X[55.0..65.0] Y[75.0..95.0] Z[-35.0..-25.0]
+    => sketch-U(60) -> world X; offset(85) -> world Y = extrude axis
+
+xY PLANE (reference - known good)
+    sketched at U=60 V=30, offset 85
+    ACTUAL centre  X60.0  Y30.0  Z85.0
+    ACTUAL span    X[55.0..65.0] Y[25.0..35.0] Z[75.0..95.0]
+    => sketch-U(60) -> world X; sketch-V(30) -> world Y; offset(85) -> world Z = extrude axis
+
+RAW: name | x0 x1 | y0 y1 | z0 z1  (mm)
+RAW: PROBE yZ (U60 V30 offset85) | 75.00 95.00 | 25.00 35.00 | -65.00 -55.00
+RAW: PROBE xZ (U60 V30 offset85) | 55.00 65.00 | 75.00 95.00 | -35.00 -25.00
+RAW: PROBE xY (U60 V30 offset85) | 55.00 65.00 | 25.00 35.00 | 75.00 95.00

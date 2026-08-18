@@ -9,9 +9,18 @@
 #
 # Run in a fresh design, then send the popup text (or a screenshot of it).
 
+import os
+
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
 CM = 0.1
+
+# v3: the numbers are WRITTEN TO A FILE as well as shown, so nobody has to
+# transcribe a popup.  First writable path wins.
+RESULT_PATHS = (
+    r'F:\freeispserverbox\tools\plane_probe_result.txt',
+    os.path.join(os.path.expanduser('~'), 'plane_probe_result.txt'),
+)
 
 
 def mm(v):
@@ -107,8 +116,35 @@ def run(context):
         lines.append(describe('xY PLANE (reference - known good)',
                               xy, 60.0, 30.0, 85.0))
 
+        # Also record each body's raw bounding box, so nothing depends on the
+        # interpretation above being right.
+        lines.append('')
+        lines.append('RAW: name | x0 x1 | y0 y1 | z0 z1  (mm)')
+        for body in (yz, xz, xy):
+            lines.append('RAW: {} | {:.2f} {:.2f} | {:.2f} {:.2f} | {:.2f} {:.2f}'
+                         .format(body.name, *measure(body)))
+
+        text = '\n'.join(lines)
+        written = None
+        for path in RESULT_PATHS:
+            try:
+                folder = os.path.dirname(path)
+                if folder and not os.path.isdir(folder):
+                    continue
+                with open(path, 'w') as handle:
+                    handle.write(text)
+                written = path
+                break
+            except Exception:
+                continue
+
         app.activeViewport.fit()
-        ui.messageBox('\n'.join(lines), 'FIR_PlaneProbe v2 - measured')
+        ui.messageBox(
+            text + '\n\n' +
+            ('SAVED TO: {}\nNothing to copy - just say "done".'.format(written)
+             if written else
+             'Could not write a result file; please screenshot this popup.'),
+            'FIR_PlaneProbe v3 - measured')
     except:  # noqa
         if ui:
             ui.messageBox('FIR_PlaneProbe failed:\n{}'.format(traceback.format_exc()))

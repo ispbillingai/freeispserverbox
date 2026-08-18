@@ -115,11 +115,11 @@ def cyl(comp, cx, cy, z0, d, sz, op, parts=None):
 
 def cyl_x(comp, cy, cz, x0, d, length, op, parts=None):
     # cylinder running along X (circle on the yZ plane) - currently unused.
-    # REAL Fusion's yZ plane: sketch-X = world Z, sketch-Y = world Y
-    # (probe-verified, 18 Aug) - coordinates swapped at sketch time.
+    # MEASURED yZ convention (FIR_PlaneProbe v3): sketch-U = world -Z,
+    # sketch-V = world +Y, offset/extrude = world +X.
     sk = comp.sketches.add(comp.yZConstructionPlane)
     sk.sketchCurves.sketchCircles.addByCenterRadius(
-        adsk.core.Point3D.create(mm(cz), mm(cy), 0), mm(d / 2.0))
+        adsk.core.Point3D.create(mm(-cz), mm(cy), 0), mm(d / 2.0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
