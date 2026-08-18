@@ -137,8 +137,6 @@ HORN_FOOT_D = INTERFACE.HORN_FOOT_D
 SLED_X0, SLED_X1 = INTERFACE.HORN_SLED_X0, INTERFACE.HORN_SLED_X1
 SLED_Y0, SLED_Y1 = INTERFACE.HORN_SLED_Y0, INTERFACE.HORN_SLED_Y1
 SLED_TH, SLED_BOSS_H = INTERFACE.HORN_SLED_TH, INTERFACE.HORN_SLED_BOSS_H
-CURB_TH, CURB_H = INTERFACE.HORN_CURB_TH, INTERFACE.HORN_CURB_H
-CURB_CLR = INTERFACE.HORN_CURB_CLEAR
 # Cap-to-tub fastening: FOUR screws per SIDE wall, all horizontal, all
 # drivable with the box hanging on its wall.  The old back pair at X=+-115
 # could not be reached behind a wall-hung box (8mm of air), so it moved to
@@ -500,39 +498,51 @@ def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, la
     return
 
 
-def build_mount_ears(comp, sh):
-    """Four wall-mounting flanges on the tub's back corners.
+def build_mount_tabs(comp, sh):
+    """Four wall-mounting tabs in the FLOOR plane.
 
-    One box per ear (root buried in the corner so the JOIN is structural),
-    then a vertical levelling slot: a round hole plus a short slot above and
-    below it, so the installer can true the box up after the anchors are in.
+    The box mounts like an electrical panel: its 280 x 280 floor lies flat on
+    the wall and the box stands 120mm out into the room, screen facing the
+    viewer.  So the tabs are flat lugs growing sideways out of the floor,
+    their undersides coplanar with the floor's underside (Z0 = the wall).
+    Each has a levelling slot, and a gusset ties it into the side wall
+    because the box's 120mm depth puts a peel moment on these screws.
     """
-    ear_y0 = INTERFACE.mount_plane_y()                 # -144, the wall face
-    ear_y1 = ear_y0 + INTERFACE.MOUNT_EAR_TH           # -134, buried in the box
-    hole_d = INTERFACE.MOUNT_EAR_HOLE_D
+    hole_d = INTERFACE.MOUNT_TAB_HOLE_D
+    th = INTERFACE.MOUNT_TAB_TH
     for sxs in (-1.0, 1.0):
-        x_root = sxs * (HALF - WALL)                   # +-137, inside the wall
-        x_tip = sxs * (HALF + INTERFACE.MOUNT_EAR_OUT)
-        hx = sxs * (HALF + INTERFACE.MOUNT_EAR_HOLE_OUT)
-        for ez in INTERFACE.MOUNT_EAR_Z:
-            box(comp, (x_root + x_tip) / 2.0, (ear_y0 + ear_y1) / 2.0,
-                ez - INTERFACE.MOUNT_EAR_H / 2.0,
-                abs(x_tip - x_root), ear_y1 - ear_y0,
-                INTERFACE.MOUNT_EAR_H, JOIN, [sh])
-            # levelling slot: round ends + a straight waist between them
-            for dz in (-INTERFACE.MOUNT_EAR_SLOT / 2.0,
-                       INTERFACE.MOUNT_EAR_SLOT / 2.0):
-                cyl_y(comp, hx, ez + dz, (ear_y0 + ear_y1) / 2.0,
-                      hole_d, INTERFACE.MOUNT_EAR_TH + 4.0, CUT, [sh])
-            box_y(comp, hx, ez, (ear_y0 + ear_y1) / 2.0,
-                  hole_d, INTERFACE.MOUNT_EAR_SLOT,
-                  INTERFACE.MOUNT_EAR_TH + 4.0, CUT, [sh])
+        x_root = sxs * (HALF - WALL)                 # +-137, inside the wall
+        x_tip = sxs * (HALF + INTERFACE.MOUNT_TAB_OUT)
+        hx = sxs * (HALF + INTERFACE.MOUNT_TAB_HOLE_OUT)
+        for ty in INTERFACE.MOUNT_TAB_Y:
+            box(comp, (x_root + x_tip) / 2.0, ty, 0.0,
+                abs(x_tip - x_root), INTERFACE.MOUNT_TAB_W, th, JOIN, [sh])
+            # gusset: ties the tab into the side wall against the peel moment
+            rib_tip = sxs * (HALF + INTERFACE.MOUNT_RIB_L)
+            box(comp, (x_root + rib_tip) / 2.0, ty, 0.0,
+                abs(rib_tip - x_root), INTERFACE.MOUNT_RIB_W,
+                INTERFACE.MOUNT_RIB_H, JOIN, [sh])
+            # levelling slot: two round ends plus the waist between them
+            for dy in (-INTERFACE.MOUNT_TAB_SLOT / 2.0,
+                       INTERFACE.MOUNT_TAB_SLOT / 2.0):
+                cyl(comp, hx, ty + dy, -1.0, hole_d, th + 2.0, CUT, [sh])
+            box(comp, hx, ty, -1.0, hole_d, INTERFACE.MOUNT_TAB_SLOT,
+                th + 2.0, CUT, [sh])
+    pts = INTERFACE.mount_tab_points()
     SKIPPED.append(
-        'wall mount: four M5/#10 anchors at (X{:.0f}, Z{:.0f}) and (X{:.0f}, '
-        'Z{:.0f}) on both sides. Mark through the ears, drill, hang, level in '
-        'the slots, tighten. Nothing enters the box; the cap fits over them.'
-        .format(INTERFACE.mount_ear_points()[0][0], INTERFACE.MOUNT_EAR_Z[0],
-                INTERFACE.mount_ear_points()[0][0], INTERFACE.MOUNT_EAR_Z[1]))
+        'WALL MOUNT (panel style): the 280x280 FLOOR lies flat on the wall and '
+        'the box stands 120mm out, screen facing the room. Four M5/#10 anchors '
+        'at (X{:.0f}, Y{:.0f}) and (X{:.0f}, Y{:.0f}) on each side, in {:.0f}mm '
+        'levelling slots. Mark through the tabs, drill, hang, level, tighten.'
+        .format(pts[0][0], pts[0][1], pts[1][0], pts[1][1],
+                INTERFACE.MOUNT_TAB_SLOT))
+    SKIPPED.append(
+        'ORIENTATION CONSEQUENCE: with the floor on the wall, model +Z points '
+        'OUT of the wall, not up. The device cradles, the extension-strip lips '
+        'and the adapter strap were all designed with +Z as up, so they now '
+        'take a SHEAR load. Assumed working orientation: the port face (+Y) '
+        'points DOWN the wall so cables hang and drip clear. Say the word and '
+        'the internal retention gets reviewed for that.')
     return
 
 
@@ -642,19 +652,15 @@ def build(comp):
 
     # (BUZZER/alarm seat REMOVED - Francis will just bolt it; no cradle needed)
 
-    # ================= WALL MOUNT: four integral mounting flanges ============
-    # Third design, and this one is what commercial wall-mount enclosures
-    # actually use.  Gone: the two keyholes (could barely hold 2-3kg, screw
-    # heads poked into the adapter bay) and the separate cleat plate (needed a
-    # second 276mm print and, in the owner's words, "could not mount
-    # anything").  Now four ears grow out of the back corners, two per side,
-    # each with a plain vertical slot for an M5/#10 wall anchor: drill four
-    # holes, drive four screws, hang the box.  No fastener enters the box.
-    #
-    # Their back faces stand 4mm proud of the tub back, which clears the cap
-    # skirt (Y-143) and the back detent bumps (Y-141.2), so the box really
-    # rests on the ears.  All of it stays under Z63, below the skirt.
-    build_mount_ears(comp, sh)
+    # ================= WALL MOUNT: four floor-plane mounting tabs ============
+    # The box mounts like an electrical panel - its 280 x 280 FLOOR flat on
+    # the wall, standing 120mm out into the room with the screen facing the
+    # viewer.  Earlier attempts assumed it hung off its BACK wall, which is
+    # why they read as useless: keyholes (weak, heads inside the box), then a
+    # cleat plate, then back-wall ears.  All gone.  These four tabs grow out
+    # of the floor itself, so the face that carries the load is the same face
+    # that touches the wall.
+    build_mount_tabs(comp, sh)
 
     # ================= SIDE-BOLT bosses at the lid overlap    # ================= SIDE-BOLT bosses at the lid overlap (lid skirt bolts in from the SIDE) =================
     # block on the side-wall INNER face + a HORIZONTAL (X) pilot - the bolt
@@ -791,23 +797,16 @@ def build_poe_plate(comp, ox, oy):
 
 
 def horn_floor_mount(comp, sh):
-    """Curb pocket + two clamp-screw pads for the horn's printed SLED.
+    """Two clamp-screw pads for the horn's printed SLED.  Bolts only.
 
-    The horn's own bracket arm and tightening bolts hang over its rear foot
-    holes, so no driver reaches ANY foot bolt inside the box.  All three foot
-    bolts are therefore driven on the bench, into the separate FIR HORN SLED
-    part.  In the tub there is only: a four-sided curb the bolted-up sled
-    drops into (takes every sideways knock), and two 14mm pads whose M4 x 10
-    wing screws sit at Y-65 - behind the foot, the bell and the bracket, with
-    nothing above them all the way to the roof.
+    The horn's own bracket arm and tightening bolts hang over its foot holes,
+    so no driver reaches any foot bolt inside the box; all three are driven on
+    the bench into the separate FIR HORN SLED.  In the tub there is now
+    nothing but two 14mm pads whose M4 x 10 wing screws sit at Y-65, behind
+    the foot, the bell and the bracket, with nothing above them to the roof.
+    The old four-sided curb pocket is deleted at the owner's request - the
+    bolts hold it, a cage adds print time and traps swarf.
     """
-    x0, x1 = SLED_X0 - CURB_CLR, SLED_X1 + CURB_CLR
-    y0, y1 = SLED_Y0 - CURB_CLR, SLED_Y1 + CURB_CLR
-    box(comp, (x0 + x1) / 2.0, y1 + CURB_TH / 2.0, FLOOR,
-        (x1 - x0) + 2 * CURB_TH, CURB_TH, CURB_H, JOIN, [sh])   # front curb
-    for sxs in (x0 - CURB_TH / 2.0, x1 + CURB_TH / 2.0):        # side curbs
-        box(comp, sxs, (y0 + y1) / 2.0, FLOOR, CURB_TH,
-            (y1 - y0), CURB_H, JOIN, [sh])
     for px, py in INTERFACE.horn_wing_points():
         cyl(comp, px, py, FLOOR, HORN_PAD_D, HORN_PAD_H, JOIN, [sh])
         cyl(comp, px, py, FLOOR + HORN_PAD_H - HORN_PILOT_DEPTH,
@@ -1029,10 +1028,10 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v37: FOUR cap screws (two per side wall at Y+-85) and a real wall '
-           'mount - four integral flanges with levelling slots replace the '
-           'cleat plate; screen centred on the roof. Plane conventions are '
-           'probe-measured / interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v38: PANEL-STYLE WALL MOUNT - the 280x280 floor lies on the wall and '
+           'four floor-plane tabs (gusseted, slotted) take the anchors; box '
+           'stands 120mm out, screen facing the room. FOUR cap screws, two per '
+           'side / interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):

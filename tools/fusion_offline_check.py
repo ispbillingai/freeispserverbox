@@ -732,7 +732,7 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v37', any('v37' in m for m in msgs))
+    c.check('FIR_Shell popup states v38', any('v38' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -896,8 +896,10 @@ def check_tree(root, label):
             'INTERFERENCE' not in shell_notes)
     c.check('FIR_Shell: insert decision is raised in the popup',
             'DECISION PENDING' in shell_notes and 'insert' in shell_notes)
-    c.check('FIR_Shell: wall-mount instructions are stated',
-            'wall mount' in shell_notes and 'anchors' in shell_notes)
+    c.check('FIR_Shell: wall-mount instructions and the orientation '
+            'consequence are stated',
+            'WALL MOUNT' in shell_notes and 'anchors' in shell_notes
+            and 'ORIENTATION CONSEQUENCE' in shell_notes)
 
     # ---------------- FIR_BottomLid --------------------------------------
     lid_mod, lid_design, msgs = run_script(
@@ -1031,48 +1033,53 @@ def check_tree(root, label):
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
-    # ---------------- wall mounting: integral flanges ---------------------
-    # The separate cleat plate is retired; the mount is part of the tub now.
-    ears = [s for s in tub.solids('join', 'rect', 'xY')
-            if near(2 * s.shape[2],
-                    abs(interface.MOUNT_EAR_OUT + 3.0))]
-    ear_bodies = [s for s in tub.solids('join', 'rect', 'xY')
-                  if near(s.a1 - s.a0, interface.MOUNT_EAR_H)
-                  and abs(s.world_centre()[0]) > 140.0]
-    c.check('tub: 4 integral mounting flanges, two per side',
-            len(ear_bodies) == 4
-            and sorted(round(abs(b.world_centre()[2]), 1)
-                       for b in ear_bodies) ==
-            sorted([interface.MOUNT_EAR_Z[0]] * 2 +
-                   [interface.MOUNT_EAR_Z[1]] * 2))
-    if ear_bodies:
-        back = min(b.aabb()[2] for b in ear_bodies)
-        c.check('tub: ears rest the box on Y{:.0f} - proud of the cap skirt '
-                '(Y-143) and the back detents (Y-141.2)'
-                .format(interface.mount_plane_y()),
-                near(back, interface.mount_plane_y())
-                and back < -143.0)
-        top = max(b.aabb()[5] for b in ear_bodies)
-        c.check('tub: ear tops at Z{:.0f} stay under the cap skirt (Z65)'
-                .format(top), top <= 63.0)
-    slots = [s for s in tub.solids('cut', 'circle', 'xZ')
-             if near(s.shape[2], interface.MOUNT_EAR_HOLE_D / 2.0)]
-    waists = [s for s in tub.solids('cut', 'rect', 'xZ')
-              if near(2 * s.shape[2], interface.MOUNT_EAR_HOLE_D)]
-    anchor_xz = sorted((round(w.world_centre()[0], 1),
-                        round(w.world_centre()[2], 1)) for w in waists)
+    # ---------------- wall mounting: floor-plane tabs ---------------------
+    # The box mounts like a panel: its floor lies on the wall, so the tabs
+    # must be IN the floor plane (wall contact face) - not on the back wall.
+    tabs = [s for s in tub.solids('join', 'rect', 'xY')
+            if near(s.a0, interface.mount_plane_z())
+            and near(s.a1, interface.MOUNT_TAB_TH)
+            and abs(s.world_centre()[0]) > 140.0]
+    tab_xy = sorted((round(t.world_centre()[0], 1),
+                     round(t.world_centre()[1], 1)) for t in tabs)
+    c.check('tub: 4 floor-plane mounting tabs, two per side at Y{}'
+            .format(list(interface.MOUNT_TAB_Y)),
+            len(tabs) == 4
+            and sorted(y for _, y in tab_xy) ==
+            sorted(list(interface.MOUNT_TAB_Y) * 2))
+    if tabs:
+        c.check('tub: tab undersides are coplanar with the floor - the SAME '
+                'face that touches the wall',
+                all(near(t.aabb()[4], interface.mount_plane_z()) for t in tabs))
+    ribs = [s for s in tub.solids('join', 'rect', 'xY')
+            if near(s.a1 - s.a0, interface.MOUNT_RIB_H)
+            and near(2 * s.shape[3], interface.MOUNT_RIB_W)]
+    c.check('tub: every tab is gusseted into the side wall against the peel '
+            'moment of a 120mm-deep box', len(ribs) == 4)
+    slot_ends = [s for s in tub.solids('cut', 'circle', 'xY')
+                 if near(s.shape[2], interface.MOUNT_TAB_HOLE_D / 2.0)]
+    waists = [s for s in tub.solids('cut', 'rect', 'xY')
+              if near(2 * s.shape[2], interface.MOUNT_TAB_HOLE_D)
+              and near(2 * s.shape[3], interface.MOUNT_TAB_SLOT)]
+    anchor_xy = sorted((round(w.world_centre()[0], 1),
+                        round(w.world_centre()[1], 1)) for w in waists)
     c.check('tub: 4 levelling slots on the wall-anchor points {}'
-            .format(anchor_xz),
-            len(slots) == 8 and len(waists) == 4
-            and anchor_xz == sorted((round(x, 1), round(z, 1))
-                                    for x, z in interface.mount_ear_points()))
-    # a driver must reach every wall anchor from outside the box footprint
-    c.check('tub: wall anchors sit {:.0f}mm clear of the box side, reachable '
-            'with the box in place'
-            .format(interface.MOUNT_EAR_HOLE_OUT
-                    - interface.MOUNT_EAR_HOLE_D / 2.0),
-            all(abs(x) - interface.MOUNT_EAR_HOLE_D / 2.0 > 140.0
-                for x, _ in interface.mount_ear_points()))
+            .format(anchor_xy),
+            len(slot_ends) == 8 and len(waists) == 4
+            and anchor_xy == sorted((round(x, 1), round(y, 1))
+                                    for x, y in interface.mount_tab_points()))
+    c.check('tub: anchors sit {:.0f}mm clear of the box side and the slots '
+            'pass right through the tab'
+            .format(interface.MOUNT_TAB_HOLE_OUT
+                    - interface.MOUNT_TAB_HOLE_D / 2.0),
+            all(abs(x) - interface.MOUNT_TAB_HOLE_D / 2.0 > 140.0
+                for x, _ in interface.mount_tab_points())
+            and all(w.a0 < 0.0 and w.a1 > interface.MOUNT_TAB_TH
+                    for w in waists))
+    # nothing may block the front cover, which slides in the +Y region
+    c.check('tub: mounting tabs stay clear of the sliding front cover',
+            all(abs(y) + interface.MOUNT_TAB_W / 2.0 < 133.0
+                for _, y in interface.mount_tab_points()))
 
     # ---------------- FIR_FitCoupons -------------------------------------
     fc_mod, fc_design, msgs = run_script(
@@ -1116,7 +1123,7 @@ def check_tree(root, label):
             if not shells_only:
                 for needle, why in (
                         ('horn clearance', 'horn clearances reported'),
-                        ('wall mount', 'wall-mount summary reported')):
+                        ('WALL MOUNT', 'wall-mount summary reported')):
                     c.check('FIR_ShellCheck FULL: {}'.format(why),
                             needle in text)
         except Exception as exc:  # noqa

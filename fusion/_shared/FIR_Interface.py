@@ -332,45 +332,48 @@ def reed_magnet_distance():
     return math.hypot(magnet_y - reed_y, magnet_z - reed_z)
 
 # ---------------------------------------------------------------------------
-# Wall mounting: INTEGRAL MOUNTING FLANGES ("ears") on the tub
+# Wall mounting: FLOOR-PLANE FLANGES (the box mounts like an electrical panel)
 # ---------------------------------------------------------------------------
-# Third attempt, and this one follows the industry standard rather than a
-# tool-holder pattern.  History: (1) two keyholes - could barely hold 2-3kg
-# and their screw heads poked into the adapter bay; (2) a separate printed
-# wall plate with a French cleat - the owner's verdict was "badly placed and
-# it cannot mount anything", and he was right: it needed a second 276mm print
-# and nothing about it read as a mount.  Commercial wall-mount enclosures
-# (Polycase, AutomationDirect, NEMA supply) all solve this the same way:
-# FLANGES OUTSIDE THE FOOTPRINT with plain through-holes, so the installer
-# drills four holes, drives four anchors, done - and no fastener enters the
-# sealed volume.
+# ORIENTATION - read this before touching any mounting geometry.  The box is
+# NOT hung sideways off its back wall.  It mounts the way a wall panel does:
+# the big flat 280 x 280 FLOOR lies against the wall and the box stands 120mm
+# out into the room, so the cap - with the 3.5" screen and the indicator LEDs
+# - faces the person looking at it.  In model coordinates that means:
 #
-# Four ears, two per side wall, at the BACK corners so they sit flat on the
-# wall behind the box.  Their back faces stand 4mm proud of the tub's back
-# face, which clears the cap skirt (Y-143) and the back snap detents
-# (Y-141.2) so the box really does sit on the ears, not on a detent.
-# Everything stays below Z63, under the cap skirt, so the ears never
-# interfere with fitting the cap.
-MOUNT_EAR_Z = (14.0, 54.0)        # ear centre heights (shell Z)
-MOUNT_EAR_H = 16.0                # ear height
-MOUNT_EAR_STANDOFF = 4.0          # back face proud of the tub back (Y-140)
-MOUNT_EAR_TH = 10.0               # Y thickness, root buried in the corner
-MOUNT_EAR_OUT = 24.0              # projection beyond the side wall (|X|140)
-MOUNT_EAR_HOLE_D = 5.5            # M5 / #10 wall-anchor clearance
-MOUNT_EAR_HOLE_OUT = 12.0         # hole centre beyond the wall outer face
-MOUNT_EAR_SLOT = 2.0              # vertical slack, so a hole becomes a slot
-                                  # and the box can be levelled after drilling
+#     model +Z  = straight OUT of the wall (NOT up)
+#     model X/Y = the plane of the wall
+#     the floor's underside, Z0, is the wall contact face
+#
+# Assumed working orientation: the port face (+Y) points DOWN the wall, so
+# cables hang and drip away.  Device retention was designed with +Z as "up";
+# with the box on a wall the cradle snaps take a shear load instead - see the
+# note FIR_Shell prints on every run.
+#
+# The flanges are therefore FLAT TABS in the floor plane, projecting past the
+# side walls where a drill and a driver reach them.  Four of them, two per
+# side, each with a levelling slot, plus a gusset rib into the side wall
+# because the box's own depth puts a peel moment on them.
+MOUNT_TAB_Y = (-90.0, 90.0)       # tab centres along the wall (model Y)
+MOUNT_TAB_W = 24.0                # tab width in Y
+MOUNT_TAB_TH = 4.0                # tab thickness, standing off the wall in +Z
+MOUNT_TAB_OUT = 24.0              # projection beyond the side wall (|X|140)
+MOUNT_TAB_HOLE_D = 5.5            # M5 / #10 wall-anchor clearance
+MOUNT_TAB_HOLE_OUT = 12.0         # hole centre beyond the wall outer face
+MOUNT_TAB_SLOT = 2.0              # slot along Y, so the box can be levelled
+MOUNT_RIB_H = 12.0                # gusset up the side wall
+MOUNT_RIB_L = 13.0                # gusset reach outward
+MOUNT_RIB_W = 8.0                 # gusset width in Y
 
 
-def mount_ear_points():
-    """The four wall-screw centres in shell coordinates (X, Z)."""
-    return tuple((sx * (140.0 + MOUNT_EAR_HOLE_OUT), z)
-                 for sx in (-1.0, 1.0) for z in MOUNT_EAR_Z)
+def mount_tab_points():
+    """The four wall-screw centres in the wall plane, as (X, Y)."""
+    return tuple((sx * (140.0 + MOUNT_TAB_HOLE_OUT), ty)
+                 for sx in (-1.0, 1.0) for ty in MOUNT_TAB_Y)
 
 
-def mount_plane_y():
-    """The plane the box actually rests on: the ears' back faces."""
-    return -140.0 - MOUNT_EAR_STANDOFF
+def mount_plane_z():
+    """The face that touches the wall: the tub floor's underside."""
+    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +410,7 @@ HORN_FOOT_MEASURED = False
 # a small printed SLED (adapter plate) where nothing hangs over them - the
 # bracket arm and its tightening bolts sit right above the rear foot holes, so
 # no in-box driver path to them exists in any orientation.  The bolted-up
-# horn+sled then drops into a curb pocket on the tub floor and TWO M4 wing
+# horn+sled is then held by TWO M4 wing
 # screws, on wings that stick out BEHIND everything, clamp it down.  Adapter
 # plates are the standard answer to fastening under an unreachable overhang.
 HORN_FOOT_PLATE_TH = 3.0          # the horn's own steel foot plate
@@ -420,8 +423,9 @@ HORN_SLED_PILOT_DEPTH = 5.5
 HORN_WING_W, HORN_WING_L = 24.0, 14.0
 HORN_WING_Y = -65.0               # wing screw line, behind the foot and bell
 HORN_WING_SCREW_X = (-93.0, -53.0)
-HORN_CURB_TH, HORN_CURB_H = 2.5, 5.5   # stays 0.5 under the bell envelope
-HORN_CURB_CLEAR = 0.3
+# NO CURB (owner, 18 Aug: "we don't need this cage for horns, just the bolt
+# is enough").  The four-sided curb pocket the sled used to drop into is gone;
+# the two M4 x 10 wing screws hold the bolted-up horn+sled by themselves.
 # Floor mounting: three pads raise the foot clear of the floor fillets.  Pad
 # 6 mm + pilot 7 mm is sized so an M4 x 10 (3 mm foot plate + 7 mm of thread)
 # bottoms exactly at the pilot floor with 2 mm of tub floor still under it;
@@ -585,7 +589,7 @@ def validate():
         errors.append('horn envelope must be positive')
     # The sled layout only works if (a) every foot hole lands on the sled,
     # (b) both wing screws sit behind the horn body AND behind the sled plate,
-    # clear for a straight-down driver, and (c) the curb stays under the bell.
+    # clear for a straight-down driver.
     body_rear = HORN_MOUTH_Y - HORN_L
     for hx_, hy_ in horn_mount_points():
         if not (HORN_SLED_X0 + 7.0 <= hx_ <= HORN_SLED_X1 - 7.0
@@ -597,8 +601,6 @@ def validate():
             errors.append('horn wing screw at Y{:.1f} is under the body'.format(wy_))
         if wy_ > HORN_SLED_Y0 - HORN_WING_L / 2.0 + 1e-9:
             errors.append('horn wing screw is not behind the sled plate')
-    if 3.0 + HORN_CURB_H > horn_foot_plane_z() - 0.5:
-        errors.append('horn curb rises into the bell envelope')
     if abs(HORN_PROFILE[-1][1] - HORN_W) > 1e-9 or HORN_PROFILE[-1][0] != 1.0:
         errors.append('horn profile must end at the measured 102mm mouth')
     if any(b[1] < a[1] for a, b in zip(HORN_PROFILE, HORN_PROFILE[1:])):
@@ -744,29 +746,29 @@ def validate():
         errors.append('cap needs exactly two screw rows per side, well separated')
     if any(abs(y) > 133.0 - M3_SEAT_PAD_D / 2.0 for y in CAP_SIDE_SCREW_Y):
         errors.append('a cap screw row runs into the corner radius')
-    # Mounting flanges: they must sit proud enough that the box rests on THEM
-    # and not on the cap skirt or a detent bump, stay clear of the skirt
-    # vertically, keep real material around each hole, and land outside the
-    # box footprint where a drill and a driver can actually reach.
-    if MOUNT_EAR_STANDOFF <= 3.0:
-        errors.append('mounting ears do not stand proud of the cap skirt (Y-143)')
-    if MOUNT_EAR_STANDOFF <= CAP_SNAP_PROUD + 1.0:
-        errors.append('mounting ears do not clear the back snap detents')
-    if max(MOUNT_EAR_Z) + MOUNT_EAR_H / 2.0 > 63.0:
-        errors.append('a mounting ear rises into the cap skirt (skirt bottom Z65)')
-    if min(MOUNT_EAR_Z) - MOUNT_EAR_H / 2.0 < 3.0:
-        errors.append('a mounting ear hangs below the tub floor')
-    if len(set(MOUNT_EAR_Z)) != 2 or abs(MOUNT_EAR_Z[1] - MOUNT_EAR_Z[0]) < 30.0:
-        errors.append('mounting ears need two well-separated heights per side')
-    if MOUNT_EAR_HOLE_OUT - MOUNT_EAR_HOLE_D / 2.0 < 4.0:
-        errors.append('wall screw sits too close to the box wall to get a driver in')
-    if MOUNT_EAR_OUT - MOUNT_EAR_HOLE_OUT - MOUNT_EAR_HOLE_D / 2.0 < 4.0:
-        errors.append('wall screw leaves under 4mm of ear beyond its hole')
-    if MOUNT_EAR_H - MOUNT_EAR_HOLE_D - MOUNT_EAR_SLOT < 5.0:
-        errors.append('mounting ear is too short around its levelling slot')
-    if MOUNT_EAR_TH < MOUNT_EAR_STANDOFF + 3.0:
-        errors.append('mounting ear is not thick enough to bury a root in the corner')
-    if len(mount_ear_points()) != 4:
+    # Mounting tabs: they live in the floor plane (the wall contact face),
+    # must not foul the sliding front cover or the cap skirt, must leave real
+    # material around each slot, and must put the anchors outside the box
+    # footprint where a drill and a driver can reach them.
+    if MOUNT_TAB_TH < 3.0:
+        errors.append('mounting tab is too thin to carry the box')
+    if MOUNT_TAB_TH > 8.0:
+        errors.append('mounting tab is thicker than the floor it grows from')
+    if len(set(MOUNT_TAB_Y)) != 2 or abs(MOUNT_TAB_Y[1] - MOUNT_TAB_Y[0]) < 120.0:
+        errors.append('the two tabs per side must be widely separated')
+    if max(abs(ty) for ty in MOUNT_TAB_Y) + MOUNT_TAB_W / 2.0 > 133.0:
+        errors.append('a mounting tab runs into the corner radius')
+    if MOUNT_TAB_HOLE_OUT - MOUNT_TAB_HOLE_D / 2.0 < 4.0:
+        errors.append('wall screw sits too close to the box to get a driver in')
+    if MOUNT_TAB_OUT - MOUNT_TAB_HOLE_OUT - MOUNT_TAB_HOLE_D / 2.0 < 4.0:
+        errors.append('wall screw leaves under 4mm of tab beyond its hole')
+    if MOUNT_TAB_W - MOUNT_TAB_HOLE_D - MOUNT_TAB_SLOT < 8.0:
+        errors.append('mounting tab is too narrow around its levelling slot')
+    if MOUNT_RIB_H + 3.0 > 65.0:
+        errors.append('mounting gusset rises into the cap skirt (Z65)')
+    if MOUNT_RIB_L > MOUNT_TAB_OUT - 6.0:
+        errors.append('mounting gusset reaches past its own tab')
+    if len(mount_tab_points()) != 4:
         errors.append('there must be exactly four wall-screw points')
     return errors
 

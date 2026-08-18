@@ -140,7 +140,7 @@ SHOW_SCREW_MARKERS = False
 # interference view.
 PRESENTATION = True
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v46: FOUR cap screws (two per side) + integral wall-mounting flanges (the cleat plate is retired). '
+CHECK_VERSION = ('v47: PANEL-STYLE mount - floor flat on the wall, four floor-plane tabs; FOUR cap screws (two per side); horn cage removed. '
                  'PRESENTATION=True gives an opaque, fastener-marked review view '
                  '(transparent stays for interference only). Five printed shells - tub, '
                  'deep cap, BottomLid, CurvedLid - with every outside screw '
@@ -650,7 +650,7 @@ def build_horn_preview(comp, brain):
     make_check_cyl(comp, 'alarm horn 69mm bracket foot', fx, fy,
                    FLOOR + HORN_PAD_H, HORN_FOOT_D, 3.0, 0.45)
     # The sled: bench-assembled with ALL THREE measured foot bolts, then the
-    # whole horn+sled drops into the tub's curb pocket and clamps with two
+    # whole horn+sled is clamped by two
     # wing screws.  Show the assembled sled and prove the wing corridors open.
     sled_cx = (INTERFACE.HORN_SLED_X0 + INTERFACE.HORN_SLED_X1) / 2.0
     sled_cy = (INTERFACE.HORN_SLED_Y0 + INTERFACE.HORN_SLED_Y1) / 2.0
@@ -823,11 +823,11 @@ def build_screw_markers(comp):
             body.name = CHECK_PREFIX + ' cap SIDE screw M3 (Y{:.0f}, {}X wall)'.format(
                 sy, '+' if sxs > 0 else '-')
             set_opacity(body, 0.85)
-    for ex, ez in INTERFACE.mount_ear_points():   # 4 wall anchors, in the ears
-        body = cyl_y(comp, ex, ez, INTERFACE.mount_plane_y() + 5.0, 4.5, 30.0,
-                     NEW).bodies.item(0)
-        body.name = (CHECK_PREFIX + ' WALL ANCHOR M5 (X{:.0f}, Z{:.0f}) - into '
-                     'the wall'.format(ex, ez))
+    for ex, ey in INTERFACE.mount_tab_points():   # 4 wall anchors, in the tabs
+        body = cyl(comp, ex, ey, INTERFACE.mount_plane_z() - 14.0, 4.5, 22.0,
+                   NEW).bodies.item(0)
+        body.name = (CHECK_PREFIX + ' WALL ANCHOR M5 (X{:.0f}, Y{:.0f}) - runs '
+                     'INTO the wall behind the floor'.format(ex, ey))
         set_opacity(body, 0.85)
     for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72),
                      (-132, 44), (132, 44)):    # 6 BottomLid screws
@@ -859,18 +859,22 @@ def build_screw_markers(comp):
 
 
 def report_wall_mount():
-    """State the mount in numbers, since it is now part of the tub itself."""
-    pts = INTERFACE.mount_ear_points()
+    """State the mount in numbers - it is part of the tub itself now."""
+    pts = INTERFACE.mount_tab_points()
     SKIPPED.append(
-        'wall mount: FOUR integral flanges (two per side, X{:.0f} and X{:.0f}, '
-        'at Z{:.0f}/Z{:.0f}) take M5 or #10 anchors in {:.1f}mm levelling '
-        'slots. Their back faces sit at Y{:.0f}, {:.0f}mm proud of the tub '
-        'back, so the box rests on the ears - clear of the cap skirt (Y-143) '
-        'and the back detents (Y-141.2). Mark through the ears, drill, hang, '
-        'level, tighten; then fit the cap over them.'
-        .format(pts[0][0], pts[2][0], INTERFACE.MOUNT_EAR_Z[0],
-                INTERFACE.MOUNT_EAR_Z[1], INTERFACE.MOUNT_EAR_SLOT,
-                INTERFACE.mount_plane_y(), INTERFACE.MOUNT_EAR_STANDOFF))
+        'WALL MOUNT (panel style, 18 Aug): the 280x280 FLOOR lies flat against '
+        'the wall and the box stands 120mm out into the room, so the cap - '
+        'screen and LEDs - faces the viewer. Four M5/#10 anchors through '
+        'floor-plane tabs at (X{:.0f}, Y{:.0f}) / (X{:.0f}, Y{:.0f}) per side, '
+        'in {:.0f}mm levelling slots, gusseted into the side walls against the '
+        'peel moment of a 120mm-deep box. Nothing enters the sealed volume.'
+        .format(pts[0][0], pts[0][1], pts[1][0], pts[1][1],
+                INTERFACE.MOUNT_TAB_SLOT))
+    SKIPPED.append(
+        'ORIENTATION: model +Z now points OUT of the wall, not up. Internal '
+        'retention (cradle snaps, extension lips, adapter strap) was designed '
+        'with +Z up and now works in shear; assumed working orientation is the '
+        'port face (+Y) pointing DOWN the wall so cables hang and drip clear.')
 
 
 def build_actual_shell_and_cap(comp):
