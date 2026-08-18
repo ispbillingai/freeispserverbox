@@ -134,9 +134,9 @@ POE_PLUG_MIN_AIR = POE_PLUG_RIGHT_ANGLE_L + 1.0
 # through-window in the skirt at full seat.  The bump's flat underside then
 # catches the window's lower edge, so the cap resists lifting even with no
 # screws fitted.  The 8 screws remain the permanent lock.
-#   sides: two detents per wall at Y = +-45 (clear of the screw row at
-#   -75/0/+75 and of the crush rib at Y0);  back: two at X = +-45 (clear of
-#   the back screws at +-115 and the keyholes at +-60).
+#   sides: two detents per wall at Y = +-45 (clear of the screw rows at
+#   +-85 and of the crush rib at Y0);  back: two at X = +-45, where there are
+#   no screws at all - the detents ARE the back-edge retention.
 CAP_SNAP_SIDE_Y = (-45.0, 45.0)
 CAP_SNAP_BACK_X = (-45.0, 45.0)
 CAP_SNAP_W = 8.0                  # bump width along the wall
@@ -190,12 +190,13 @@ BOTTOM_LID_BOSS_PILOT_D = (M3_INSERT_BORE_D if BOTTOM_LID_INSERTS
 # cover's channel rib (inner face at 129.1) with 2.1mm of air.
 COVER_LOCK_X = 122.0
 COVER_LOCK_BOSS_W = 10.0
-# Cap fastening: EIGHT horizontal M3 at Z72, now ALL through the side walls.
-# The old back pair at X=+-115 could not be driven with the box hanging on a
-# wall (8mm of air behind it), so it moved to the side walls at Y=-118 - the
-# back edge is held by its two snap detents plus these corner-adjacent screws.
+# Cap fastening: FOUR horizontal M3 at Z72 - TWO PER SIDE WALL (owner, 18 Aug:
+# "two sides each, not four").  Nothing on the back: it cannot be driven with
+# the box on a wall, and the back edge is held by its two snap detents.
+# +-85 gives a 170mm clamping base while clearing the snap detents at Y+-45,
+# the strap-anchor lugs at Y-118..-102 and the corner radius.
 CAP_SCREW_Z = 72.0
-CAP_SIDE_SCREW_Y = (-118.0, -75.0, 0.0, 75.0)
+CAP_SIDE_SCREW_Y = (-85.0, 85.0)
 # Lead-in: a 45-degree chamfer on the skirt's lower inner edge (two sides +
 # back) so the 0.5mm-per-side slide fit starts itself instead of biting the
 # tub rim.  Agreed in the 18 Aug two-AI design review.
@@ -308,7 +309,8 @@ SCREEN_MEASURED = False
 SCREEN_PCB_W, SCREEN_PCB_H = 86.5, 57.0
 SCREEN_VIS_W, SCREEN_VIS_H = 76.0, 51.0
 SCREEN_SEAT_DEPTH = 1.0           # into the 3mm roof: module registers flat
-SCREEN_CX, SCREEN_CY = 25.0, 108.0   # assembled shell X/Y of window centre
+SCREEN_CX, SCREEN_CY = 0.0, 108.0    # assembled shell X/Y of window centre
+                                     # (centred in X, owner request 18 Aug)
 LED_HOLE_D = 5.0                  # standard 5mm LED, push fit + superglue
 LED_HOLES = ((78.0, 100.0), (78.0, 116.0))   # green, red (assembled X/Y)
 
@@ -330,65 +332,45 @@ def reed_magnet_distance():
     return math.hypot(magnet_y - reed_y, magnet_z - reed_z)
 
 # ---------------------------------------------------------------------------
-# Wall mounting: printed wall plate + French cleat (replaces the keyholes)
+# Wall mounting: INTEGRAL MOUNTING FLANGES ("ears") on the tub
 # ---------------------------------------------------------------------------
-# The two 11mm keyholes could barely hold a 2-3kg loaded box, and their screw
-# heads protruded into the 4mm gap in front of the adapter bank.  Both are
-# gone.  The box now hangs on a separate printed FIR WALL PLATE:
-#   * the plate screws to the wall with up to six 4.5mm screws whose heads sit
-#     in pockets INSIDE the plate - nothing enters the box any more;
-#   * a full-width 45-degree cleat bar on the tub's back wall drops onto the
-#     plate's matching 45-degree face and wedges the box against the plate;
-#   * a crest wall behind the bar stops the box being pulled straight off;
-#   * two under-floor arms end below the tub floor, and two M4 x 10 screws
-#     driven DOWN from inside the box clamp the floor to them.  With the cap
-#     screwed on, those screws are unreachable: the box cannot leave the wall
-#     without first unlocking and removing the cap.  That is the anti-theft.
-# Everything below Z65 so the cap skirt (Z65..120) never touches the plate.
-WALL_PLATE_TH = 9.0               # leaves a 2.4mm crest wall behind the bar tip
-WALL_PLATE_X_HALF = 138.0
-WALL_PLATE_TOP_Z = 61.0
-WALL_PLATE_BOT_Z = -8.4
-WALL_FACE_Y = -140.0 - WALL_PLATE_TH        # the building wall sits at -149
-CLEAT_BAR_X_HALF = 95.0
-CLEAT_FACE_Z0 = 50.8              # 45deg face height at the box-back plane
-CLEAT_BAR_RUN = 5.8               # bar protrusion behind the box back
-CLEAT_TIP_CLEAR = 0.8             # air between bar tip and the crest wall
-CLEAT_CREST_TOP_Z = 61.0          # lift the box past this to unhook it
-CLEAT_BAR_TOP_Z = 64.0
-# In-box lock screws: straight-down driver corridors inside the back corner
-# fillet pockets, clear of the extension strip (|X|<=120), the rear cap-screw
-# bosses (Y-124..-112) and the strap-anchor lugs.  Same M4 x 10 as the horn.
-WALL_LOCK_X = (-129.0, 129.0)
-WALL_LOCK_Y = -130.0
-WALL_LOCK_CLEAR_D = 4.5           # clearance hole through the 3mm tub floor
-WALL_LOCK_PILOT_D = 3.4
-WALL_LOCK_PILOT_DEPTH = 7.0       # M4 x 10: 3 floor + 0.4 lift + 6.6 bite
-WALL_ARM_W = 14.0
-WALL_ARM_TH = 8.0
-WALL_ARM_TOP_Z = -0.4             # 0.4 under the floor: the cleat carries the
-                                  # weight; the screws pre-load the arms up
-WALL_ARM_Y0 = -118.0              # forward end of each under-floor arm
-WALL_SCREW_D = 4.5
-WALL_SCREW_HEAD_D = 11.0
-WALL_SCREW_HEAD_DEPTH = 3.5       # head sits below the plate front face
-WALL_SCREW_POS = ((-115.0, 40.0), (115.0, 40.0), (-115.0, 8.0),
-                  (115.0, 8.0), (0.0, 44.0), (0.0, 8.0))
+# Third attempt, and this one follows the industry standard rather than a
+# tool-holder pattern.  History: (1) two keyholes - could barely hold 2-3kg
+# and their screw heads poked into the adapter bay; (2) a separate printed
+# wall plate with a French cleat - the owner's verdict was "badly placed and
+# it cannot mount anything", and he was right: it needed a second 276mm print
+# and nothing about it read as a mount.  Commercial wall-mount enclosures
+# (Polycase, AutomationDirect, NEMA supply) all solve this the same way:
+# FLANGES OUTSIDE THE FOOTPRINT with plain through-holes, so the installer
+# drills four holes, drives four anchors, done - and no fastener enters the
+# sealed volume.
+#
+# Four ears, two per side wall, at the BACK corners so they sit flat on the
+# wall behind the box.  Their back faces stand 4mm proud of the tub's back
+# face, which clears the cap skirt (Y-143) and the back snap detents
+# (Y-141.2) so the box really does sit on the ears, not on a detent.
+# Everything stays below Z63, under the cap skirt, so the ears never
+# interfere with fitting the cap.
+MOUNT_EAR_Z = (14.0, 54.0)        # ear centre heights (shell Z)
+MOUNT_EAR_H = 16.0                # ear height
+MOUNT_EAR_STANDOFF = 4.0          # back face proud of the tub back (Y-140)
+MOUNT_EAR_TH = 10.0               # Y thickness, root buried in the corner
+MOUNT_EAR_OUT = 24.0              # projection beyond the side wall (|X|140)
+MOUNT_EAR_HOLE_D = 5.5            # M5 / #10 wall-anchor clearance
+MOUNT_EAR_HOLE_OUT = 12.0         # hole centre beyond the wall outer face
+MOUNT_EAR_SLOT = 2.0              # vertical slack, so a hole becomes a slot
+                                  # and the box can be levelled after drilling
 
 
-def cleat_crest_front_y():
-    """Front face of the plate's crest wall, behind the bar tip."""
-    return -140.0 - CLEAT_BAR_RUN - CLEAT_TIP_CLEAR
+def mount_ear_points():
+    """The four wall-screw centres in shell coordinates (X, Z)."""
+    return tuple((sx * (140.0 + MOUNT_EAR_HOLE_OUT), z)
+                 for sx in (-1.0, 1.0) for z in MOUNT_EAR_Z)
 
 
-def cleat_bar_tip_z():
-    """Underside height of the cleat bar at its tip (45-degree face)."""
-    return CLEAT_FACE_Z0 + CLEAT_BAR_RUN
-
-
-def cleat_interlock():
-    """How far the box must LIFT before it can be pulled off the wall."""
-    return CLEAT_CREST_TOP_Z - cleat_bar_tip_z()
+def mount_plane_y():
+    """The plane the box actually rests on: the ears' back faces."""
+    return -140.0 - MOUNT_EAR_STANDOFF
 
 
 # ---------------------------------------------------------------------------
@@ -629,8 +611,6 @@ def validate():
     for sy in CAP_SNAP_SIDE_Y:
         if min(abs(sy - r) for r in CAP_SIDE_SCREW_Y) < 20.0:
             errors.append('side snap at Y{:.0f} crowds a screw row or crush rib'.format(sy))
-    if CAP_SNAP_Z0 < CLEAT_BAR_TOP_Z + 1.0:
-        errors.append('back snap bumps reach down into the cleat bar')
     if not (CAP_SNAP_WIN_Z0 < CAP_SNAP_Z0 and CAP_SNAP_Z1 < CAP_SNAP_WIN_Z1):
         errors.append('snap window does not swallow the bump')
     if CAP_SNAP_WIN_W < CAP_SNAP_W + 1.5:
@@ -760,51 +740,34 @@ def validate():
     # Cap screw rows: all four on each side wall, clear of each other, of the
     # snap detents, and inside the straight wall (corner radius starts |Y|133).
     rows = sorted(CAP_SIDE_SCREW_Y)
-    if len(rows) != 4 or any(b - a < 20.0 for a, b in zip(rows, rows[1:])):
-        errors.append('cap side screw rows must be four, at least 20mm apart')
+    if len(rows) != 2 or rows[1] - rows[0] < 100.0:
+        errors.append('cap needs exactly two screw rows per side, well separated')
     if any(abs(y) > 133.0 - M3_SEAT_PAD_D / 2.0 for y in CAP_SIDE_SCREW_Y):
         errors.append('a cap screw row runs into the corner radius')
-    # Wall mount: the cleat system must stay under the cap skirt (Z65), hook
-    # deep enough to need a real lift, and keep the bar tip off the crest.
-    if CLEAT_BAR_TOP_Z > 64.0:
-        errors.append('cleat bar rises into the cap skirt (skirt bottom Z65)')
-    if WALL_PLATE_TOP_Z > 63.0:
-        errors.append('wall plate top is too close to the cap skirt')
-    if cleat_interlock() < 3.0:
-        errors.append('cleat interlock under 3mm: the box could be flicked off the wall')
-    if CLEAT_TIP_CLEAR < 0.6:
-        errors.append('cleat bar tip would scrape the crest wall on the way down')
-    if WALL_PLATE_TH - CLEAT_BAR_RUN - CLEAT_TIP_CLEAR < 2.0:
-        errors.append('crest wall thinner than 2mm: it could not resist a pull-off')
-    if CLEAT_BAR_X_HALF > WALL_PLATE_X_HALF - 4.0:
-        errors.append('cleat bar is wider than the plate that receives it')
-    # Lock screws: the straight-down driver corridor (7mm shaft) must clear
-    # the extension strip, the rear cap-screw bosses and stay inside the
-    # cavity's R7 corner pocket; the pilot must not pierce the arm.
-    rear_row = min(CAP_SIDE_SCREW_Y)
-    for lx in WALL_LOCK_X:
-        if abs(lx) - 3.5 < 121.0:
-            errors.append('wall lock screw at X{:.0f} crowds the extension strip'.format(lx))
-        if WALL_LOCK_Y + 3.5 > rear_row - 6.0 - 2.0:
-            errors.append('wall lock corridor runs into the rear cap-screw boss')
-        if math.hypot(abs(lx) - 130.0, WALL_LOCK_Y + 130.0) + 3.5 > 6.5:
-            errors.append('wall lock corridor at X{:.0f} leaves the R7 corner pocket'.format(lx))
-        if abs(lx) + WALL_ARM_W / 2.0 > WALL_PLATE_X_HALF - 2.0:
-            errors.append('under-floor arm at X{:.0f} hangs off the wall plate'.format(lx))
-    if WALL_LOCK_PILOT_DEPTH > WALL_ARM_TH - 0.8:
-        errors.append('wall lock pilot would pierce the under-floor arm')
-    if 10.0 - 3.0 - (0.0 - WALL_ARM_TOP_Z) > WALL_LOCK_PILOT_DEPTH:
-        errors.append('an M4 x 10 lock screw bottoms out before clamping the floor')
-    if WALL_ARM_Y0 < WALL_LOCK_Y + 5.0:
-        errors.append('under-floor arm stops short of its own lock screw')
-    for wx, wz in WALL_SCREW_POS:
-        if wz + WALL_SCREW_HEAD_D / 2.0 > CLEAT_FACE_Z0 - 1.0:
-            errors.append('wall screw at Z{:.0f} runs into the cleat face'.format(wz))
-        if abs(wx) > WALL_PLATE_X_HALF - 10.0 or wz < WALL_PLATE_BOT_Z + 8.0:
-            errors.append('wall screw at ({:.0f},{:.0f}) sits too near the plate edge'
-                          .format(wx, wz))
-    if WALL_SCREW_HEAD_DEPTH + 4.0 > WALL_PLATE_TH:
-        errors.append('wall screw head pocket leaves under 4mm of plate')
+    # Mounting flanges: they must sit proud enough that the box rests on THEM
+    # and not on the cap skirt or a detent bump, stay clear of the skirt
+    # vertically, keep real material around each hole, and land outside the
+    # box footprint where a drill and a driver can actually reach.
+    if MOUNT_EAR_STANDOFF <= 3.0:
+        errors.append('mounting ears do not stand proud of the cap skirt (Y-143)')
+    if MOUNT_EAR_STANDOFF <= CAP_SNAP_PROUD + 1.0:
+        errors.append('mounting ears do not clear the back snap detents')
+    if max(MOUNT_EAR_Z) + MOUNT_EAR_H / 2.0 > 63.0:
+        errors.append('a mounting ear rises into the cap skirt (skirt bottom Z65)')
+    if min(MOUNT_EAR_Z) - MOUNT_EAR_H / 2.0 < 3.0:
+        errors.append('a mounting ear hangs below the tub floor')
+    if len(set(MOUNT_EAR_Z)) != 2 or abs(MOUNT_EAR_Z[1] - MOUNT_EAR_Z[0]) < 30.0:
+        errors.append('mounting ears need two well-separated heights per side')
+    if MOUNT_EAR_HOLE_OUT - MOUNT_EAR_HOLE_D / 2.0 < 4.0:
+        errors.append('wall screw sits too close to the box wall to get a driver in')
+    if MOUNT_EAR_OUT - MOUNT_EAR_HOLE_OUT - MOUNT_EAR_HOLE_D / 2.0 < 4.0:
+        errors.append('wall screw leaves under 4mm of ear beyond its hole')
+    if MOUNT_EAR_H - MOUNT_EAR_HOLE_D - MOUNT_EAR_SLOT < 5.0:
+        errors.append('mounting ear is too short around its levelling slot')
+    if MOUNT_EAR_TH < MOUNT_EAR_STANDOFF + 3.0:
+        errors.append('mounting ear is not thick enough to bury a root in the corner')
+    if len(mount_ear_points()) != 4:
+        errors.append('there must be exactly four wall-screw points')
     return errors
 
 

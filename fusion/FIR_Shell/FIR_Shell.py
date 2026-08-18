@@ -244,8 +244,8 @@ def cyl_x(comp, cy, cz, xcenter, d, span, op, parts=None):
 
 def poly_x(comp, pts_yz, xcenter, span, op, parts=None):
     # closed polygon on the yZ plane (points are (y, z) mm), extruded along X
-    # symmetric about xcenter - used for the 45-degree wall-cleat bar, which a
-    # rectangle cannot make and a stepped approximation would not mate.
+    # symmetric about xcenter - used for the cap skirt's lead-in chamfer, which
+    # a rectangle cannot make.
     # MEASURED yZ convention: sketch-U = world -Z, sketch-V = world +Y.
     sk = comp.sketches.add(comp.yZConstructionPlane)
     lines = sk.sketchCurves.sketchLines
@@ -500,6 +500,42 @@ def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, la
     return
 
 
+def build_mount_ears(comp, sh):
+    """Four wall-mounting flanges on the tub's back corners.
+
+    One box per ear (root buried in the corner so the JOIN is structural),
+    then a vertical levelling slot: a round hole plus a short slot above and
+    below it, so the installer can true the box up after the anchors are in.
+    """
+    ear_y0 = INTERFACE.mount_plane_y()                 # -144, the wall face
+    ear_y1 = ear_y0 + INTERFACE.MOUNT_EAR_TH           # -134, buried in the box
+    hole_d = INTERFACE.MOUNT_EAR_HOLE_D
+    for sxs in (-1.0, 1.0):
+        x_root = sxs * (HALF - WALL)                   # +-137, inside the wall
+        x_tip = sxs * (HALF + INTERFACE.MOUNT_EAR_OUT)
+        hx = sxs * (HALF + INTERFACE.MOUNT_EAR_HOLE_OUT)
+        for ez in INTERFACE.MOUNT_EAR_Z:
+            box(comp, (x_root + x_tip) / 2.0, (ear_y0 + ear_y1) / 2.0,
+                ez - INTERFACE.MOUNT_EAR_H / 2.0,
+                abs(x_tip - x_root), ear_y1 - ear_y0,
+                INTERFACE.MOUNT_EAR_H, JOIN, [sh])
+            # levelling slot: round ends + a straight waist between them
+            for dz in (-INTERFACE.MOUNT_EAR_SLOT / 2.0,
+                       INTERFACE.MOUNT_EAR_SLOT / 2.0):
+                cyl_y(comp, hx, ez + dz, (ear_y0 + ear_y1) / 2.0,
+                      hole_d, INTERFACE.MOUNT_EAR_TH + 4.0, CUT, [sh])
+            box_y(comp, hx, ez, (ear_y0 + ear_y1) / 2.0,
+                  hole_d, INTERFACE.MOUNT_EAR_SLOT,
+                  INTERFACE.MOUNT_EAR_TH + 4.0, CUT, [sh])
+    SKIPPED.append(
+        'wall mount: four M5/#10 anchors at (X{:.0f}, Z{:.0f}) and (X{:.0f}, '
+        'Z{:.0f}) on both sides. Mark through the ears, drill, hang, level in '
+        'the slots, tighten. Nothing enters the box; the cap fits over them.'
+        .format(INTERFACE.mount_ear_points()[0][0], INTERFACE.MOUNT_EAR_Z[0],
+                INTERFACE.mount_ear_points()[0][0], INTERFACE.MOUNT_EAR_Z[1]))
+    return
+
+
 def build(comp):
     # ---- FLOOR + side/back walls. EVERYTHING STOPS AT Y=137: the bottom lid IS the front face
     #      (it fills the slab Y137-140), so the tub leaves that slab completely open. The old
@@ -606,38 +642,21 @@ def build(comp):
 
     # (BUZZER/alarm seat REMOVED - Francis will just bolt it; no cradle needed)
 
-    # ================= WALL MOUNT: cleat bar + in-box lock screws =================
-    # The two 11mm keyholes are GONE: they could barely hold a 2-3kg loaded
-    # box and their wall-screw heads protruded into the 4mm gap in front of
-    # the adapter bank.  The box now hangs on the printed FIR WALL PLATE:
-    # this full-width 45-degree bar drops onto the plate's matching face and
-    # wedges the box back against it; the plate's crest wall sits behind the
-    # bar tip so the box must LIFT 4.4mm before it can be pulled off; and the
-    # two floor lock screws below stop it lifting.  The bar's 45-degree
-    # underside prints support-free on the vertical back wall; its 1mm root
-    # is buried in the wall so the JOIN can never leave a floating lump.
-    bar_tip_y = -HALF - INTERFACE.CLEAT_BAR_RUN
-    poly_x(comp, ((-HALF + 1.0, INTERFACE.CLEAT_FACE_Z0),
-                  (-HALF, INTERFACE.CLEAT_FACE_Z0),
-                  (bar_tip_y, INTERFACE.cleat_bar_tip_z()),
-                  (bar_tip_y, INTERFACE.CLEAT_BAR_TOP_Z),
-                  (-HALF + 1.0, INTERFACE.CLEAT_BAR_TOP_Z)),
-           0.0, 2.0 * INTERFACE.CLEAT_BAR_X_HALF, JOIN, [sh])
-    # Lock screws: M4 x 10 (same screw as the horn wings) driven straight
-    # DOWN from inside the box, through the floor, into the plate's
-    # under-floor arms.  They live in the R7 back-corner pockets, clear of
-    # the extension strip, the rear cap bosses and the strap lugs - and they
-    # are unreachable once the cap is on, which is the anti-theft.
-    for lx in INTERFACE.WALL_LOCK_X:
-        cyl(comp, lx, INTERFACE.WALL_LOCK_Y, -1,
-            INTERFACE.WALL_LOCK_CLEAR_D, FLOOR + 2, CUT, [sh])
-    SKIPPED.append(
-        'wall mount: hang the tub on the FIR WALL PLATE cleat, drive the two '
-        'M4 x 10 floor lock screws from INSIDE at (+-{:.0f}, {:.0f}), THEN fit '
-        'the cap - the screws are unreachable once the cap is on.'
-        .format(abs(INTERFACE.WALL_LOCK_X[0]), INTERFACE.WALL_LOCK_Y))
+    # ================= WALL MOUNT: four integral mounting flanges ============
+    # Third design, and this one is what commercial wall-mount enclosures
+    # actually use.  Gone: the two keyholes (could barely hold 2-3kg, screw
+    # heads poked into the adapter bay) and the separate cleat plate (needed a
+    # second 276mm print and, in the owner's words, "could not mount
+    # anything").  Now four ears grow out of the back corners, two per side,
+    # each with a plain vertical slot for an M5/#10 wall anchor: drill four
+    # holes, drive four screws, hang the box.  No fastener enters the box.
+    #
+    # Their back faces stand 4mm proud of the tub back, which clears the cap
+    # skirt (Y-143) and the back detent bumps (Y-141.2), so the box really
+    # rests on the ears.  All of it stays under Z63, below the skirt.
+    build_mount_ears(comp, sh)
 
-    # ================= SIDE-BOLT bosses at the lid overlap (lid skirt bolts in from the SIDE) =================
+    # ================= SIDE-BOLT bosses at the lid overlap    # ================= SIDE-BOLT bosses at the lid overlap (lid skirt bolts in from the SIDE) =================
     # block on the side-wall INNER face + a HORIZONTAL (X) pilot - the bolt
     # enters from the side through the lid skirt, not from the top.  Four rows
     # per wall now: the rearmost row (Y-118) replaces the old back pair, so
@@ -1010,11 +1029,10 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v36: PLANE FIX (measured) - the 8 side screws, their seat pads and the '
-           'cleat bar now land where they always claimed to (Fusion sketch '
-           'axes were swapped; Francis was right, they WERE floating). Plus '
-           'the v34 indoor screen/LED roof, tamper pairs, chamfer, wall plate '
-           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v37: FOUR cap screws (two per side wall at Y+-85) and a real wall '
+           'mount - four integral flanges with levelling slots replace the '
+           'cleat plate; screen centred on the roof. Plane conventions are '
+           'probe-measured / interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):

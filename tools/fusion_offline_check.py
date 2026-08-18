@@ -732,7 +732,7 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v36', any('v36' in m for m in msgs))
+    c.check('FIR_Shell popup states v37', any('v37' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -751,8 +751,8 @@ def check_tree(root, label):
                    and near(s.world_centre()[2], z72)
                    and s.a0 <= wall <= s.a1]
             ok_rows.append(len(hit) == 1)
-    c.check('tub: 8 cap-screw pilots on the side walls at Z72',
-            len(pilots) == 8 and all(ok_rows),
+    c.check('tub: 4 cap-screw pilots - two per side wall at Z72',
+            len(pilots) == 4 and all(ok_rows),
             'rows {}'.format(rows))
     c.check('tub: no back-wall cap screws remain',
             not [s for s in tub.solids('cut', 'circle', 'xZ')
@@ -762,61 +762,10 @@ def check_tree(root, label):
             not [s for s in tub.solids('cut', 'circle', 'xZ')
                  if near(s.shape[2], 5.5)])
 
-    # cleat bar: polygon on the back wall, correct profile
-    bars = tub.solids('join', 'poly', 'yZ')
-    c.check('tub: cleat bar exists', len(bars) == 1)
-    if bars:
-        bar = bars[0]
-        x0, x1, y0, y1, z0, z1 = bar.aabb()
-        tipz = interface.cleat_bar_tip_z()
-        c.check('tub: cleat bar spans X +-{:.0f}, Y {:.1f}..{:.1f}, '
-                'Z {:.1f}..{:.1f}'.format(interface.CLEAT_BAR_X_HALF,
-                                          y0, y1, z0, z1),
-                near(x0, -interface.CLEAT_BAR_X_HALF)
-                and near(x1, interface.CLEAT_BAR_X_HALF)
-                and near(y0, -140.0 - interface.CLEAT_BAR_RUN)
-                and near(z0, interface.CLEAT_FACE_Z0)
-                and near(z1, interface.CLEAT_BAR_TOP_Z))
-        c.check('tub: bar top clears the cap skirt (Z65) by {:.1f}mm'
-                .format(65.0 - z1), z1 <= 64.0)
-        # the 45-degree underside: both defining points on z = -y - c.
-        # yZ sketch points are (U, V) = (-worldZ, worldY) - map back to world.
-        bar_pts = [(v, -u) for u, v in bar.shape]
-        cft = [pt for pt in bar_pts if near(pt[0], -140.0)]
-        tip = [pt for pt in bar_pts
-               if near(pt[0], -140.0 - interface.CLEAT_BAR_RUN)
-               and near(pt[1], tipz)]
-        line_c = -(-140.0) - interface.CLEAT_FACE_Z0
-        c.check('tub: bar underside is a true 45deg face (z=-y-{:.1f})'
-                .format(line_c),
-                any(near(pt[1], interface.CLEAT_FACE_Z0) for pt in cft)
-                and len(tip) == 1)
-
-    # floor lock holes
-    locks = [s for s in tub.solids('cut', 'circle', 'xY')
-             if near(s.shape[2], interface.WALL_LOCK_CLEAR_D / 2.0)]
-    c.check('tub: 2 floor lock holes at (+-{:.0f}, {:.0f})'
-            .format(abs(interface.WALL_LOCK_X[0]), interface.WALL_LOCK_Y),
-            len(locks) == 2 and
-            sorted(round(s.shape[0], 3) for s in locks) ==
-            sorted(interface.WALL_LOCK_X) and
-            all(near(s.shape[1], interface.WALL_LOCK_Y) for s in locks))
-    if locks:
-        lx = interface.WALL_LOCK_X[1]
-        ly = interface.WALL_LOCK_Y
-        c.check('tub: floor material around the lock hole, open at its centre',
-                tub.material_at((lx + 3.2, ly, 1.5))
-                and not tub.material_at((lx, ly, 1.5)))
-        # straight-down driver corridor: no tub material from Z5 up to Z80
-        clear = True
-        for dz in range(5, 80, 3):
-            for du, dv in ((0, 0), (3.4, 0), (-3.4, 0), (0, 3.4), (0, -3.4),
-                           (2.4, 2.4), (2.4, -2.4), (-2.4, 2.4), (-2.4, -2.4)):
-                if tub.material_at((lx + du, ly + dv, float(dz))) or \
-                        tub.material_at((-lx + du, ly + dv, float(dz))):
-                    clear = False
-        c.check('tub: 7mm driver corridors above both lock screws are open '
-                '(Z5..80)', clear)
+    c.check('tub: cleat bar and floor locks are gone (mount is now the ears)',
+            not tub.solids('join', 'poly', 'yZ')
+            and not [s for s in tub.solids('cut', 'circle', 'xY')
+                     if near(s.shape[2], 2.25)])
 
     # cap: 8 seat pads + counterbores + through holes, aligned through the flip
     pads = [s for s in cap.solids('join', 'circle', 'yZ')
@@ -825,8 +774,8 @@ def check_tree(root, label):
               if near(s.shape[2], interface.M3_SEAT_CBORE_D / 2.0)]
     through = [s for s in cap.solids('cut', 'circle', 'yZ')
                if near(s.shape[2], 1.7)]
-    c.check('cap: 8 visible seat pads / 8 counterbores / 8 through holes',
-            len(pads) == 8 and len(cbores) == 8 and len(through) == 8)
+    c.check('cap: 4 visible seat pads / 4 counterbores / 4 through holes',
+            len(pads) == 4 and len(cbores) == 4 and len(through) == 4)
     lh = 52.0
     cap_ox = shell_mod.BOX_W + 50.0        # the cap is laid out beside the tub
     align = []
@@ -947,8 +896,8 @@ def check_tree(root, label):
             'INTERFERENCE' not in shell_notes)
     c.check('FIR_Shell: insert decision is raised in the popup',
             'DECISION PENDING' in shell_notes and 'insert' in shell_notes)
-    c.check('FIR_Shell: wall-mount install order is stated',
-            'THEN fit' in shell_notes.replace('\n', ' '))
+    c.check('FIR_Shell: wall-mount instructions are stated',
+            'wall mount' in shell_notes and 'anchors' in shell_notes)
 
     # ---------------- FIR_BottomLid --------------------------------------
     lid_mod, lid_design, msgs = run_script(
@@ -1082,68 +1031,48 @@ def check_tree(root, label):
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
-    # ---------------- FIR_WallPlate --------------------------------------
-    wp_mod, wp_design, msgs = run_script(
-        world, p('FIR_WallPlate'), 'wallplate')
-    c.check('FIR_WallPlate run() completed',
-            msgs and 'failed' not in msgs[-1])
-    c.check('FIR_WallPlate popup states v3', any('v3' in m for m in msgs))
-    plate = body_named(wp_design, 'FIR WALL PLATE')
-    slabs = plate.solids('new', 'poly', 'yZ')
-    c.check('WallPlate: slab+cleat is one polygon profile', len(slabs) == 1)
-    if slabs:
-        x0, x1, y0, y1, z0, z1 = slabs[0].aabb()
-        c.check('WallPlate: {:.0f} wide x {:.1f} tall x {:.0f} thick'
-                .format(x1 - x0, y1 - y0, z1 - z0),
-                near(x1 - x0, 2 * interface.WALL_PLATE_X_HALF)
-                and near(z1 - z0, interface.WALL_PLATE_TH))
-        # the cleat face, mapped to ASSEMBLED coords, must be COLLINEAR with
-        # the tub bar's 45deg underside: assembled y = lz + WALL_FACE_Y,
-        # assembled z = -ly.
-        # yZ sketch (U, V) = (-localZ, localY); local Z is the plate's own
-        # depth axis, mapped to shell Y, and local Y maps to shell -Z.
-        pts = [(-u + interface.WALL_FACE_Y, -v) for u, v in slabs[0].shape]
-        on_line = [pt for pt in pts
-                   if near(pt[1], -pt[0] - (140.0 - interface.CLEAT_FACE_Z0))]
-        c.check('WallPlate: plate 45deg face is collinear with the tub bar '
-                'face (wedge mates flush)', len(on_line) >= 2,
-                'shared line z = -y - {:.1f}, {} profile points on it'
-                .format(140.0 - interface.CLEAT_FACE_Z0, len(on_line)))
-        crest = [pt for pt in pts
-                 if near(pt[0], interface.cleat_crest_front_y())]
-        c.check('WallPlate: crest wall at Y{:.1f}, top Z{:.0f} -> box must '
-                'lift {:.1f}mm to unhook'
-                .format(interface.cleat_crest_front_y(),
-                        interface.CLEAT_CREST_TOP_Z,
-                        interface.cleat_interlock()),
-                len(crest) >= 1 and interface.cleat_interlock() >= 3.0)
-    arms = [s for s in plate.solids('join', 'rect', 'xY')]
-    c.check('WallPlate: 2 under-floor arms', len(arms) == 2)
-    apilots = [s for s in plate.solids('cut', 'circle', 'xZ')
-               if near(s.shape[2], interface.WALL_LOCK_PILOT_D / 2.0)]
-    # world (part-local) coordinates: X = shell X, Z = distance from the wall
-    # face, which is where the tub's lock holes sit
-    ok_pilots = (len(apilots) == 2 and all(
-        near(s.world_centre()[0], lx)
-        and near(s.world_centre()[2],
-                 interface.WALL_LOCK_Y - interface.WALL_FACE_Y)
-        for s, lx in zip(sorted(apilots, key=lambda s: s.world_centre()[0]),
-                         sorted(interface.WALL_LOCK_X))))
-    c.check('WallPlate: arm pilots line up under the tub floor holes',
-            ok_pilots,
-            'M4 x 10 = 3 floor + 0.4 lift + {:.1f} bite, 1mm arm left below'
-            .format(interface.WALL_LOCK_PILOT_DEPTH - 0.4))
-    wscrews = [s for s in plate.solids('cut', 'circle', 'xY')
-               if near(s.shape[2], interface.WALL_SCREW_D / 2.0)]
-    wpockets = [s for s in plate.solids('cut', 'circle', 'xY')
-                if near(s.shape[2], interface.WALL_SCREW_HEAD_D / 2.0)]
-    c.check('WallPlate: {} wall screws, every head pocketed below the '
-            'contact face'.format(len(interface.WALL_SCREW_POS)),
-            len(wscrews) == len(interface.WALL_SCREW_POS)
-            and len(wpockets) == len(interface.WALL_SCREW_POS)
-            and all(near(s.a0, interface.WALL_PLATE_TH
-                         - interface.WALL_SCREW_HEAD_DEPTH)
-                    for s in wpockets))
+    # ---------------- wall mounting: integral flanges ---------------------
+    # The separate cleat plate is retired; the mount is part of the tub now.
+    ears = [s for s in tub.solids('join', 'rect', 'xY')
+            if near(2 * s.shape[2],
+                    abs(interface.MOUNT_EAR_OUT + 3.0))]
+    ear_bodies = [s for s in tub.solids('join', 'rect', 'xY')
+                  if near(s.a1 - s.a0, interface.MOUNT_EAR_H)
+                  and abs(s.world_centre()[0]) > 140.0]
+    c.check('tub: 4 integral mounting flanges, two per side',
+            len(ear_bodies) == 4
+            and sorted(round(abs(b.world_centre()[2]), 1)
+                       for b in ear_bodies) ==
+            sorted([interface.MOUNT_EAR_Z[0]] * 2 +
+                   [interface.MOUNT_EAR_Z[1]] * 2))
+    if ear_bodies:
+        back = min(b.aabb()[2] for b in ear_bodies)
+        c.check('tub: ears rest the box on Y{:.0f} - proud of the cap skirt '
+                '(Y-143) and the back detents (Y-141.2)'
+                .format(interface.mount_plane_y()),
+                near(back, interface.mount_plane_y())
+                and back < -143.0)
+        top = max(b.aabb()[5] for b in ear_bodies)
+        c.check('tub: ear tops at Z{:.0f} stay under the cap skirt (Z65)'
+                .format(top), top <= 63.0)
+    slots = [s for s in tub.solids('cut', 'circle', 'xZ')
+             if near(s.shape[2], interface.MOUNT_EAR_HOLE_D / 2.0)]
+    waists = [s for s in tub.solids('cut', 'rect', 'xZ')
+              if near(2 * s.shape[2], interface.MOUNT_EAR_HOLE_D)]
+    anchor_xz = sorted((round(w.world_centre()[0], 1),
+                        round(w.world_centre()[2], 1)) for w in waists)
+    c.check('tub: 4 levelling slots on the wall-anchor points {}'
+            .format(anchor_xz),
+            len(slots) == 8 and len(waists) == 4
+            and anchor_xz == sorted((round(x, 1), round(z, 1))
+                                    for x, z in interface.mount_ear_points()))
+    # a driver must reach every wall anchor from outside the box footprint
+    c.check('tub: wall anchors sit {:.0f}mm clear of the box side, reachable '
+            'with the box in place'
+            .format(interface.MOUNT_EAR_HOLE_OUT
+                    - interface.MOUNT_EAR_HOLE_D / 2.0),
+            all(abs(x) - interface.MOUNT_EAR_HOLE_D / 2.0 > 140.0
+                for x, _ in interface.mount_ear_points()))
 
     # ---------------- FIR_FitCoupons -------------------------------------
     fc_mod, fc_design, msgs = run_script(
@@ -1176,9 +1105,9 @@ def check_tree(root, label):
                 printed_shells = [
                     b for b in chk_design.rootComponent.bodies_list
                     if b.name.startswith('CHECK: ALL-UP')]
-                c.check('FIR_ShellCheck SHELLS_ONLY: exactly the five printed '
+                c.check('FIR_ShellCheck SHELLS_ONLY: exactly the four printed '
                         'shells, no loose inspection hardware',
-                        len(printed_shells) == 5)
+                        len(printed_shells) == 4)
             c.check('FIR_ShellCheck {}: no interference / handedness faults'
                     .format(mode),
                     'INTERFERENCE' not in text
@@ -1221,9 +1150,9 @@ def check_tree(root, label):
         placed.append(near(abs(cx), 138.0, 0.01)
                       and any(near(cy, r, 0.01) for r in rows)
                       and near(cz, z72, 0.01) and crosses)
-    c.check('FIR_ShellCheck DEFAULT: all 8 cap screw markers stand through '
-            'their side walls at Z72 (the yZ bug is dead)',
-            len(marks) == 8 and all(placed))
+    c.check('FIR_ShellCheck DEFAULT: all 4 cap screw markers stand through '
+            'their side walls at Z72 (the plane bug is dead)',
+            len(marks) == 4 and all(placed))
 
     return c.report()
 

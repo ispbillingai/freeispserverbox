@@ -132,7 +132,7 @@ SHELLS_ONLY = True
 SHOW_SCREW_MARKERS = False
 # PRESENTATION mode (18 Aug two-AI review, D6): every shell fully OPAQUE plus
 # the fastener marker pins drawn solid in place.  The transparent inspection
-# view turns attached features (seat pads, the cleat bar, the wall plate)
+# view turns attached features (seat pads, the mounting flanges)
 # into what look like floating ghosts - that view is for interference
 # checking; THIS one is what the owner should render and react to, so it is
 # now the DEFAULT: just run the script, no editing.  Combine with CAP_LIFT /
@@ -140,10 +140,10 @@ SHOW_SCREW_MARKERS = False
 # interference view.
 PRESENTATION = True
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v45: PLANE FIX (probe-measured) - side screws, pads, cleat bar and the front-lid pilots all land correctly now. '
+CHECK_VERSION = ('v46: FOUR cap screws (two per side) + integral wall-mounting flanges (the cleat plate is retired). '
                  'PRESENTATION=True gives an opaque, fastener-marked review view '
                  '(transparent stays for interference only). Five printed shells - tub, '
-                 'deep cap, BottomLid, CurvedLid, WALL PLATE - with every outside screw '
+                 'deep cap, BottomLid, CurvedLid - with every outside screw '
                  'in a visible seat. All 8 cap screws are on the side walls; the '
                  'keyholes are gone. SHELLS_ONLY=False restores the internals; '
                  'SHOW_SCREW_MARKERS=True adds the fastener marker pins.')
@@ -823,11 +823,11 @@ def build_screw_markers(comp):
             body.name = CHECK_PREFIX + ' cap SIDE screw M3 (Y{:.0f}, {}X wall)'.format(
                 sy, '+' if sxs > 0 else '-')
             set_opacity(body, 0.85)
-    for lx in INTERFACE.WALL_LOCK_X:            # 2 wall-mount floor locks
-        body = cyl(comp, lx, INTERFACE.WALL_LOCK_Y, -10.0, 3.0, 24.0,
-                   NEW).bodies.item(0)
-        body.name = (CHECK_PREFIX + ' wall-mount floor lock M4 (X{:.0f}, driven '
-                     'DOWN from inside)'.format(lx))
+    for ex, ez in INTERFACE.mount_ear_points():   # 4 wall anchors, in the ears
+        body = cyl_y(comp, ex, ez, INTERFACE.mount_plane_y() + 5.0, 4.5, 30.0,
+                     NEW).bodies.item(0)
+        body.name = (CHECK_PREFIX + ' WALL ANCHOR M5 (X{:.0f}, Z{:.0f}) - into '
+                     'the wall'.format(ex, ez))
         set_opacity(body, 0.85)
     for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72),
                      (-132, 44), (132, 44)):    # 6 BottomLid screws
@@ -858,40 +858,19 @@ def build_screw_markers(comp):
         'into their skirt windows (the cap holds itself), then 8 M3 screws lock it.')
 
 
-def build_actual_wall_plate(comp):
-    """Build the real FIR_WallPlate and hang it where the wall actually is.
-
-    The plate is authored lying wall-face down (local X = shell X, local
-    Y = -shell Z, local Z = shell Y - WALL_FACE_Y).  A -90 degree rotation
-    about X plus a WALL_FACE_Y shift inverts that mapping exactly.
-    """
-    plate_source = _load_active_builder('FIR_WallPlate')
-    plate = plate_source.build(comp)
-    plate.name = CHECK_PREFIX + ' wall plate (actual FIR_WallPlate)'
-    coll = adsk.core.ObjectCollection.create()
-    coll.add(plate)
-    matrix = adsk.core.Matrix3D.create()
-    matrix.setToRotation(-math.pi / 2.0, adsk.core.Vector3D.create(1, 0, 0),
-                         adsk.core.Point3D.create(0, 0, 0))
-    matrix.translation = adsk.core.Vector3D.create(
-        0, mm(INTERFACE.WALL_FACE_Y), 0)
-    comp.features.moveFeatures.add(comp.features.moveFeatures.createInput(coll, matrix))
-    set_opacity(plate, 0.35)
-
-    # The numbers that make this mount work, restated every run.
+def report_wall_mount():
+    """State the mount in numbers, since it is now part of the tub itself."""
+    pts = INTERFACE.mount_ear_points()
     SKIPPED.append(
-        'wall mount: tub cleat bar drops onto the plate 45deg face and wedges the '
-        'box back flat against it; the crest wall means the box must LIFT {:.1f}mm '
-        'before it can be pulled off, and the two in-box M4 x 10 floor locks at '
-        '(+-{:.0f}, {:.0f}) stop that lift. Cap skirt bottom Z65 clears the plate '
-        'top Z{:.0f} by {:.0f}mm; the skirt outer face at Y-143 clears the building '
-        'wall at Y{:.0f} by {:.0f}mm. Install: plate -> hang tub -> floor locks '
-        'from inside -> cap. With the cap screwed on, the box cannot leave the wall.'
-        .format(INTERFACE.cleat_interlock(), abs(INTERFACE.WALL_LOCK_X[0]),
-                INTERFACE.WALL_LOCK_Y, INTERFACE.WALL_PLATE_TOP_Z,
-                65.0 - INTERFACE.WALL_PLATE_TOP_Z, INTERFACE.WALL_FACE_Y,
-                abs(INTERFACE.WALL_FACE_Y) - 143.0))
-    return plate
+        'wall mount: FOUR integral flanges (two per side, X{:.0f} and X{:.0f}, '
+        'at Z{:.0f}/Z{:.0f}) take M5 or #10 anchors in {:.1f}mm levelling '
+        'slots. Their back faces sit at Y{:.0f}, {:.0f}mm proud of the tub '
+        'back, so the box rests on the ears - clear of the cap skirt (Y-143) '
+        'and the back detents (Y-141.2). Mark through the ears, drill, hang, '
+        'level, tighten; then fit the cap over them.'
+        .format(pts[0][0], pts[2][0], INTERFACE.MOUNT_EAR_Z[0],
+                INTERFACE.MOUNT_EAR_Z[1], INTERFACE.MOUNT_EAR_SLOT,
+                INTERFACE.mount_plane_y(), INTERFACE.MOUNT_EAR_STANDOFF))
 
 
 def build_actual_shell_and_cap(comp):
@@ -963,7 +942,7 @@ def run(context):
         removed = clear_old(comp)
         sh, cap = build_actual_shell_and_cap(comp)
         lid, cover = build_actual_front_closure(comp)
-        build_actual_wall_plate(comp)
+        report_wall_mount()
         horn_points = ()
         if SHELLS_ONLY:
             SKIPPED.append(
@@ -981,10 +960,9 @@ def run(context):
         if SHOW_SCREW_MARKERS or PRESENTATION:
             build_screw_markers(comp)
         app.activeViewport.fit()
-        built = ('the five printed shells ONLY (tub, deep cap, BottomLid, CurvedLid, '
-                 'wall plate)'
+        built = ('the four printed shells ONLY (tub, deep cap, BottomLid, CurvedLid)'
                  if SHELLS_ONLY else
-                 'the assembled tub, BottomLid, CurvedLid, cap, wall plate, actual '
+                 'the assembled tub, BottomLid, CurvedLid, cap, actual '
                  'brain case, actual tray, PCB/module envelopes, router, PoE switch, '
                  'three adapters, connectors and cable paths')
         message = (CHECK_VERSION + '\n\n'
