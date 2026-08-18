@@ -138,7 +138,8 @@ SHOW_SCREW_MARKERS = False
 # with CAP_LIFT / COVER_TRAVEL above for an exploded view.
 PRESENTATION = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v43: PRESENTATION=True gives an opaque, fastener-marked review view '
+CHECK_VERSION = ('v44: yZ-plane fix - side screws/pads/cleat bar land correctly now. '
+                 'PRESENTATION=True gives an opaque, fastener-marked review view '
                  '(transparent stays for interference only). Five printed shells - tub, '
                  'deep cap, BottomLid, CurvedLid, WALL PLATE - with every outside screw '
                  'in a visible seat. All 8 cap screws are on the side walls; the '
@@ -199,10 +200,12 @@ def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
 
 def cyl_x(comp, cy, cz, xcenter, d, span, op, parts=None):
     # cylinder along X (circle on the yZ plane), symmetric about xcenter -
-    # used for the side screw-axis markers
+    # used for the side screw-axis markers.
+    # REAL Fusion's yZ plane: sketch-X = world Z, sketch-Y = world Y
+    # (probe-verified, 18 Aug) - coordinates swapped at sketch time.
     sk = comp.sketches.add(comp.yZConstructionPlane)
     sk.sketchCurves.sketchCircles.addByCenterRadius(
-        adsk.core.Point3D.create(mm(cy), mm(cz), 0), mm(d / 2.0))
+        adsk.core.Point3D.create(mm(cz), mm(cy), 0), mm(d / 2.0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(xcenter) > 1e-9:

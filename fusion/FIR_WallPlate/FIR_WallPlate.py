@@ -136,14 +136,16 @@ def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
 def poly_x(comp, pts_yz, xcenter, span, op, parts=None):
     # closed polygon on the yZ plane, extruded along X - the slab-plus-cleat
     # cross-section is one profile so the 45-degree face is a true plane.
+    # REAL Fusion's yZ plane: sketch-X = world Z, sketch-Y = world Y, so the
+    # coordinates are swapped at sketch time (probe-verified, 18 Aug).
     sk = comp.sketches.add(comp.yZConstructionPlane)
     lines = sk.sketchCurves.sketchLines
     n = len(pts_yz)
     for i in range(n):
         y0, z0 = pts_yz[i]
         y1, z1 = pts_yz[(i + 1) % n]
-        lines.addByTwoPoints(adsk.core.Point3D.create(mm(y0), mm(z0), 0),
-                             adsk.core.Point3D.create(mm(y1), mm(z1), 0))
+        lines.addByTwoPoints(adsk.core.Point3D.create(mm(z0), mm(y0), 0),
+                             adsk.core.Point3D.create(mm(z1), mm(y1), 0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), op)
     if abs(xcenter) > 1e-9:
@@ -206,9 +208,9 @@ def build(comp):
     return plate
 
 
-VERSION = ('v1: wall plate + 45deg cleat (bar drops on, wedges tight, must lift '
-           '{:.1f}mm to unhook) + two under-floor arms for the in-box M4 x 10 '
-           'floor locks / interface {}'
+VERSION = ('v2: yZ-plane convention fix (the cleat profile now lands on the real '
+           'plate, not underground); 45deg cleat, lift {:.1f}mm to unhook, two '
+           'under-floor arms for the in-box M4 x 10 floor locks / interface {}'
            .format(INTERFACE.cleat_interlock(), INTERFACE.INTERFACE_VERSION))
 
 
