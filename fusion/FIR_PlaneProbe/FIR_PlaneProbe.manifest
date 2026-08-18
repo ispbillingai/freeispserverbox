@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "One-run calibration probe: builds labeled bodies on the xY, xZ and yZ construction planes to reveal Fusion's real sketch-axis and normal conventions, so the side-screw features can be fixed with certainty."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
