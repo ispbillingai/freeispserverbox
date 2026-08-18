@@ -4,7 +4,8 @@
 #  - integrated BOTTOM LID closes the front opening + bolts on with 6 self-tap screws
 #  - EXTENSION strip: a tall guide wall it rests against + wedge tabs that clamp it down
 #  - cable run: front-left cord exit + grommet collar + zip-tie slots cut through the floor
-#  - back-wall keyholes (hang on 2 screws); side-bolt bosses for the deep-cap top lid.
+#  - back-wall CLEAT BAR (hangs on the printed FIR WALL PLATE, locked by two in-box
+#    floor screws - the old keyholes are gone); side-bolt bosses for the deep-cap top lid.
 # Coordinate frame: origin at footprint centre, +Y = front (ports/UI), +Z = up. HALF = 140.
 # This is the main tub only (print BOTTOM-DOWN, no support). Bottom lid + top lid are separate.
 
@@ -138,10 +139,12 @@ SLED_Y0, SLED_Y1 = INTERFACE.HORN_SLED_Y0, INTERFACE.HORN_SLED_Y1
 SLED_TH, SLED_BOSS_H = INTERFACE.HORN_SLED_TH, INTERFACE.HORN_SLED_BOSS_H
 CURB_TH, CURB_H = INTERFACE.HORN_CURB_TH, INTERFACE.HORN_CURB_H
 CURB_CLR = INTERFACE.HORN_CURB_CLEAR
-# Cap-to-tub fastening: three screws per SIDE wall plus a BACK pair, X chosen
-# to land between the adapter bank (|X| < 103) and the corner radius.
-CAP_SIDE_SCREW_Y = (-75.0, 0.0, 75.0)
-CAP_BACK_SCREW_X = (-115.0, 115.0)
+# Cap-to-tub fastening: FOUR screws per SIDE wall, all horizontal, all
+# drivable with the box hanging on its wall.  The old back pair at X=+-115
+# could not be reached behind a wall-hung box (8mm of air), so it moved to
+# the side walls at Y=-118; the back edge keeps its two snap detents.
+CAP_SIDE_SCREW_Y = INTERFACE.CAP_SIDE_SCREW_Y
+CAP_SCREW_Z = INTERFACE.CAP_SCREW_Z
 
 SHOW_PARTS = False                               # False = print-ready (no display components/cables)
 
@@ -232,6 +235,29 @@ def cyl_x(comp, cy, cz, xcenter, d, span, op, parts=None):
     return f.add(ei)
 
 
+def poly_x(comp, pts_yz, xcenter, span, op, parts=None):
+    # closed polygon on the yZ plane (points are (y, z) mm), extruded along X
+    # symmetric about xcenter - used for the 45-degree wall-cleat bar, which a
+    # rectangle cannot make and a stepped approximation would not mate.
+    sk = comp.sketches.add(comp.yZConstructionPlane)
+    lines = sk.sketchCurves.sketchLines
+    n = len(pts_yz)
+    for i in range(n):
+        y0, z0 = pts_yz[i]
+        y1, z1 = pts_yz[(i + 1) % n]
+        lines.addByTwoPoints(adsk.core.Point3D.create(mm(y0), mm(z0), 0),
+                             adsk.core.Point3D.create(mm(y1), mm(z1), 0))
+    f = comp.features.extrudeFeatures
+    ei = f.createInput(sk.profiles.item(0), op)
+    if abs(xcenter) > 1e-9:
+        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
+            adsk.core.ValueInput.createByReal(mm(xcenter)))
+    ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
+    if parts:
+        ei.participantBodies = parts
+    return f.add(ei)
+
+
 def fillet_corners(comp, body, r, cx=0.0, half=None, back_only=False):
     # round ONLY the 4 outer vertical corners (at cx+-half in X, +-half in Y). Call AFTER the
     # walls/skirt so the FULL-HEIGHT corner is rounded, not just the base plate. cx/half let it
@@ -273,7 +299,8 @@ def build_lid_seat(comp, sh):
     for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72), (-132, 44), (132, 44)):
         bw = 10 if abs(bx) == 132 else 9
         box(comp, bx, FRONT_Y - 4.5, bz - 4, bw, 9, 8, JOIN, [sh])      # boss block behind the lid
-        cyl_y(comp, bx, bz, FRONT_Y - 4.5, 2.6, 16, CUT, [sh])         # self-tap pilot (cuts through)
+        cyl_y(comp, bx, bz, FRONT_Y - 4.5,
+              INTERFACE.M3_BOSS_PILOT_D, 16, CUT, [sh])                 # pilot (self-tap or insert bore)
     return
 
 
@@ -519,26 +546,48 @@ def build(comp):
 
     # (BUZZER/alarm seat REMOVED - Francis will just bolt it; no cradle needed)
 
-    # ================= THEFT: back-wall keyholes (hang on 2 wall screws) =================
-    for kx in (-60, 60):
-        cyl_y(comp, kx, BOX_H - 24, -HALF + 1, 11, WALL + 2, CUT, [sh])
-        box_y(comp, kx, BOX_H - 33, -HALF + 1, 5, 18, WALL + 2, CUT, [sh])
+    # ================= WALL MOUNT: cleat bar + in-box lock screws =================
+    # The two 11mm keyholes are GONE: they could barely hold a 2-3kg loaded
+    # box and their wall-screw heads protruded into the 4mm gap in front of
+    # the adapter bank.  The box now hangs on the printed FIR WALL PLATE:
+    # this full-width 45-degree bar drops onto the plate's matching face and
+    # wedges the box back against it; the plate's crest wall sits behind the
+    # bar tip so the box must LIFT 4.4mm before it can be pulled off; and the
+    # two floor lock screws below stop it lifting.  The bar's 45-degree
+    # underside prints support-free on the vertical back wall; its 1mm root
+    # is buried in the wall so the JOIN can never leave a floating lump.
+    bar_tip_y = -HALF - INTERFACE.CLEAT_BAR_RUN
+    poly_x(comp, ((-HALF + 1.0, INTERFACE.CLEAT_FACE_Z0),
+                  (-HALF, INTERFACE.CLEAT_FACE_Z0),
+                  (bar_tip_y, INTERFACE.cleat_bar_tip_z()),
+                  (bar_tip_y, INTERFACE.CLEAT_BAR_TOP_Z),
+                  (-HALF + 1.0, INTERFACE.CLEAT_BAR_TOP_Z)),
+           0.0, 2.0 * INTERFACE.CLEAT_BAR_X_HALF, JOIN, [sh])
+    # Lock screws: M4 x 10 (same screw as the horn wings) driven straight
+    # DOWN from inside the box, through the floor, into the plate's
+    # under-floor arms.  They live in the R7 back-corner pockets, clear of
+    # the extension strip, the rear cap bosses and the strap lugs - and they
+    # are unreachable once the cap is on, which is the anti-theft.
+    for lx in INTERFACE.WALL_LOCK_X:
+        cyl(comp, lx, INTERFACE.WALL_LOCK_Y, -1,
+            INTERFACE.WALL_LOCK_CLEAR_D, FLOOR + 2, CUT, [sh])
+    SKIPPED.append(
+        'wall mount: hang the tub on the FIR WALL PLATE cleat, drive the two '
+        'M4 x 10 floor lock screws from INSIDE at (+-{:.0f}, {:.0f}), THEN fit '
+        'the cap - the screws are unreachable once the cap is on.'
+        .format(abs(INTERFACE.WALL_LOCK_X[0]), INTERFACE.WALL_LOCK_Y))
 
     # ================= SIDE-BOLT bosses at the lid overlap (lid skirt bolts in from the SIDE) =================
-    # block on the side-wall INNER face + a HORIZONTAL (X) self-tap pilot - the bolt enters from the
-    # side through the lid skirt, not from the top.
+    # block on the side-wall INNER face + a HORIZONTAL (X) pilot - the bolt
+    # enters from the side through the lid skirt, not from the top.  Four rows
+    # per wall now: the rearmost row (Y-118) replaces the old back pair, so
+    # every cap screw stays drivable with the box hanging on its wall.
     for sx in (-HALF + WALL, HALF - WALL):                  # +-137 (wall inner face)
         s = 1.0 if sx > 0 else -1.0
         for sy in CAP_SIDE_SCREW_Y:
             box(comp, sx - s * 6, sy, BOX_H - 14, 12, 12, 12, JOIN, [sh])     # boss block on the wall inner
-            cyl_x(comp, sy, BOX_H - 8, sx, 2.6, 30, CUT, [sh])               # HORIZONTAL X self-tap pilot
-    # BACK pair: the back wall previously had only a crush rib holding it, so
-    # the cap now bolts on all three closed sides - 8 screws in total.  X=+-115
-    # lands between the adapter bank (|X|<103) and the corner radius, above
-    # the keyhole slots.  Drive these two before hanging the box on its wall.
-    for bx in CAP_BACK_SCREW_X:
-        box(comp, bx, -HALF + WALL + 6, BOX_H - 14, 12, 12, 12, JOIN, [sh])
-        cyl_y(comp, bx, BOX_H - 8, -HALF + WALL, 2.6, 30, CUT, [sh])
+            cyl_x(comp, sy, CAP_SCREW_Z, sx,
+                  INTERFACE.M3_BOSS_PILOT_D, 30, CUT, [sh])                   # HORIZONTAL X pilot
 
     # ================= SELF-CLICK DETENTS (cap snaps onto the tub) =================
     # Stepped bumps on the OUTER wall faces: the descending cap skirt flexes
@@ -565,6 +614,12 @@ def build(comp):
 
     # ===== seat + bolt the integrated BOTTOM LID into the front opening =====
     build_lid_seat(comp, sh)
+    if not INTERFACE.HEAT_SET_INSERTS:
+        SKIPPED.append(
+            'DECISION PENDING: all lid/cap screws are M3 self-tappers into 2.6mm '
+            'printed pilots. A lid opened many times will strip PETG; brass M3 '
+            'heat-set inserts are the durable answer. Flip HEAT_SET_INSERTS in '
+            'FIR_Interface.py to convert every boss to the 4.0mm insert bore.')
     return sh
 
 
@@ -788,15 +843,26 @@ def build_top_lid(comp, ox):
     # ASSEMBLY NOTE: flip the printed cap over about the FRONT-BACK axis (left<->right swap) so
     # the short-wall edge stays at the FRONT; the bolt-hole pattern is symmetric either way.
     box(comp, ox, 141.75, LH - 15.5, inner, 5.5, 20, CUT, [lid])
-    # 6 clearance holes for the tub's side bolts (3 per side wall @ Y=-75/0/75; tub pilot Z72 ->
-    # print z LH-4). Without these the cap could not be bolted down at all.
+    # 8 clearance holes for the tub's side bolts (4 per side wall at the
+    # shared CAP_SIDE_SCREW_Y rows; tub pilot Z72 -> print z LH-4), and the
+    # fix for the owner's real complaint - he exported the box and could not
+    # find anywhere to screw the lids together, because a flush 3.4mm hole on
+    # a 286mm face is invisible in a shaded render.  Every hole now sits in a
+    # 12mm round pad standing 2.5mm proud of the skirt, with a 6.5mm
+    # counterbore cut back to the ORIGINAL skirt face: the location reads at
+    # a glance, the M3 pan head disappears fully into the pad, and the head
+    # still seats on the same face as before, so no engagement number moved.
+    # Rows are identical on both walls, so the assembly flip cannot misplace
+    # them.  (The old back pair is gone: it could not be driven behind a
+    # wall-hung box.  Its replacement is the fourth row at Y-118.)
+    pad_h = INTERFACE.CAP_SEAT_PAD_H
     for sxs in (-1, 1):
         for byy in CAP_SIDE_SCREW_Y:
+            cyl_x(comp, byy, LH - 4, ox + sxs * (LW / 2 + (pad_h - 1) / 2),
+                  INTERFACE.M3_SEAT_PAD_D, pad_h + 1, JOIN, [lid])     # seat pad, root 1mm in the skirt
             cyl_x(comp, byy, LH - 4, ox + sxs * (inner / 2 + 1.5), 3.4, 6, CUT, [lid])
-    # matching BACK-pair clearance holes (pattern symmetric in X, so the
-    # assembly flip cannot misplace them)
-    for bx in CAP_BACK_SCREW_X:
-        cyl_y(comp, ox + bx, LH - 4, -(inner / 2 + 1.5), 3.4, 6, CUT, [lid])
+            cyl_x(comp, byy, LH - 4, ox + sxs * (LW / 2 + pad_h),
+                  INTERFACE.M3_SEAT_CBORE_D, 2 * pad_h, CUT, [lid])    # head counterbore
     # SELF-CLICK windows: through-cuts in the skirt that swallow the tub's
     # detent bumps at full seat.  Assembled Z70..76.5 -> print z 43.5..50.
     # All positions are symmetric, so the assembly flip cannot misplace them.
@@ -814,8 +880,9 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v30: cap SELF-CLICKS onto the tub (6 stepped detents snap into skirt windows) '
-           'and bolts on three sides with 8 screws; sled-mounted horn '
+VERSION = ('v31: every cap screw sits in a VISIBLE 12mm counterbored pad (8 total, '
+           'four per side wall - the undrivable back pair moved to Y-118); keyholes '
+           'replaced by the FIR WALL PLATE cleat bar + two in-box M4 floor locks '
            '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 

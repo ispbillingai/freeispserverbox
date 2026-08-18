@@ -126,10 +126,16 @@ SHELLS_ONLY = True
 # shells so a fastener cannot be missed, which also makes them read as loose
 # bars floating beside the box.  OFF by default: the real clearance holes and
 # 2.6mm pilots are in the printed parts either way.  Set True only when you
-# want to see where every fastener runs.
+# want to see where every enclosure fastener runs.  Do not show loose hardware
+# in the default view: ShellCheck's normal mode is deliberately the five
+# printable shells only.
 SHOW_SCREW_MARKERS = False
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v39: SHELLS-ONLY inspection - the four printed shells, nothing else. '
+CHECK_VERSION = ('v42: clean five-shell wall-mount inspection - tub, '
+                 'deep cap, BottomLid, CurvedLid, WALL PLATE) with every outside screw '
+                 'in a visible seat. All 8 cap screws are on the side walls now; the '
+                 'keyholes are gone. The printed plate mates to the tub cleat; its two '
+                 'M4 floor-lock holes are in the real parts, not shown as floating screws. '
                  'SHELLS_ONLY=False restores the internals; SHOW_SCREW_MARKERS=True '
                  'adds the fastener marker pins.')
 # ---- 951 measured ports (x from left edge, z from base) ----
@@ -666,7 +672,7 @@ def build_horn_preview(comp, brain):
                 return dia / 2.0
         return HORN_W / 2.0
     checks = []
-    for by in (-75.0, 0.0, 75.0):        # wall boss rows (Z66-78, face X-125)
+    for by in INTERFACE.CAP_SIDE_SCREW_Y:   # wall boss rows (Z66-78, face X-125)
         if hy0 <= by <= hy1:
             checks.append(('cap side-bolt boss row at Y{:.0f}'.format(by),
                            (HORN_CX - bell_edge(by)) - (-HALF + WALL + 12.0)))
@@ -775,22 +781,27 @@ def build_screw_markers(comp):
     'there are no bolts'.  These pins make each fastener's position and
     direction unmissable; they are inspection bodies, not printed geometry.
     """
-    for sxs in (-1.0, 1.0):                     # 6 cap side screws
-        for sy in (-75.0, 0.0, 75.0):
-            body = cyl_x(comp, sy, 72.0 + CAP_LIFT, sxs * 138.0, 3.0, 22.0,
-                         NEW).bodies.item(0)
+    for sxs in (-1.0, 1.0):                     # 8 cap side screws (4 per wall)
+        for sy in INTERFACE.CAP_SIDE_SCREW_Y:
+            body = cyl_x(comp, sy, INTERFACE.CAP_SCREW_Z + CAP_LIFT,
+                         sxs * 138.0, 3.0, 22.0, NEW).bodies.item(0)
             body.name = CHECK_PREFIX + ' cap SIDE screw M3 (Y{:.0f}, {}X wall)'.format(
                 sy, '+' if sxs > 0 else '-')
             set_opacity(body, 0.85)
-    for bx in (-115.0, 115.0):                  # 2 cap back screws
-        body = cyl_y(comp, bx, 72.0 + CAP_LIFT, -138.0, 3.0, 22.0,
-                     NEW).bodies.item(0)
-        body.name = CHECK_PREFIX + ' cap BACK screw M3 (X{:.0f})'.format(bx)
+    for lx in INTERFACE.WALL_LOCK_X:            # 2 wall-mount floor locks
+        body = cyl(comp, lx, INTERFACE.WALL_LOCK_Y, -10.0, 3.0, 24.0,
+                   NEW).bodies.item(0)
+        body.name = (CHECK_PREFIX + ' wall-mount floor lock M4 (X{:.0f}, driven '
+                     'DOWN from inside)'.format(lx))
         set_opacity(body, 0.85)
     for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72),
                      (-132, 44), (132, 44)):    # 6 BottomLid screws
         body = cyl_y(comp, bx, bz, FRONT_Y + 2.0, 3.0, 22.0, NEW).bodies.item(0)
         body.name = CHECK_PREFIX + ' BottomLid screw M3 (X{}, Z{})'.format(bx, bz)
+        set_opacity(body, 0.85)
+    for sx in (-125.0, 125.0):                  # 2 CurvedLid lock screws
+        body = cyl_y(comp, sx, 12.0, 206.0, 3.0, 22.0, NEW).bodies.item(0)
+        body.name = CHECK_PREFIX + ' CurvedLid lock screw M3 (X{:.0f})'.format(sx)
         set_opacity(body, 0.85)
     # snap detents: mark each click point so the self-lock is visible too
     for sy in INTERFACE.CAP_SNAP_SIDE_Y:
@@ -810,6 +821,42 @@ def build_screw_markers(comp):
     SKIPPED.append(
         'cap closure: push straight down - at the last 1mm the six wall detents click '
         'into their skirt windows (the cap holds itself), then 8 M3 screws lock it.')
+
+
+def build_actual_wall_plate(comp):
+    """Build the real FIR_WallPlate and hang it where the wall actually is.
+
+    The plate is authored lying wall-face down (local X = shell X, local
+    Y = -shell Z, local Z = shell Y - WALL_FACE_Y).  A -90 degree rotation
+    about X plus a WALL_FACE_Y shift inverts that mapping exactly.
+    """
+    plate_source = _load_active_builder('FIR_WallPlate')
+    plate = plate_source.build(comp)
+    plate.name = CHECK_PREFIX + ' wall plate (actual FIR_WallPlate)'
+    coll = adsk.core.ObjectCollection.create()
+    coll.add(plate)
+    matrix = adsk.core.Matrix3D.create()
+    matrix.setToRotation(-math.pi / 2.0, adsk.core.Vector3D.create(1, 0, 0),
+                         adsk.core.Point3D.create(0, 0, 0))
+    matrix.translation = adsk.core.Vector3D.create(
+        0, mm(INTERFACE.WALL_FACE_Y), 0)
+    comp.features.moveFeatures.add(comp.features.moveFeatures.createInput(coll, matrix))
+    set_opacity(plate, 0.35)
+
+    # The numbers that make this mount work, restated every run.
+    SKIPPED.append(
+        'wall mount: tub cleat bar drops onto the plate 45deg face and wedges the '
+        'box back flat against it; the crest wall means the box must LIFT {:.1f}mm '
+        'before it can be pulled off, and the two in-box M4 x 10 floor locks at '
+        '(+-{:.0f}, {:.0f}) stop that lift. Cap skirt bottom Z65 clears the plate '
+        'top Z{:.0f} by {:.0f}mm; the skirt outer face at Y-143 clears the building '
+        'wall at Y{:.0f} by {:.0f}mm. Install: plate -> hang tub -> floor locks '
+        'from inside -> cap. With the cap screwed on, the box cannot leave the wall.'
+        .format(INTERFACE.cleat_interlock(), abs(INTERFACE.WALL_LOCK_X[0]),
+                INTERFACE.WALL_LOCK_Y, INTERFACE.WALL_PLATE_TOP_Z,
+                65.0 - INTERFACE.WALL_PLATE_TOP_Z, INTERFACE.WALL_FACE_Y,
+                abs(INTERFACE.WALL_FACE_Y) - 143.0))
+    return plate
 
 
 def build_actual_shell_and_cap(comp):
@@ -881,6 +928,7 @@ def run(context):
         removed = clear_old(comp)
         sh, cap = build_actual_shell_and_cap(comp)
         lid, cover = build_actual_front_closure(comp)
+        build_actual_wall_plate(comp)
         horn_points = ()
         if SHELLS_ONLY:
             SKIPPED.append(
@@ -898,11 +946,12 @@ def run(context):
         if SHOW_SCREW_MARKERS:
             build_screw_markers(comp)
         app.activeViewport.fit()
-        built = ('the four printed shells ONLY (tub, deep cap, BottomLid, CurvedLid)'
+        built = ('the five printed shells ONLY (tub, deep cap, BottomLid, CurvedLid, '
+                 'wall plate)'
                  if SHELLS_ONLY else
-                 'the assembled tub, BottomLid, CurvedLid, cap, actual brain case, '
-                 'actual tray, PCB/module envelopes, router, PoE switch, three '
-                 'adapters, connectors and cable paths')
+                 'the assembled tub, BottomLid, CurvedLid, cap, wall plate, actual '
+                 'brain case, actual tray, PCB/module envelopes, router, PoE switch, '
+                 'three adapters, connectors and cable paths')
         message = (CHECK_VERSION + '\n\n'
                    'Built {}.\n'
                    'Cleared {} prior ShellCheck body(ies).\n'

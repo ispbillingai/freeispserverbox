@@ -79,6 +79,10 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
+VERSION = ('v2: all 6 face screws sit in visible 12mm counterbored pads '
+           '(head land 0.8 -> 1.9mm) / interface {}'
+           .format(INTERFACE.INTERFACE_VERSION))
+
 
 def _ext(comp, prof, z0, sz, op, parts):
     f = comp.features.extrudeFeatures
@@ -197,13 +201,24 @@ def build(comp):
     # clip tabs along the top edge (locate it on the box front before bolting)
     for tx in (-130, -40, 40, 130):
         box(comp, tx, PH - 2, 0, 10, 4, PT, JOIN, [plate])
-    # ===== BOLTING: attach the lid to the main box (counterbored - heads flush on the front) =====
+    # ===== BOLTING: attach the lid to the main box - now in VISIBLE seats =====
     # 4 along the top + 2 mid-height (kept ABOVE the bottom shelf so a screwdriver can reach)
     # all 6 on the OPENING PERIMETER (4 near one long edge + 2 out on the side edges) so the
-    # shell can anchor every boss to a wall/flange (was 2 mid-span)
+    # shell can anchor every boss to a wall/flange (was 2 mid-span).
+    # The owner could not FIND these screws on the 280mm face - a flush 3.4mm
+    # hole is invisible in a shaded render.  Each one now sits in a 12mm pad
+    # standing 1.5mm proud of the face, and the counterbore is re-cut from the
+    # pad top: the head finishes flush with the pad and the land under it
+    # GROWS from 0.8mm to 1.9mm of plate.  (M3 screws now grip the tub bosses
+    # ~1.1mm less; with the through-pilot that is still 8mm of thread.)
+    pad_h = INTERFACE.LID_SEAT_PAD_H
+    cb_floor = PT + pad_h - INTERFACE.LID_SEAT_CBORE_DEPTH
     for (bx, by) in ((-120, 72), (-40, 72), (40, 72), (120, 72), (-132, 44), (132, 44)):
-        cyl(comp, bx, by, -1, 3.5, PT + 2, CUT, [plate])      # M3 through-hole
-        cyl(comp, bx, by, PT - 2.2, 6.5, 3, CUT, [plate])     # counterbore (head sits flush)
+        cyl(comp, bx, by, PT - 0.5, INTERFACE.M3_SEAT_PAD_D,
+            pad_h + 0.5, JOIN, [plate])                               # seat pad, root in the plate
+        cyl(comp, bx, by, -1, 3.5, PT + pad_h + 2, CUT, [plate])              # M3 through-hole
+        cyl(comp, bx, by, cb_floor, INTERFACE.M3_SEAT_CBORE_D,
+            INTERFACE.LID_SEAT_CBORE_DEPTH + 1, CUT, [plate])                 # head counterbore
 
     # ===== STEP 1: 65mm horizontal SHELF sticking OUT from the bottom-OUTSIDE, full length =====
     box(comp, 0, 1.5, PT, PW, 3, 65, JOIN, [plate])           # Y 0-3 (bottom), out 65mm
@@ -216,7 +231,8 @@ def build(comp):
         # boss stops at z65 = 0.5 clear of the cover's INNER face (65.5); 11 deep it poked 2.5mm
         # THROUGH the cover front wall and the cover could not close
         box(comp, sx, 9.5, PT + 54, 7, 13, 8, JOIN, [plate])  # SMALL boss, just enough around the screw
-        cyl(comp, sx, 12, PT + 54, 2.6, 8, CUT, [plate])      # M3 self-tap pilot, screw enters from the front
+        cyl(comp, sx, 12, PT + 54, INTERFACE.M3_BOSS_PILOT_D, 8,
+            CUT, [plate])                                     # pilot (self-tap or insert bore)
     # ===== TOP GROOVE: build OUT 3mm at the top (lid top now meets cover top) + a 1mm channel =====
     box(comp, 0, PH + 1.5, 0, PW, 3, PT, JOIN, [plate])       # extend lid top UP 3mm -> Y 80-83
     box(comp, 0, PH + 1.5, PT - 1, 250, 1.6, 2, CUT, [plate]) # 1mm-deep groove in the outer face, full width
@@ -240,8 +256,9 @@ def run(context):
         del SKIPPED[:]
         build(design.rootComponent)
         app.activeViewport.fit()
-        if SKIPPED:
-            ui.messageBox('Bottom lid built. Skipped:\n - ' + '\n - '.join(SKIPPED))
+        # ALWAYS report the version so a stale %APPDATA% deploy shows itself.
+        ui.messageBox('FIR_BottomLid {} built.{}'.format(
+            VERSION, ('\nSkipped:\n - ' + '\n - '.join(SKIPPED)) if SKIPPED else ''))
     except:  # noqa
         if ui:
             ui.messageBox('FIR_BottomLid failed:\n{}'.format(traceback.format_exc()))

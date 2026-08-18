@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-16.10'
+INTERFACE_VERSION = '2026-08-17.11'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -144,6 +144,103 @@ CAP_SNAP_PROUD = 1.2              # bump stand-off from the wall outer face
 CAP_SNAP_Z0, CAP_SNAP_Z1 = 71.0, 76.0   # bump band (flat catch at the bottom)
 CAP_SNAP_WIN_W = 10.0             # skirt window, 1mm clearance each side
 CAP_SNAP_WIN_Z0, CAP_SNAP_WIN_Z1 = 70.0, 76.5
+
+# ---------------------------------------------------------------------------
+# Cap-to-tub screws + VISIBLE screw seats (owner complaint, 16 Aug 2026)
+# ---------------------------------------------------------------------------
+# The owner exported the model and could not find anywhere to screw the lids
+# together: a flush 3.4mm hole on a 286mm face is invisible in a shaded render,
+# so every outside screw now sits in a feature you can see and feel.
+#   cap skirt: a 12mm round pad stands 2.5mm proud around each hole, with a
+#     6.5mm counterbore cut back to the original skirt face - the M3 pan head
+#     (2.4mm tall) seats on the skirt exactly as before, fully inside the pad,
+#     so every documented engagement number is unchanged.
+#   BottomLid: the same 12mm pad, 1.5mm proud, and the counterbore is re-cut
+#     from the pad top - the head land grows from 0.8mm to 1.9mm of plate.
+#   CurvedLid: it prints face-down, so a proud pad would lift it off the bed;
+#     its two lock screws get a 10mm dished recess 1.0mm into the 2.5mm face.
+M3_HEAD_H = 2.4                   # DIN 7985 pan head; button heads sit lower
+M3_SEAT_PAD_D = 12.0
+M3_SEAT_CBORE_D = 6.5
+CAP_SEAT_PAD_H = 2.5
+LID_SEAT_PAD_H = 1.5
+LID_SEAT_CBORE_DEPTH = 2.6        # from pad top -> 1.9mm land in the 3mm plate
+COVER_SEAT_D = 10.0
+COVER_SEAT_DEPTH = 1.0            # leaves 1.5mm of the 2.5mm cover face
+# Repeat-opening screws thread into printed plastic today.  Brass M3 heat-set
+# inserts are the durable answer for a lid that will be opened many times;
+# that is an OWNER DECISION not yet taken.  Flipping this one flag converts
+# every tub/lid boss pilot from a 2.6mm self-tap to the 4.0mm insert bore.
+HEAT_SET_INSERTS = False
+M3_BOSS_PILOT_D = 4.0 if HEAT_SET_INSERTS else 2.6
+# Cap fastening: EIGHT horizontal M3 at Z72, now ALL through the side walls.
+# The old back pair at X=+-115 could not be driven with the box hanging on a
+# wall (8mm of air behind it), so it moved to the side walls at Y=-118 - the
+# back edge is held by its two snap detents plus these corner-adjacent screws.
+CAP_SCREW_Z = 72.0
+CAP_SIDE_SCREW_Y = (-118.0, -75.0, 0.0, 75.0)
+
+# ---------------------------------------------------------------------------
+# Wall mounting: printed wall plate + French cleat (replaces the keyholes)
+# ---------------------------------------------------------------------------
+# The two 11mm keyholes could barely hold a 2-3kg loaded box, and their screw
+# heads protruded into the 4mm gap in front of the adapter bank.  Both are
+# gone.  The box now hangs on a separate printed FIR WALL PLATE:
+#   * the plate screws to the wall with up to six 4.5mm screws whose heads sit
+#     in pockets INSIDE the plate - nothing enters the box any more;
+#   * a full-width 45-degree cleat bar on the tub's back wall drops onto the
+#     plate's matching 45-degree face and wedges the box against the plate;
+#   * a crest wall behind the bar stops the box being pulled straight off;
+#   * two under-floor arms end below the tub floor, and two M4 x 10 screws
+#     driven DOWN from inside the box clamp the floor to them.  With the cap
+#     screwed on, those screws are unreachable: the box cannot leave the wall
+#     without first unlocking and removing the cap.  That is the anti-theft.
+# Everything below Z65 so the cap skirt (Z65..120) never touches the plate.
+WALL_PLATE_TH = 9.0               # leaves a 2.4mm crest wall behind the bar tip
+WALL_PLATE_X_HALF = 138.0
+WALL_PLATE_TOP_Z = 61.0
+WALL_PLATE_BOT_Z = -8.4
+WALL_FACE_Y = -140.0 - WALL_PLATE_TH        # the building wall sits at -149
+CLEAT_BAR_X_HALF = 95.0
+CLEAT_FACE_Z0 = 50.8              # 45deg face height at the box-back plane
+CLEAT_BAR_RUN = 5.8               # bar protrusion behind the box back
+CLEAT_TIP_CLEAR = 0.8             # air between bar tip and the crest wall
+CLEAT_CREST_TOP_Z = 61.0          # lift the box past this to unhook it
+CLEAT_BAR_TOP_Z = 64.0
+# In-box lock screws: straight-down driver corridors inside the back corner
+# fillet pockets, clear of the extension strip (|X|<=120), the rear cap-screw
+# bosses (Y-124..-112) and the strap-anchor lugs.  Same M4 x 10 as the horn.
+WALL_LOCK_X = (-129.0, 129.0)
+WALL_LOCK_Y = -130.0
+WALL_LOCK_CLEAR_D = 4.5           # clearance hole through the 3mm tub floor
+WALL_LOCK_PILOT_D = 3.4
+WALL_LOCK_PILOT_DEPTH = 7.0       # M4 x 10: 3 floor + 0.4 lift + 6.6 bite
+WALL_ARM_W = 14.0
+WALL_ARM_TH = 8.0
+WALL_ARM_TOP_Z = -0.4             # 0.4 under the floor: the cleat carries the
+                                  # weight; the screws pre-load the arms up
+WALL_ARM_Y0 = -118.0              # forward end of each under-floor arm
+WALL_SCREW_D = 4.5
+WALL_SCREW_HEAD_D = 11.0
+WALL_SCREW_HEAD_DEPTH = 3.5       # head sits below the plate front face
+WALL_SCREW_POS = ((-115.0, 40.0), (115.0, 40.0), (-115.0, 8.0),
+                  (115.0, 8.0), (0.0, 44.0), (0.0, 8.0))
+
+
+def cleat_crest_front_y():
+    """Front face of the plate's crest wall, behind the bar tip."""
+    return -140.0 - CLEAT_BAR_RUN - CLEAT_TIP_CLEAR
+
+
+def cleat_bar_tip_z():
+    """Underside height of the cleat bar at its tip (45-degree face)."""
+    return CLEAT_FACE_Z0 + CLEAT_BAR_RUN
+
+
+def cleat_interlock():
+    """How far the box must LIFT before it can be pulled off the wall."""
+    return CLEAT_CREST_TOP_Z - cleat_bar_tip_z()
+
 
 # ---------------------------------------------------------------------------
 # Alarm horn: INSIDE the box, on the floor behind the switch
@@ -377,14 +474,14 @@ def validate():
         errors.append('horn profile must flare outward toward the mouth')
     if HORN_SLED_PILOT_DEPTH > HORN_SLED_TH + HORN_SLED_BOSS_H - 0.5:
         errors.append('horn sled pilot would pierce the sled bottom')
-    # Snap detents must stay clear of the screw rows, the keyholes and the
-    # crush ribs, and their window must fully swallow the bump.
+    # Snap detents must stay clear of the screw rows and the crush ribs, and
+    # their window must fully swallow the bump.  The back wall no longer has
+    # screws or keyholes; its bumps must only clear the cleat bar's top edge.
     for sy in CAP_SNAP_SIDE_Y:
-        if min(abs(sy - r) for r in (-75.0, 0.0, 75.0)) < 20.0:
+        if min(abs(sy - r) for r in CAP_SIDE_SCREW_Y) < 20.0:
             errors.append('side snap at Y{:.0f} crowds a screw row or crush rib'.format(sy))
-    for sx in CAP_SNAP_BACK_X:
-        if abs(abs(sx) - 115.0) < 20.0 or abs(abs(sx) - 60.0) < 12.0:
-            errors.append('back snap at X{:.0f} crowds a back screw or keyhole'.format(sx))
+    if CAP_SNAP_Z0 < CLEAT_BAR_TOP_Z + 1.0:
+        errors.append('back snap bumps reach down into the cleat bar')
     if not (CAP_SNAP_WIN_Z0 < CAP_SNAP_Z0 and CAP_SNAP_Z1 < CAP_SNAP_WIN_Z1):
         errors.append('snap window does not swallow the bump')
     if CAP_SNAP_WIN_W < CAP_SNAP_W + 1.5:
@@ -401,6 +498,69 @@ def validate():
         errors.append('brain case leaves under 2mm beside the horn')
     if CASE_OUTER_W / 2.0 + CASE_TO_CAP_X > 137.0 - 15.0:
         errors.append('brain case is pushed so far +X that its J4/J5 wires have no room')
+    # Screw seats: the head must fully disappear into its pad, the deepened
+    # BottomLid counterbore must leave a real land, and the cover recess must
+    # leave printable skin in its 2.5mm face.
+    if CAP_SEAT_PAD_H < M3_HEAD_H:
+        errors.append('cap screw pad is shallower than the M3 head it must swallow')
+    if M3_SEAT_CBORE_D <= 3.6 or M3_SEAT_CBORE_D >= M3_SEAT_PAD_D - 3.0:
+        errors.append('screw-seat counterbore leaves no pad ring around the head')
+    lid_land = 3.0 + LID_SEAT_PAD_H - LID_SEAT_CBORE_DEPTH
+    if lid_land < 1.5:
+        errors.append('BottomLid counterbore leaves only {:.1f}mm under the head'
+                      .format(lid_land))
+    if COVER_SEAT_DEPTH > 1.2:
+        errors.append('cover seat recess cuts too deep into the 2.5mm face')
+    if M3_BOSS_PILOT_D not in (2.6, 4.0):
+        errors.append('M3 boss pilot must be 2.6 (self-tap) or 4.0 (heat-set insert)')
+    # Cap screw rows: all four on each side wall, clear of each other, of the
+    # snap detents, and inside the straight wall (corner radius starts |Y|133).
+    rows = sorted(CAP_SIDE_SCREW_Y)
+    if len(rows) != 4 or any(b - a < 20.0 for a, b in zip(rows, rows[1:])):
+        errors.append('cap side screw rows must be four, at least 20mm apart')
+    if any(abs(y) > 133.0 - M3_SEAT_PAD_D / 2.0 for y in CAP_SIDE_SCREW_Y):
+        errors.append('a cap screw row runs into the corner radius')
+    # Wall mount: the cleat system must stay under the cap skirt (Z65), hook
+    # deep enough to need a real lift, and keep the bar tip off the crest.
+    if CLEAT_BAR_TOP_Z > 64.0:
+        errors.append('cleat bar rises into the cap skirt (skirt bottom Z65)')
+    if WALL_PLATE_TOP_Z > 63.0:
+        errors.append('wall plate top is too close to the cap skirt')
+    if cleat_interlock() < 3.0:
+        errors.append('cleat interlock under 3mm: the box could be flicked off the wall')
+    if CLEAT_TIP_CLEAR < 0.6:
+        errors.append('cleat bar tip would scrape the crest wall on the way down')
+    if WALL_PLATE_TH - CLEAT_BAR_RUN - CLEAT_TIP_CLEAR < 2.0:
+        errors.append('crest wall thinner than 2mm: it could not resist a pull-off')
+    if CLEAT_BAR_X_HALF > WALL_PLATE_X_HALF - 4.0:
+        errors.append('cleat bar is wider than the plate that receives it')
+    # Lock screws: the straight-down driver corridor (7mm shaft) must clear
+    # the extension strip, the rear cap-screw bosses and stay inside the
+    # cavity's R7 corner pocket; the pilot must not pierce the arm.
+    rear_row = min(CAP_SIDE_SCREW_Y)
+    for lx in WALL_LOCK_X:
+        if abs(lx) - 3.5 < 121.0:
+            errors.append('wall lock screw at X{:.0f} crowds the extension strip'.format(lx))
+        if WALL_LOCK_Y + 3.5 > rear_row - 6.0 - 2.0:
+            errors.append('wall lock corridor runs into the rear cap-screw boss')
+        if math.hypot(abs(lx) - 130.0, WALL_LOCK_Y + 130.0) + 3.5 > 6.5:
+            errors.append('wall lock corridor at X{:.0f} leaves the R7 corner pocket'.format(lx))
+        if abs(lx) + WALL_ARM_W / 2.0 > WALL_PLATE_X_HALF - 2.0:
+            errors.append('under-floor arm at X{:.0f} hangs off the wall plate'.format(lx))
+    if WALL_LOCK_PILOT_DEPTH > WALL_ARM_TH - 0.8:
+        errors.append('wall lock pilot would pierce the under-floor arm')
+    if 10.0 - 3.0 - (0.0 - WALL_ARM_TOP_Z) > WALL_LOCK_PILOT_DEPTH:
+        errors.append('an M4 x 10 lock screw bottoms out before clamping the floor')
+    if WALL_ARM_Y0 < WALL_LOCK_Y + 5.0:
+        errors.append('under-floor arm stops short of its own lock screw')
+    for wx, wz in WALL_SCREW_POS:
+        if wz + WALL_SCREW_HEAD_D / 2.0 > CLEAT_FACE_Z0 - 1.0:
+            errors.append('wall screw at Z{:.0f} runs into the cleat face'.format(wz))
+        if abs(wx) > WALL_PLATE_X_HALF - 10.0 or wz < WALL_PLATE_BOT_Z + 8.0:
+            errors.append('wall screw at ({:.0f},{:.0f}) sits too near the plate edge'
+                          .format(wx, wz))
+    if WALL_SCREW_HEAD_DEPTH + 4.0 > WALL_PLATE_TH:
+        errors.append('wall screw head pocket leaves under 4mm of plate')
     return errors
 
 

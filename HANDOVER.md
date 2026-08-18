@@ -91,23 +91,33 @@ They do not share a source frame. The cover's openings were once written in the
 BottomLid's frame and every notch landed on the wrong device. `FIR_ShellCheck`
 re-verifies this every run.
 
-### 2.5 Verification harness — do this, it is the whole difference
+### 2.5 Verification harness — it exists now, run it
 
-You can execute these scripts **offline** by stubbing the Fusion API. Register fake
-`adsk` / `adsk.core` / `adsk.fusion` modules in `sys.modules` before importing the
-script, record every extrude and loft as an axis-aligned prism, then query the result for
-interference and clearance. Mind the cm↔mm factor (Fusion is internally cm) and which
-construction plane each sketch is on (`xY`→extrude Z, `xZ`→extrude Y, `yZ`→extrude X).
+`tools/fusion_offline_check.py` executes these scripts **offline** by stubbing the
+Fusion API: it registers fake `adsk` / `adsk.core` / `adsk.fusion` modules in
+`sys.modules` before importing each script, records every extrude and loft as an exact
+prism (rect/circle/polygon swept along an axis), then queries the result — screw
+alignment through both assembly flips, seat geometry, driver corridors, the cleat mate.
 
-Two rules learned the hard way:
+```
+python tools/fusion_offline_check.py                                    # workspace tree
+python tools/fusion_offline_check.py "%APPDATA%/Autodesk/Autodesk Fusion 360/API/Scripts"
+```
 
-1. **Call the script's real `run()`**, not its `build_*` functions. Calling builders
-   directly once let a stale variable name in the final `messageBox` reach Francis — the
-   model built perfectly and then threw on the last line.
-2. **Run both trees** — the workspace master and the deployed `%APPDATA%` copy.
+Run it after every geometry change, on **both trees**. Rules already learned the hard
+way, baked into the harness:
+
+1. **It calls each script's real `run()`**, not the bare `build_*` functions. Calling
+   builders directly once let a stale variable name in the final `messageBox` reach
+   Francis — the model built perfectly and then threw on the last line.
+2. Mind the cm↔mm factor (Fusion is internally cm) and which construction plane each
+   sketch is on (`xY`→extrude Z, `xZ`→extrude Y, `yZ`→extrude X).
+3. Fillets/chamfers/text are no-ops offline (the scripts guard them); the one clearance
+   that depends on fillet material — the R7 corner driver pockets — is enforced
+   analytically in `FIR_Interface.validate()` instead.
 
 This turns "run it and send me a screenshot" into "here are the measured clearances",
-which is exactly what this workflow has been missing.
+which is exactly what this workflow had been missing.
 
 ### 2.6 The parts
 
@@ -116,13 +126,14 @@ which is exactly what this workflow has been missing.
 | `FIR_Shell` | The tub, the deep top cap, and the horn sled. **The main print source.** |
 | `FIR_BottomLid` | Flat front port face, 280 × 80 × 3 |
 | `FIR_CurvedLid` | Sliding outer cover, 280 × 80 × 65 hood |
+| `FIR_WallPlate` | The wall plate the box hangs on: French cleat + under-floor lock arms |
 | `FIR_ModuleGadget` | The small brain case |
 | `FIR_ModulePlate` | The electronics tray inside it |
 | `FIR_ShellCheck` | **Inspection only, never print it.** Imports the real builders and assembles everything. |
 | `FIR_GadgetPlateCheck` | Brain case + tray fit inspection |
 
-`FIR_ShellCheck` has two useful flags at the top: `SHELLS_ONLY` (four printed shells,
-nothing else) and `SHOW_SCREW_MARKERS` (bright pins on every fastener axis).
+`FIR_ShellCheck` has two useful flags at the top: `SHELLS_ONLY` (the five printed
+shells, nothing else) and `SHOW_SCREW_MARKERS` (bright pins on every fastener axis).
 
 Older `FIR_*` scripts in the repo are superseded experiments.
 
@@ -202,11 +213,38 @@ exists**. All three measured foot bolts are driven on the bench into a printed s
 bolted-up horn+sled drops into a floor curb and two M4 wing screws (well clear of
 everything above) clamp it. Service = two screws.
 
-**Cap closure: 8 screws + 6 snap detents.** Three M3 per side wall at Y −75/0/+75 and a
-back pair at X ±115, all at Z72, horizontally through the skirt into 12 × 12 × 12 mm wall
-bosses. Six stepped bumps on the tub's outer walls (Y ±45 sides, X ±45 back) snap into
+**Cap closure: 8 screws + 6 snap detents — all screws on the side walls (17 Aug 2026).**
+Four M3 per side wall at Y −118/−75/0/+75, all at Z72, horizontally through the skirt
+into 12 × 12 × 12 mm wall bosses. The old back pair at X ±115 is **gone**: it could not
+be driven with the box hanging on a wall (8 mm of air behind it). The Y−118 row sits just
+off the back corners and replaces it; the back edge is additionally held by its two snap
+detents. Six stepped bumps on the tub's outer walls (Y ±45 sides, X ±45 back) snap into
 10 × 6.5 mm through-windows in the skirt, so the cap clicks and holds itself before any
 screw goes in.
+
+**Every outside screw sits in a visible seat (17 Aug 2026 — this was Francis's live
+complaint).** A flush 3.4 mm hole on a 286 mm face is invisible in a shaded render, so:
+the 8 cap screws each sit in a **⌀12 mm pad standing 2.5 mm proud** of the skirt with a
+⌀6.5 counterbore cut back to the original skirt face (the M3 pan head disappears fully
+into the pad; every engagement number is unchanged). The 6 BottomLid screws get the same
+⌀12 pad, 1.5 mm proud, with the counterbore re-cut from the pad top — the head land
+**grows from 0.8 to 1.9 mm**. The CurvedLid prints face-down, so its 2 lock screws get a
+⌀10 **dished recess** 1.0 mm into the face instead of a proud pad. Seat dimensions live
+in `FIR_Interface.py` (`M3_SEAT_*`, `CAP_SEAT_*`, `LID_SEAT_*`, `COVER_SEAT_*`).
+
+**Wall mount: printed wall plate + French cleat (17 Aug 2026 — replaces the keyholes).**
+The two ⌀11 keyholes could barely hold a 2–3 kg box and their screw heads protruded into
+the adapter bank; both problems are gone. `FIR_WallPlate` (276 × ~70 × 9 mm) screws to
+the wall with up to six 4.5 mm screws whose heads sit in pockets **inside the plate** —
+nothing enters the box. A full-width 45° cleat bar on the tub's back wall (X ±95,
+Z50.8–64, protruding 5.8 mm) drops onto the plate's matching 45° face and gravity wedges
+the box back flat against the plate. A crest wall behind the bar tip means the box must
+**lift 4.4 mm** before it can be pulled off — and two **M4 × 10 lock screws driven DOWN
+from inside the box** (at X ±129, Y −130, into the plate's under-floor arms) stop that
+lift. With the cap screwed on, those screws are unreachable: **the box cannot leave the
+wall without first opening it.** That is the anti-theft story. Everything sits below Z65
+so the cap skirt never touches the plate. All numbers are in `FIR_Interface.py`
+(`WALL_*`, `CLEAT_*`) and `validate()` enforces the mate.
 
 ---
 
@@ -225,34 +263,23 @@ screw goes in.
 
 ## 6. OPEN PROBLEMS — this is where the work is
 
-### 6.1 Fastening is not legible (the live complaint)
+*(Fastening legibility and wall mounting were the two big ones; both were fixed on
+17 Aug 2026 — see §4. What remains:)*
 
-Francis exported the model and **could not find anywhere to screw the two big lids
-together from outside.** The screws are there — 3.4 mm clearance holes in the cap skirt at
-Z72, plus 6 counterbored M3 through the BottomLid — but a 3.4 mm flush hole on a 286 mm
-face is invisible in a shaded render, and the only obvious features on that face are the
-10 mm snap windows.
+### 6.1 Heat-set inserts vs self-tappers (decision pending with Francis)
 
-This is a real design failure, not a rendering artifact: **a fastening point you cannot
-see is a fastening point that does not exist.** It needs visible, seated fastening —
-recessed pads or counterbores around each hole so the head sits flat and the location
-reads at a glance.
+**Eight M3 self-tappers into printed plastic on a lid that will be opened repeatedly**
+will eventually strip. Brass M3 heat-set inserts with machine screws are the normal
+answer. The geometry is one flag away: flip `HEAT_SET_INSERTS = True` in
+`FIR_Interface.py` and every tub/lid boss pilot converts from a 2.6 mm self-tap to the
+4.0 mm insert bore. `FIR_Shell`'s popup raises this on every run. Needs Francis's call
+(he'd have to buy inserts and use a soldering iron to seat them).
 
-Related: **eight M3 self-tappers into printed plastic on a lid that will be opened
-repeatedly** will strip. Brass heat-set inserts and machine screws are the normal answer
-and have not been discussed with him yet.
+### 6.2 Wall plate load testing
 
-### 6.2 Wall mounting is inadequate
-
-Currently: two keyholes in the back wall at X ±60 — an ⌀11 mm circle at Z56 with a
-5 × 18 mm slot below. Francis's judgement, which I agree with: **"those can barely even
-hold this on the wall."** The box will weigh roughly 2–3 kg loaded.
-
-Also unresolved: the wall screw heads protrude into the box at Z47–56, and the adapter
-bank starts about 4 mm inside that wall — likely interference.
-
-This needs a proper mounting design, probably a separate wall bracket or plate the box
-locks onto, and it should be treated as a real sub-problem rather than two holes.
+The cleat + arms are dimensioned generously for a 2–3 kg box (full-width 45° bearing +
+the whole back face flat on the plate), but a printed part on a real wall deserves a
+hang test with the loaded weight before rollout. Print the plate flat, wall face down.
 
 ### 6.3 Unmeasured values currently carried as assumptions
 
@@ -287,19 +314,30 @@ slowly and square; a 3 mm tilt eats the gap.
 
 ## 7. Assembly order (as designed today)
 
+0. **On the wall first:** level `FIR_WallPlate`, drive its wall screws (up to six ⌀4.5,
+   heads finish inside the plate)
 1. **Bench:** bolt the horn's foot to the printed sled with three M4 × 8
 2. Drop the horn+sled into the tub's floor curb; two M4 × 10 wing screws behind it
 3. Drop in the router and the switch (snap cradles); the switch stays serviceable
 4. Extension strip, adapters, strap
-5. BottomLid: 6 counterbored M3 from the front
-6. Cover slides on the rails, 2 lock screws
-7. **Separately:** assemble the brain stack into the cap — case-to-cap screws first while
+5. **Hang the tub:** hold it against the plate, slide down until the cleat wedges home,
+   then drive the two M4 × 10 floor locks straight down from inside at (±129, −130).
+   These must go in **before the cap** — they are unreachable afterwards, by design.
+6. BottomLid: 6 M3 into their visible pads from the front
+7. Cover slides on the rails, 2 lock screws into their dished seats
+8. **Separately:** assemble the brain stack into the cap — case-to-cap screws first while
    the case is empty, then the PCB, then the tray. This order is mandatory.
-8. Lower the cap straight down until the six detents click, then 8 M3 screws
+9. Lower the cap straight down until the six detents click, then 8 M3 side screws — all
+   of them drivable with the box on the wall
 
-Screw engagement, all verified: case-to-cap M3 × 12 = 9 mm bite; BottomLid M3 = 9 mm; cap
-side M3 = 6 mm; horn M4 × 10 = 7 mm and bottoms exactly at the pilot floor with 2 mm of
-tub floor beneath. **Never use longer than M4 × 10 in the horn pads.**
+Steps 5–9 can also be done on the bench and the whole box hung afterwards, but then the
+cap must come off again for the floor locks — hang first, cap last.
+
+Screw engagement, all verified: case-to-cap M3 × 12 = 9 mm bite; BottomLid M3 = 8 mm
+(the deeper seat costs 1.1 mm); cap side M3 = 6 mm; horn M4 × 10 = 7 mm and bottoms
+exactly at the pilot floor with 2 mm of tub floor beneath; wall-lock M4 × 10 = 6.6 mm
+into the plate arm with 1 mm of arm left below. **Never use longer than M4 × 10 in the
+horn pads or the wall-lock holes.**
 
 ---
 
@@ -321,9 +359,11 @@ tub floor beneath. **Never use longer than M4 × 10 in the horn pads.**
 
 ## 9. Suggested first moves for whoever takes over
 
-1. **Fix the fastening legibility** (§6.1) — recessed, visible screw seats on the cap and
-   the BottomLid. This is what he is asking for right now.
-2. **Design the wall mounting properly** (§6.2) — treat it as its own problem.
+1. Have Francis run `FIR_ShellCheck` (and `FIR_WallPlate`) and react to the new screw
+   seats and wall mount — both were his complaints, both are now built, and both are in
+   the deployed tree.
+2. Get his decision on heat-set inserts (§6.1) — the geometry is one flag away.
 3. Get the two outstanding measurements (§6.3) and set them.
-4. Raise heat-set inserts vs self-tappers as a decision.
-5. Build the offline harness (§2.5) before changing geometry, not after.
+4. Print the wall plate first and hang-test it with real weight (§6.2).
+5. Run `python tools/fusion_offline_check.py` on both trees after **every** geometry
+   change (§2.5) — it is fast and it has already caught real coordinate bugs.

@@ -98,6 +98,9 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
+VERSION = ('v2: the 2 lock screws sit in visible 10mm dished seats '
+           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
+
 
 def _ext(comp, prof, z0, sz, op, parts):
     f = comp.features.extrudeFeatures
@@ -171,8 +174,14 @@ def build(comp):
                 JOIN, [front])
 
     # Slide fully home, then drive two M3 screws through the front face into
-    # the BottomLid shelf bosses.
+    # the BottomLid shelf bosses.  These are the outermost screws on the whole
+    # box and were invisible flush holes; each now sits in a 10mm dished seat
+    # 1.0mm into the face (this part prints FACE-DOWN, so a proud pad would
+    # lift it off the bed - a recess is the printable version of the same
+    # visual cue).  1.5mm of face is left under the head.
     for sx in (-125, 125):
+        cyl(comp, sx, -31.0, -1.0, INTERFACE.COVER_SEAT_D,
+            INTERFACE.COVER_SEAT_DEPTH + 1.0, CUT, [front])
         cyl(comp, sx, -31.0, -1.0, 3.4, WALL + 2.0, CUT, [front])
     return front
 
@@ -194,8 +203,9 @@ def run(context):
         del SKIPPED[:]
         build(design.rootComponent)
         app.activeViewport.fit()
-        if SKIPPED:
-            ui.messageBox('Cover built. Skipped:\n - ' + '\n - '.join(SKIPPED))
+        # ALWAYS report the version so a stale %APPDATA% deploy shows itself.
+        ui.messageBox('FIR_CurvedLid {} built.{}'.format(
+            VERSION, ('\nSkipped:\n - ' + '\n - '.join(SKIPPED)) if SKIPPED else ''))
     except:  # noqa
         if ui:
             ui.messageBox('FIR_CurvedLid failed:\n{}'.format(traceback.format_exc()))

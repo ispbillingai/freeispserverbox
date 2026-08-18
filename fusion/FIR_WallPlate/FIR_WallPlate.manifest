@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Printed wall plate the FreeISP box hangs on: 45-degree French cleat (replaces the keyholes), pocketed wall-screw heads, crest anti-pull wall, and two under-floor arms for the in-box M4 floor lock screws."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
