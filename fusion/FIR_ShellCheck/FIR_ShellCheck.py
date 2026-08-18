@@ -722,14 +722,24 @@ def build_horn_preview(comp, brain):
             'horn fires into a closed box by owner decision - no vents in the front '
             'panel, the cover or the lid. Do not re-add a grille without asking.')
     # Owner requirement: rain from the TOP must never reach the components;
-    # dripping out the bottom is fine.  Trace the top paths explicitly.
-    SKIPPED.append(
-        'top-rain check: roof is continuous (no holes at all); every roof edge sheds '
-        'onto the OUTSIDE of the cap skirt; the skirt-to-tub gap opens DOWNWARD at '
-        'Z65, below the tub rim at Z80, so top water cannot run into it; water on the '
-        'cap front wall drips onto the cover top and runs off the front; anything '
-        'that wicks through that 0.5mm seam lands inside the cover hood and drains '
-        'out the downward cable notches. Top-tight by geometry, drips exit down.')
+    # dripping out the bottom is fine.  Trace the top paths explicitly - and
+    # state the INDOOR exception honestly instead of repeating a stale claim.
+    if INTERFACE.INDOOR_SCREEN:
+        SKIPPED.append(
+            'top-rain check: INDOOR VARIANT - the roof carries the 3.5" TFT window '
+            'and 2 LED holes, so this build is NOT top-rain-tight (owner decision, '
+            '18 Aug). Every other top path still sheds: skirt gap opens downward at '
+            'Z65, front seam drains through the cover notches. INDOOR_SCREEN=False '
+            'restores the fully sealed roof for the weatherproof model.')
+    else:
+        SKIPPED.append(
+            'top-rain check: roof is continuous (no holes at all); every roof edge '
+            'sheds onto the OUTSIDE of the cap skirt; the skirt-to-tub gap opens '
+            'DOWNWARD at Z65, below the tub rim at Z80, so top water cannot run into '
+            'it; water on the cap front wall drips onto the cover top and runs off '
+            'the front; anything that wicks through that 0.5mm seam lands inside the '
+            'cover hood and drains out the downward cable notches. Top-tight by '
+            'geometry, drips exit down.')
 
     if not INTERFACE.HORN_FOOT_MEASURED:
         SKIPPED.append(

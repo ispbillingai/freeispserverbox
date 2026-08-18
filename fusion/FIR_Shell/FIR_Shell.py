@@ -935,9 +935,39 @@ def build_top_lid(comp, ox):
            ox, inner + 4, CUT, [lid])
     # FRONT ARROW, engraved 0.6mm into the roof's INNER face (print z3, up in
     # print).  A triangle survives the left/right assembly flip that would
-    # mirror any text; it always points at the short front wall.
-    poly_z(comp, ((ox, 126.0), (ox - 7.0, 112.0), (ox + 7.0, 112.0)),
+    # mirror any text; it always points at the short front wall.  It lives at
+    # assembled X-90 (print +90), between the magnet pillar and the wall,
+    # because the screen seat now owns the roof centre-front.
+    poly_z(comp, ((ox + 90.0, 126.0), (ox + 83.0, 112.0), (ox + 97.0, 112.0)),
            2.4, 1.0, CUT, [lid])
+    # INDOOR VARIANT (owner, 18 Aug): the Landzo 3.5" TFT shows through a
+    # roof window; the module drops into a 1mm registration seat cut into
+    # the roof's inner face and is glued/clamped from below, wired to the
+    # brain's J4.  Two 5mm holes take the green/red indicator LEDs (push
+    # through, superglue).  INDOOR_SCREEN=False restores the sealed
+    # weatherproof roof untouched.  Asymmetric -> X mirrored exactly once.
+    if INTERFACE.INDOOR_SCREEN:
+        scx = ox - INTERFACE.SCREEN_CX
+        box(comp, scx, INTERFACE.SCREEN_CY, 3.0 - INTERFACE.SCREEN_SEAT_DEPTH,
+            INTERFACE.SCREEN_PCB_W, INTERFACE.SCREEN_PCB_H,
+            INTERFACE.SCREEN_SEAT_DEPTH + 1.0, CUT, [lid])     # module seat
+        box(comp, scx, INTERFACE.SCREEN_CY, -1.0,
+            INTERFACE.SCREEN_VIS_W, INTERFACE.SCREEN_VIS_H,
+            CAP_ROOF_TH + 2.0, CUT, [lid])                     # view window
+        for ledx, ledy in INTERFACE.LED_HOLES:
+            cyl(comp, ox - ledx, ledy, -1.0, INTERFACE.LED_HOLE_D,
+                CAP_ROOF_TH + 2.0, CUT, [lid])
+        SKIPPED.append(
+            'INDOOR VARIANT: roof carries the 3.5" TFT window + 2 LED holes - '
+            'this cap is NOT top-rain-tight, by owner decision. '
+            'INDOOR_SCREEN=False in FIR_Interface.py restores the sealed roof.')
+        if not INTERFACE.SCREEN_MEASURED:
+            SKIPPED.append(
+                'SCREEN DIMENSIONS ARE ASSUMED (typical UNO-shield 3.5" TFT: PCB '
+                '{:.1f}x{:.1f}, window {:.0f}x{:.0f}). MEASURE the real Landzo '
+                'board before printing the cap - the seat and window move with it.'
+                .format(INTERFACE.SCREEN_PCB_W, INTERFACE.SCREEN_PCB_H,
+                        INTERFACE.SCREEN_VIS_W, INTERFACE.SCREEN_VIS_H))
     # TOP-CAP TAMPER MAGNET (owner, 18 Aug): a pillar hangs from the roof to
     # assembled Z75 with a downward-opening press pocket for the D12.1 x 4.7
     # disc - a clean vertical bore in this roof-down print.  Assembled it
@@ -971,10 +1001,10 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v33: TOP-CAP tamper pair - magnet pillar (D12.1x4.7 press pocket, '
-           'opens down) at assembled (X-60, Y125) + reed groove in the tub top '
-           'rail; plus lead-in chamfer, roof arrow, 8 seated cap screws, wall '
-           'plate cleat + floor locks / interface {}'
+VERSION = ('v34: INDOOR variant - 3.5" TFT roof window + seat and 2 LED holes '
+           '(INDOOR_SCREEN flag; False = sealed weatherproof roof); top-cap '
+           'tamper pair, lead-in chamfer, 8 seated cap screws, wall plate '
+           'cleat + floor locks / interface {}'
            .format(INTERFACE.INTERFACE_VERSION))
 
 

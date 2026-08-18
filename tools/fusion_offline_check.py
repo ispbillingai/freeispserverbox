@@ -714,7 +714,7 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v33', any('v33' in m for m in msgs))
+    c.check('FIR_Shell popup states v34', any('v34' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -880,6 +880,27 @@ def check_tree(root, label):
     c.check('tub: cap-reed groove in the top rail front face',
             len(rail_grooves) == 1
             and near(rail_grooves[0].shape[1] - rail_grooves[0].shape[3], 134.0))
+    # indoor variant: screen seat + window + LED holes, mirrored once so they
+    # land at the assembled coordinates; the window must sit inside the seat
+    if interface.INDOOR_SCREEN:
+        wins = [s for s in cap.solids('cut', 'rect', 'xY')
+                if near(2 * s.shape[2], interface.SCREEN_VIS_W)
+                and near(s.shape[1], interface.SCREEN_CY)]
+        seats = [s for s in cap.solids('cut', 'rect', 'xY')
+                 if near(2 * s.shape[2], interface.SCREEN_PCB_W)
+                 and near(s.shape[1], interface.SCREEN_CY)]
+        leds = [s for s in cap.solids('cut', 'circle', 'xY')
+                if near(s.shape[2], interface.LED_HOLE_D / 2.0)]
+        c.check('cap INDOOR: screen window in its seat + {} LED holes, all '
+                'mirrored to assembled X'.format(len(interface.LED_HOLES)),
+                len(wins) == 1 and len(seats) == 1
+                and len(leds) == len(interface.LED_HOLES)
+                and near(wins[0].shape[0] - cap_ox, -interface.SCREEN_CX)
+                and near(seats[0].shape[0] - cap_ox, -interface.SCREEN_CX)
+                and near(seats[0].a0, 3.0 - interface.SCREEN_SEAT_DEPTH)
+                and wins[0].a0 < 0 < wins[0].a1
+                and sorted(round(s.shape[0] - cap_ox, 1) for s in leds) ==
+                sorted(round(-lx, 1) for lx, _ in interface.LED_HOLES))
 
     shell_notes = '\n'.join(msgs)
     c.check('FIR_Shell: no interference notes',

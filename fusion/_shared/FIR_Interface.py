@@ -286,6 +286,32 @@ CAP_REED_GROOVE_W = 3.2           # groove height (reed lies along X)
 CAP_REED_GROOVE_LEN = 18.0
 CAP_REED_GROOVE_Z0 = 74.8
 
+# ---------------------------------------------------------------------------
+# INDOOR variant: 3.5" TFT + indicator LEDs in the cap roof (owner, 18 Aug)
+# ---------------------------------------------------------------------------
+# Two build variants exist and this ONE flag switches them:
+#   True  = INDOOR: the Landzo 3.5" TFT shows through a roof window (module
+#           sits in a shallow seat under the roof, glued/clamped from below,
+#           wired to the brain PCB's J4), plus two 5mm LED holes (green/red,
+#           push through + superglue).  The roof is NO LONGER top-rain-tight
+#           - that is the owner's explicit trade for the indoor model.
+#   False = WEATHERPROOF: sealed continuous roof, exactly as before; the
+#           screen will later live inside the CurvedLid instead.
+# Position (assembled): front-of-roof strip, clear of the brain case plan
+# (Y<=77), its bosses, and the cap magnet pillar (X-68..-52 at Y125).
+# ASYMMETRIC roof features -> build_top_lid mirrors X exactly once.
+INDOOR_SCREEN = True
+# Landzo "3.5 inch TFT Ultra HD (UNO/Mega256)" - typical UNO-shield numbers,
+# NOT measured: PCB ~86.5 x 57, visible glass window 76 x 51 (active 73.4 x
+# 49 + alignment margin).  MEASURE THE REAL BOARD before printing the cap.
+SCREEN_MEASURED = False
+SCREEN_PCB_W, SCREEN_PCB_H = 86.5, 57.0
+SCREEN_VIS_W, SCREEN_VIS_H = 76.0, 51.0
+SCREEN_SEAT_DEPTH = 1.0           # into the 3mm roof: module registers flat
+SCREEN_CX, SCREEN_CY = 25.0, 108.0   # assembled shell X/Y of window centre
+LED_HOLE_D = 5.0                  # standard 5mm LED, push fit + superglue
+LED_HOLES = ((78.0, 100.0), (78.0, 116.0))   # green, red (assembled X/Y)
+
 
 def cap_reed_magnet_distance():
     """Centre-to-centre distance of the CAP pair with the cap seated, mm."""
@@ -702,6 +728,33 @@ def validate():
     if cap_reed_magnet_distance() > 13.0:
         errors.append('cap reed..magnet distance {:.1f}mm - too far for pull-in'
                       .format(cap_reed_magnet_distance()))
+    # Roof screen + LEDs (checked whether or not the indoor variant is on,
+    # so a bad number cannot hide behind the flag): the window must keep a
+    # bezel land inside the seat, the seat must clear the brain-case plan,
+    # its bosses and the magnet pillar, and the LEDs must clear the seat.
+    if SCREEN_VIS_W > SCREEN_PCB_W - 6.0 or SCREEN_VIS_H > SCREEN_PCB_H - 5.0:
+        errors.append('screen window leaves too little bezel land in its seat')
+    seat_x0 = SCREEN_CX - SCREEN_PCB_W / 2.0
+    seat_x1 = SCREEN_CX + SCREEN_PCB_W / 2.0
+    seat_y0 = SCREEN_CY - SCREEN_PCB_H / 2.0
+    if seat_y0 < CASE_TO_CAP_Y + CASE_OUTER_H / 2.0 + 2.0:
+        errors.append('screen seat overlaps the hanging brain case in plan')
+    for bx_, by_ in CAP_BOSS_PATTERN:
+        if seat_x0 - 8.0 < bx_ < seat_x1 + 8.0 and \
+                seat_y0 - 8.0 < by_ < SCREEN_CY + SCREEN_PCB_H / 2.0 + 8.0:
+            errors.append('screen seat crowds a brain-case cap boss')
+    if seat_x0 < CAP_MAGNET_X + CAP_MAG_PILLAR_SQ / 2.0 + 2.0 and \
+            SCREEN_CY + SCREEN_PCB_H / 2.0 > CAP_MAGNET_Y - CAP_MAG_PILLAR_SQ / 2.0:
+        errors.append('screen seat crowds the cap magnet pillar')
+    if SCREEN_CY + SCREEN_PCB_H / 2.0 > 138.0 or abs(SCREEN_CX) + SCREEN_PCB_W / 2.0 > 135.0:
+        errors.append('screen seat runs off the roof / into the cap walls')
+    for lx_, ly_ in LED_HOLES:
+        if seat_x0 - LED_HOLE_D < lx_ < seat_x1 + LED_HOLE_D and \
+                seat_y0 - LED_HOLE_D < ly_ < SCREEN_CY + SCREEN_PCB_H / 2.0 + LED_HOLE_D:
+            errors.append('LED hole at ({:.0f},{:.0f}) breaks into the screen seat'
+                          .format(lx_, ly_))
+        if abs(lx_) > 135.0 or ly_ > 138.0:
+            errors.append('LED hole at ({:.0f},{:.0f}) runs off the roof'.format(lx_, ly_))
     if max(COVER_TAB_X) + COVER_TAB_LEN / 2.0 > 125.0 - 8.0:
         errors.append('a cover locator tab runs off the BottomLid groove')
     # Cap screw rows: all four on each side wall, clear of each other, of the
