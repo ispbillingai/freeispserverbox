@@ -134,9 +134,11 @@ SHOW_SCREW_MARKERS = False
 # the fastener marker pins drawn solid in place.  The transparent inspection
 # view turns attached features (seat pads, the cleat bar, the wall plate)
 # into what look like floating ghosts - that view is for interference
-# checking; THIS one is what the owner should render and react to.  Combine
-# with CAP_LIFT / COVER_TRAVEL above for an exploded view.
-PRESENTATION = False
+# checking; THIS one is what the owner should render and react to, so it is
+# now the DEFAULT: just run the script, no editing.  Combine with CAP_LIFT /
+# COVER_TRAVEL above for an exploded view.  Set False for the transparent
+# interference view.
+PRESENTATION = True
 CHECK_PREFIX = 'CHECK: ALL-UP'
 CHECK_VERSION = ('v44: yZ-plane fix - side screws/pads/cleat bar land correctly now. '
                  'PRESENTATION=True gives an opaque, fastener-marked review view '

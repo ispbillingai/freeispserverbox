@@ -1122,15 +1122,11 @@ def check_tree(root, label):
     for shells_only in (True, False):
         def tweak(mod, so=shells_only):
             mod.SHELLS_ONLY = so
-            # The default shell-only inspection must remain only the five
-            # printable bodies.  Exercise optional marker geometry in the
-            # full all-up run, where it cannot be confused with print parts.
+            # Both flags are set EXPLICITLY here so these two passes test the
+            # bare five-shell view and the full all-up view; the shipped
+            # default configuration gets its own pass below.
             mod.SHOW_SCREW_MARKERS = not so
-            # and exercise the opaque owner-review mode on the FULL pass,
-            # where marker hardware is expected anyway - the default shells
-            # view must stay exactly the five printable bodies
-            if not so and hasattr(mod, 'PRESENTATION'):
-                mod.PRESENTATION = True
+            mod.PRESENTATION = not so
         try:
             chk_mod, chk_design, msgs = run_script(
                 world, p('FIR_ShellCheck'), 'shellcheck', tweak)
@@ -1159,6 +1155,38 @@ def check_tree(root, label):
                             needle in text)
         except Exception as exc:  # noqa
             c.check('FIR_ShellCheck mode run', False, repr(exc))
+
+    # ---- the SHIPPED DEFAULT: exactly what the owner sees on Run ---------
+    # No tweak at all, so this pass tests the flags as deployed.  It must be
+    # fully opaque and it must show all 8 cap side screws standing THROUGH
+    # their side walls - the geometry the yZ-plane bug had been misplacing.
+    chk_mod, chk_design, msgs = run_script(
+        world, p('FIR_ShellCheck'), 'shellcheck')
+    bodies = chk_design.rootComponent.bodies_list
+    c.check('FIR_ShellCheck DEFAULT (as deployed) run() completed',
+            msgs and 'failed' not in msgs[-1])
+    c.check('FIR_ShellCheck DEFAULT: PRESENTATION on, every body opaque',
+            getattr(chk_mod, 'PRESENTATION', False)
+            and bodies and all(b.opacity == 1.0 for b in bodies))
+    marks = [b for b in bodies if 'cap SIDE screw' in b.name]
+    placed = []
+    for body in marks:
+        bb = body.world_aabb()
+        if not bb:
+            continue
+        cx = (bb[0] + bb[1]) / 2.0
+        cy = (bb[2] + bb[3]) / 2.0
+        cz = (bb[4] + bb[5]) / 2.0
+        # the pin must cross BOTH the tub wall inner face (|X|137) and the
+        # cap skirt outer face (|X|143) on its own side of the box
+        crosses = (bb[0] < 137.0 < 143.0 < bb[1]) if cx > 0 else \
+                  (bb[0] < -143.0 < -137.0 < bb[1])
+        placed.append(near(abs(cx), 138.0, 0.01)
+                      and any(near(cy, r, 0.01) for r in rows)
+                      and near(cz, z72, 0.01) and crosses)
+    c.check('FIR_ShellCheck DEFAULT: all 8 cap screw markers stand through '
+            'their side walls at Z72 (the yZ bug is dead)',
+            len(marks) == 8 and all(placed))
 
     return c.report()
 
