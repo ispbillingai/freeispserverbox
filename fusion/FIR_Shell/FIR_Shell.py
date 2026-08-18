@@ -537,12 +537,12 @@ def build_mount_tabs(comp, sh):
         .format(pts[0][0], pts[0][1], pts[1][0], pts[1][1],
                 INTERFACE.MOUNT_TAB_SLOT))
     SKIPPED.append(
-        'ORIENTATION CONSEQUENCE: with the floor on the wall, model +Z points '
-        'OUT of the wall, not up. The device cradles, the extension-strip lips '
-        'and the adapter strap were all designed with +Z as up, so they now '
-        'take a SHEAR load. Assumed working orientation: the port face (+Y) '
-        'points DOWN the wall so cables hang and drip clear. Say the word and '
-        'the internal retention gets reviewed for that.')
+        'ORIENTATION: the floor lies on the wall, so model +Z points OUT of '
+        'the wall, not up, and the port face (+Y) runs DOWN the wall so cables '
+        'hang and drip clear. Internal retention is SETTLED (owner, 18 Aug): '
+        'the cradles, extension lips and adapter strap were designed for this '
+        'orientation and hold their parts trapped in shear - do not redesign '
+        'them for a floor-standing box.')
     return
 
 

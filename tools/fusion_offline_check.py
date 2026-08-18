@@ -899,7 +899,8 @@ def check_tree(root, label):
     c.check('FIR_Shell: wall-mount instructions and the orientation '
             'consequence are stated',
             'WALL MOUNT' in shell_notes and 'anchors' in shell_notes
-            and 'ORIENTATION CONSEQUENCE' in shell_notes)
+            and 'ORIENTATION' in shell_notes
+            and 'SETTLED' in shell_notes)
 
     # ---------------- FIR_BottomLid --------------------------------------
     lid_mod, lid_design, msgs = run_script(

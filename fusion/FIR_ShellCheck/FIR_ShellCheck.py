@@ -871,10 +871,10 @@ def report_wall_mount():
         .format(pts[0][0], pts[0][1], pts[1][0], pts[1][1],
                 INTERFACE.MOUNT_TAB_SLOT))
     SKIPPED.append(
-        'ORIENTATION: model +Z now points OUT of the wall, not up. Internal '
-        'retention (cradle snaps, extension lips, adapter strap) was designed '
-        'with +Z up and now works in shear; assumed working orientation is the '
-        'port face (+Y) pointing DOWN the wall so cables hang and drip clear.')
+        'ORIENTATION: model +Z points OUT of the wall, not up; the port face '
+        '(+Y) runs DOWN the wall. Internal retention is SETTLED (owner, 18 '
+        'Aug): the cradle snaps, extension lips and adapter strap were '
+        'designed for exactly this and keep their parts trapped in shear.')
 
 
 def build_actual_shell_and_cap(comp):
