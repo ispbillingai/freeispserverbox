@@ -140,7 +140,7 @@ SHOW_SCREW_MARKERS = False
 # interference view.
 PRESENTATION = True
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v47: PANEL-STYLE mount - floor flat on the wall, four floor-plane tabs; FOUR cap screws (two per side); horn cage removed. '
+CHECK_VERSION = ('v48: SIX floor anchors inside the 280 footprint (Ender 3 Plus is 300 square); panel-style mount; FOUR cap screws; no horn cage. '
                  'PRESENTATION=True gives an opaque, fastener-marked review view '
                  '(transparent stays for interference only). Five printed shells - tub, '
                  'deep cap, BottomLid, CurvedLid - with every outside screw '
@@ -823,11 +823,11 @@ def build_screw_markers(comp):
             body.name = CHECK_PREFIX + ' cap SIDE screw M3 (Y{:.0f}, {}X wall)'.format(
                 sy, '+' if sxs > 0 else '-')
             set_opacity(body, 0.85)
-    for ex, ey in INTERFACE.mount_tab_points():   # 4 wall anchors, in the tabs
+    for ex, ey in INTERFACE.mount_hole_points():  # 6 wall anchors, through the floor
         body = cyl(comp, ex, ey, INTERFACE.mount_plane_z() - 14.0, 4.5, 22.0,
                    NEW).bodies.item(0)
-        body.name = (CHECK_PREFIX + ' WALL ANCHOR M5 (X{:.0f}, Y{:.0f}) - runs '
-                     'INTO the wall behind the floor'.format(ex, ey))
+        body.name = (CHECK_PREFIX + ' WALL ANCHOR M5 (X{:.0f}, Y{:.0f}) - through '
+                     'the floor, INTO the wall'.format(ex, ey))
         set_opacity(body, 0.85)
     for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72),
                      (-132, 44), (132, 44)):    # 6 BottomLid screws
@@ -859,17 +859,19 @@ def build_screw_markers(comp):
 
 
 def report_wall_mount():
-    """State the mount in numbers - it is part of the tub itself now."""
-    pts = INTERFACE.mount_tab_points()
+    """State the mount and the printability limit that shaped it."""
+    pts = INTERFACE.mount_hole_points()
     SKIPPED.append(
-        'WALL MOUNT (panel style, 18 Aug): the 280x280 FLOOR lies flat against '
-        'the wall and the box stands 120mm out into the room, so the cap - '
-        'screen and LEDs - faces the viewer. Four M5/#10 anchors through '
-        'floor-plane tabs at (X{:.0f}, Y{:.0f}) / (X{:.0f}, Y{:.0f}) per side, '
-        'in {:.0f}mm levelling slots, gusseted into the side walls against the '
-        'peel moment of a 120mm-deep box. Nothing enters the sealed volume.'
-        .format(pts[0][0], pts[0][1], pts[1][0], pts[1][1],
-                INTERFACE.MOUNT_TAB_SLOT))
+        'WALL MOUNT (panel style): the 280x280 FLOOR lies flat against the '
+        'wall and the box stands 120mm out into the room, so the cap - screen '
+        'and LEDs - faces the viewer. SIX M5 anchors go THROUGH the floor at '
+        'X+-{:.0f}, Y{:.0f}/{:.0f}/{:.0f}, heads counterbored flush into '
+        'thickened pads that tie into the side walls. Nothing projects past '
+        'the 280 footprint - the Ender 3 Plus bed is {:.0f}mm square, and '
+        'projecting tabs had made the tub {:.0f}mm wide.'
+        .format(abs(pts[0][0]), INTERFACE.MOUNT_HOLE_Y[0],
+                INTERFACE.MOUNT_HOLE_Y[1], INTERFACE.MOUNT_HOLE_Y[2],
+                INTERFACE.BED_X, 280.0 + 48.0))
     SKIPPED.append(
         'ORIENTATION: model +Z points OUT of the wall, not up; the port face '
         '(+Y) runs DOWN the wall. Internal retention is SETTLED (owner, 18 '

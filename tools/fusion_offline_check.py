@@ -732,7 +732,7 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v38', any('v38' in m for m in msgs))
+    c.check('FIR_Shell popup states v39', any('v39' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -1034,53 +1034,76 @@ def check_tree(root, label):
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
-    # ---------------- wall mounting: floor-plane tabs ---------------------
-    # The box mounts like a panel: its floor lies on the wall, so the tabs
-    # must be IN the floor plane (wall contact face) - not on the back wall.
-    tabs = [s for s in tub.solids('join', 'rect', 'xY')
-            if near(s.a0, interface.mount_plane_z())
-            and near(s.a1, interface.MOUNT_TAB_TH)
-            and abs(s.world_centre()[0]) > 140.0]
-    tab_xy = sorted((round(t.world_centre()[0], 1),
-                     round(t.world_centre()[1], 1)) for t in tabs)
-    c.check('tub: 4 floor-plane mounting tabs, two per side at Y{}'
-            .format(list(interface.MOUNT_TAB_Y)),
-            len(tabs) == 4
-            and sorted(y for _, y in tab_xy) ==
-            sorted(list(interface.MOUNT_TAB_Y) * 2))
-    if tabs:
-        c.check('tub: tab undersides are coplanar with the floor - the SAME '
-                'face that touches the wall',
-                all(near(t.aabb()[4], interface.mount_plane_z()) for t in tabs))
-    ribs = [s for s in tub.solids('join', 'rect', 'xY')
-            if near(s.a1 - s.a0, interface.MOUNT_RIB_H)
-            and near(2 * s.shape[3], interface.MOUNT_RIB_W)]
-    c.check('tub: every tab is gusseted into the side wall against the peel '
-            'moment of a 120mm-deep box', len(ribs) == 4)
-    slot_ends = [s for s in tub.solids('cut', 'circle', 'xY')
-                 if near(s.shape[2], interface.MOUNT_TAB_HOLE_D / 2.0)]
-    waists = [s for s in tub.solids('cut', 'rect', 'xY')
-              if near(2 * s.shape[2], interface.MOUNT_TAB_HOLE_D)
-              and near(2 * s.shape[3], interface.MOUNT_TAB_SLOT)]
-    anchor_xy = sorted((round(w.world_centre()[0], 1),
-                        round(w.world_centre()[1], 1)) for w in waists)
-    c.check('tub: 4 levelling slots on the wall-anchor points {}'
-            .format(anchor_xy),
-            len(slot_ends) == 8 and len(waists) == 4
-            and anchor_xy == sorted((round(x, 1), round(y, 1))
-                                    for x, y in interface.mount_tab_points()))
-    c.check('tub: anchors sit {:.0f}mm clear of the box side and the slots '
-            'pass right through the tab'
-            .format(interface.MOUNT_TAB_HOLE_OUT
-                    - interface.MOUNT_TAB_HOLE_D / 2.0),
-            all(abs(x) - interface.MOUNT_TAB_HOLE_D / 2.0 > 140.0
-                for x, _ in interface.mount_tab_points())
-            and all(w.a0 < 0.0 and w.a1 > interface.MOUNT_TAB_TH
-                    for w in waists))
-    # nothing may block the front cover, which slides in the +Y region
-    c.check('tub: mounting tabs stay clear of the sliding front cover',
-            all(abs(y) + interface.MOUNT_TAB_W / 2.0 < 133.0
-                for _, y in interface.mount_tab_points()))
+    # ---------------- wall mounting: anchors through the floor -------------
+    pads = [s for s in tub.solids('join', 'circle', 'xY')
+            if near(s.shape[2], interface.MOUNT_PAD_D / 2.0)
+            and near(s.a0, 3.0)]
+    cbores = [s for s in tub.solids('cut', 'circle', 'xY')
+              if near(s.shape[2], interface.MOUNT_CBORE_D / 2.0)]
+    holes = [s for s in tub.solids('cut', 'circle', 'xY')
+             if near(s.shape[2], interface.MOUNT_HOLE_D / 2.0)]
+    want = sorted((round(x, 1), round(y, 1))
+                  for x, y in interface.mount_hole_points())
+    got = sorted((round(h.shape[0], 1), round(h.shape[1], 1)) for h in holes)
+    c.check('tub: 6 wall anchors through the floor at {}'.format(want),
+            len(pads) == 6 and len(cbores) == 6 and len(holes) == 6
+            and got == want)
+    if holes and pads:
+        c.check('tub: every anchor hole goes right through the floor to the '
+                'wall face',
+                all(h.a0 < interface.mount_plane_z() and h.a1 > 5.0
+                    for h in holes))
+        # pad thickness is per-anchor: thick everywhere, thinner only where a
+        # device sits over it, so check each head against its own pad
+        head_ok, clear_ok, thinnest = True, True, 99.0
+        for hx, hy in interface.mount_hole_points():
+            ph = interface.mount_pad_h(hx, hy)
+            top = 3.0 + ph
+            land = top - interface.MOUNT_CBORE_DEPTH
+            thinnest = min(thinnest, land)
+            match = [cb for cb in cbores
+                     if near(cb.shape[0], hx) and near(cb.shape[1], hy)]
+            if len(match) != 1 or match[0].a1 < top - 1e-6:
+                head_ok = False
+            # only the anchors that actually sit under the router owe it
+            # clearance; the rest are free to be as thick as possible
+            if ph == interface.MOUNT_PAD_H_TIGHT and                     top > interface.MIK_UNDERSIDE_Z - 1.0:
+                clear_ok = False
+        c.check('tub: every M5 head is buried flush in its own pad, thinnest '
+                'land {:.1f}mm, and no pad fouls the MikroTik at Z{:.1f}'
+                .format(thinnest, interface.MIK_UNDERSIDE_Z),
+                head_ok and clear_ok and thinnest >= 2.0)
+        c.check('tub: anchor pads tie into the side walls (that is where the '
+                'strength is)',
+                all(abs(p.shape[0]) + interface.MOUNT_PAD_D / 2.0 >= 137.0
+                    for p in pads))
+        # the driver must reach each head straight down the box's depth
+        clear = True
+        for hx, hy in interface.mount_hole_points():
+            for dz in range(8, 60, 4):
+                if tub.material_at((hx, hy, float(dz))):
+                    clear = False
+        c.check('tub: a driver reaches every anchor head straight out of the '
+                'box (Z8..60 clear)', clear)
+
+    # ---------------- PRINTABILITY: the Ender 3 Plus envelope --------------
+    # This is the guard that would have caught the projecting tabs before
+    # they ever reached the slicer.
+    bed = (interface.BED_X - 2 * interface.BED_MARGIN,
+           interface.BED_Y - 2 * interface.BED_MARGIN,
+           interface.BED_Z)
+    for label, body in (('tub', tub), ('cap', cap)):
+        bb = body.world_aabb()
+        dims = sorted((bb[1] - bb[0], bb[3] - bb[2]), reverse=True)
+        tall = bb[5] - bb[4]
+        fits = (dims[0] <= max(bed[0], bed[1]) and dims[1] <= min(bed[0], bed[1])
+                and tall <= bed[2])
+        c.check('PRINTABLE: {} is {:.1f} x {:.1f} x {:.1f}mm - fits the '
+                '{:.0f}x{:.0f}x{:.0f} bed with {:.1f}mm to spare'
+                .format(label, dims[0], dims[1], tall, interface.BED_X,
+                        interface.BED_Y, interface.BED_Z,
+                        max(bed[0], bed[1]) - dims[0]),
+                fits)
 
     # ---------------- FIR_FitCoupons -------------------------------------
     fc_mod, fc_design, msgs = run_script(

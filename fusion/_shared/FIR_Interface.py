@@ -332,43 +332,74 @@ def reed_magnet_distance():
     return math.hypot(magnet_y - reed_y, magnet_z - reed_z)
 
 # ---------------------------------------------------------------------------
-# Wall mounting: FLOOR-PLANE FLANGES (the box mounts like an electrical panel)
+# THE PRINTER decides the outside dimensions
 # ---------------------------------------------------------------------------
-# ORIENTATION - read this before touching any mounting geometry.  The box is
-# NOT hung sideways off its back wall.  It mounts the way a wall panel does:
-# the big flat 280 x 280 FLOOR lies against the wall and the box stands 120mm
-# out into the room, so the cap - with the 3.5" screen and the indicator LEDs
-# - faces the person looking at it.  In model coordinates that means:
+# Owner's machine is a Creality Ender 3 Plus: 300 x 300 x 340mm.  The tub is
+# already 280 square, which leaves only 10mm of bed margin per side, so NO
+# printed part may grow outside the 280 footprint.  This killed the previous
+# mounting design: tabs projecting 24mm per side made the tub 328mm wide -
+# unprintable on this machine, and nobody would have found out until the
+# slicer refused it.  tools/fusion_offline_check.py now measures every
+# printed body against this envelope on every run.
+BED_X, BED_Y, BED_Z = 300.0, 300.0, 340.0
+BED_MARGIN = 2.0                  # keep this much clear of the bed edge
+
+# ---------------------------------------------------------------------------
+# Wall mounting: SIX COUNTERBORED ANCHORS THROUGH THE FLOOR
+# ---------------------------------------------------------------------------
+# ORIENTATION - read before touching any mounting geometry.  The box mounts
+# like a wall panel: the flat 280 x 280 FLOOR lies against the wall and the
+# box stands 120mm out into the room, so the cap - with the 3.5" screen and
+# the indicator LEDs - faces the viewer.  In model coordinates:
 #
 #     model +Z  = straight OUT of the wall (NOT up)
 #     model X/Y = the plane of the wall
 #     the floor's underside, Z0, is the wall contact face
 #
-# Assumed working orientation: the port face (+Y) points DOWN the wall, so
-# cables hang and drip away.  Device retention was designed with +Z as "up";
-# with the box on a wall the cradle snaps take a shear load instead - see the
-# note FIR_Shell prints on every run.
+# The port face (+Y) runs DOWN the wall so cables hang and drip clear.
+# Internal retention is SETTLED: the owner designed the cradle snaps, the
+# extension lips and the adapter strap for exactly this, and they hold their
+# parts trapped in shear.  Do not redesign them for a floor-standing box.
 #
-# The flanges are therefore FLAT TABS in the floor plane, projecting past the
-# side walls where a drill and a driver reach them.  Four of them, two per
-# side, each with a levelling slot, plus a gusset rib into the side wall
-# because the box's own depth puts a peel moment on them.
-MOUNT_TAB_Y = (-90.0, 90.0)       # tab centres along the wall (model Y)
-MOUNT_TAB_W = 24.0                # tab width in Y
-MOUNT_TAB_TH = 4.0                # tab thickness, standing off the wall in +Z
-MOUNT_TAB_OUT = 24.0              # projection beyond the side wall (|X|140)
-MOUNT_TAB_HOLE_D = 5.5            # M5 / #10 wall-anchor clearance
-MOUNT_TAB_HOLE_OUT = 12.0         # hole centre beyond the wall outer face
-MOUNT_TAB_SLOT = 2.0              # slot along Y, so the box can be levelled
-MOUNT_RIB_H = 12.0                # gusset up the side wall
-MOUNT_RIB_L = 13.0                # gusset reach outward
-MOUNT_RIB_W = 8.0                 # gusset width in Y
+# Because nothing may project past the 280 footprint, the anchors go THROUGH
+# THE FLOOR - which is how a back-panel enclosure is normally fixed anyway.
+# Six M5 screws in counterbored, locally thickened pads: the head finishes
+# flush with the pad, so nothing stands proud inside the box, and the pads at
+# |X|129 grow into the side walls, which is where the strength comes from.
+# Six rather than four because a box standing 120mm off a wall puts a peel
+# moment on the outermost screws.
+MOUNT_HOLE_X = (-129.0, 129.0)
+MOUNT_HOLE_Y = (-125.0, -20.0, 105.0)
+MOUNT_HOLE_D = 5.5                # M5 / #10 clearance
+MOUNT_PAD_D = 22.0                # local floor thickening around each anchor
+# Thickness is per-anchor, as thick as the part above it allows: 3.5mm (=6.5mm
+# of floor, 4mm under the head) everywhere, dropping to 2.0mm for the single
+# anchor that sits under the MikroTik, whose underside is at Z6.5.
+MOUNT_PAD_H = 3.5
+MOUNT_PAD_H_TIGHT = 2.0
+MOUNT_CBORE_D = 10.0              # head counterbore, flush at the pad top
+MOUNT_CBORE_DEPTH = 2.5           # leaves 2.5mm of floor under the head
+# The MikroTik sits on 3.5mm standoffs with its underside at Z6.5, and two of
+# its standoffs are near the +X anchors; both clearances are validated below.
+MIK_UNDERSIDE_Z = 6.5
+MIK_STANDOFF_XY = ((129.0, 122.5), (129.0, 5.5), (27.0, 122.5), (27.0, 5.5))
+MIK_STANDOFF_D = 7.0
 
 
-def mount_tab_points():
-    """The four wall-screw centres in the wall plane, as (X, Y)."""
-    return tuple((sx * (140.0 + MOUNT_TAB_HOLE_OUT), ty)
-                 for sx in (-1.0, 1.0) for ty in MOUNT_TAB_Y)
+def mount_pad_h(hx, hy):
+    """Pad thickness at one anchor: thick unless a device sits over it."""
+    r = MOUNT_PAD_D / 2.0
+    mik_x0, mik_x1 = 78.0 - 114.0 / 2.0, 78.0 + 114.0 / 2.0
+    mik_y1 = 137.0 - 0.5
+    mik_y0 = mik_y1 - 139.0
+    over_router = (hx + r > mik_x0 and hx - r < mik_x1
+                   and hy + r > mik_y0 and hy - r < mik_y1)
+    return MOUNT_PAD_H_TIGHT if over_router else MOUNT_PAD_H
+
+
+def mount_hole_points():
+    """The six wall-anchor centres, in the floor plane, as (X, Y)."""
+    return tuple((hx, hy) for hx in MOUNT_HOLE_X for hy in MOUNT_HOLE_Y)
 
 
 def mount_plane_z():
@@ -746,30 +777,42 @@ def validate():
         errors.append('cap needs exactly two screw rows per side, well separated')
     if any(abs(y) > 133.0 - M3_SEAT_PAD_D / 2.0 for y in CAP_SIDE_SCREW_Y):
         errors.append('a cap screw row runs into the corner radius')
-    # Mounting tabs: they live in the floor plane (the wall contact face),
-    # must not foul the sliding front cover or the cap skirt, must leave real
-    # material around each slot, and must put the anchors outside the box
-    # footprint where a drill and a driver can reach them.
-    if MOUNT_TAB_TH < 3.0:
-        errors.append('mounting tab is too thin to carry the box')
-    if MOUNT_TAB_TH > 8.0:
-        errors.append('mounting tab is thicker than the floor it grows from')
-    if len(set(MOUNT_TAB_Y)) != 2 or abs(MOUNT_TAB_Y[1] - MOUNT_TAB_Y[0]) < 120.0:
-        errors.append('the two tabs per side must be widely separated')
-    if max(abs(ty) for ty in MOUNT_TAB_Y) + MOUNT_TAB_W / 2.0 > 133.0:
-        errors.append('a mounting tab runs into the corner radius')
-    if MOUNT_TAB_HOLE_OUT - MOUNT_TAB_HOLE_D / 2.0 < 4.0:
-        errors.append('wall screw sits too close to the box to get a driver in')
-    if MOUNT_TAB_OUT - MOUNT_TAB_HOLE_OUT - MOUNT_TAB_HOLE_D / 2.0 < 4.0:
-        errors.append('wall screw leaves under 4mm of tab beyond its hole')
-    if MOUNT_TAB_W - MOUNT_TAB_HOLE_D - MOUNT_TAB_SLOT < 8.0:
-        errors.append('mounting tab is too narrow around its levelling slot')
-    if MOUNT_RIB_H + 3.0 > 65.0:
-        errors.append('mounting gusset rises into the cap skirt (Z65)')
-    if MOUNT_RIB_L > MOUNT_TAB_OUT - 6.0:
-        errors.append('mounting gusset reaches past its own tab')
-    if len(mount_tab_points()) != 4:
-        errors.append('there must be exactly four wall-screw points')
+    # Mounting anchors: the box may not grow past its own 280 footprint (the
+    # Ender 3 Plus bed), the screw heads must finish flush or below so nothing
+    # fouls the devices, and every pad must miss the router standoffs and the
+    # extension strip while still reaching a side wall for stiffness.
+    if 280.0 + 2.0 * BED_MARGIN > BED_X:
+        errors.append('the tub footprint no longer fits the printer bed')
+    for hx_, hy_ in mount_hole_points():
+        ph = mount_pad_h(hx_, hy_)
+        if ph == MOUNT_PAD_H_TIGHT and ph + 3.0 > MIK_UNDERSIDE_Z - 1.0:
+            errors.append('anchor pad at ({:.0f},{:.0f}) rises into the MikroTik'
+                          .format(hx_, hy_))
+        if MOUNT_CBORE_DEPTH > ph + 3.0 - 2.0:
+            errors.append('anchor counterbore at ({:.0f},{:.0f}) leaves under 2mm'
+                          .format(hx_, hy_))
+    if MOUNT_PAD_H_TIGHT >= MOUNT_PAD_H:
+        errors.append('the tight-anchor pad should be thinner than the normal one')
+    if MOUNT_CBORE_D <= MOUNT_HOLE_D + 2.0:
+        errors.append('anchor counterbore is not wide enough to bury an M5 head')
+    if MOUNT_PAD_D <= MOUNT_CBORE_D + 6.0:
+        errors.append('anchor pad leaves no ring around its counterbore')
+    if len(mount_hole_points()) != 6:
+        errors.append('there must be exactly six wall anchors')
+    for hx, hy in mount_hole_points():
+        if abs(hx) + MOUNT_PAD_D / 2.0 < 137.0:
+            errors.append('anchor pad at X{:.0f} does not reach a side wall'.format(hx))
+        if abs(hx) + MOUNT_PAD_D / 2.0 > 140.0:
+            errors.append('anchor pad at X{:.0f} breaks the outer wall'.format(hx))
+        if abs(hy) > 133.0:
+            errors.append('anchor at Y{:.0f} runs into the corner radius'.format(hy))
+        if abs(hx) <= 120.0 and -133.5 <= hy <= -86.5:
+            errors.append('anchor at ({:.0f},{:.0f}) lands under the extension strip'
+                          .format(hx, hy))
+        for sx, sy in MIK_STANDOFF_XY:
+            if math.hypot(hx - sx, hy - sy) < (MOUNT_PAD_D + MIK_STANDOFF_D) / 2.0 + 1.0:
+                errors.append('anchor pad at ({:.0f},{:.0f}) collides with a router '
+                              'standoff'.format(hx, hy))
     return errors
 
 

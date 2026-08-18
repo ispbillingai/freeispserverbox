@@ -498,44 +498,38 @@ def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, la
     return
 
 
-def build_mount_tabs(comp, sh):
-    """Four wall-mounting tabs in the FLOOR plane.
+def build_mount_anchors(comp, sh):
+    """Six counterbored wall anchors straight through the floor.
 
-    The box mounts like an electrical panel: its 280 x 280 floor lies flat on
-    the wall and the box stands 120mm out into the room, screen facing the
-    viewer.  So the tabs are flat lugs growing sideways out of the floor,
-    their undersides coplanar with the floor's underside (Z0 = the wall).
-    Each has a levelling slot, and a gusset ties it into the side wall
-    because the box's 120mm depth puts a peel moment on these screws.
+    Nothing may project past the 280 footprint - the Ender 3 Plus bed is
+    300 square - so the anchors go through the floor, which is how a
+    back-panel enclosure is normally fixed anyway.  Each is a locally
+    thickened pad that grows into the side wall (that is where the stiffness
+    comes from), a counterbore that buries the M5 head flush with the pad,
+    and the through hole.  Six of them, because a box standing 120mm off a
+    wall puts a peel moment on the outermost screws.
     """
-    hole_d = INTERFACE.MOUNT_TAB_HOLE_D
-    th = INTERFACE.MOUNT_TAB_TH
-    for sxs in (-1.0, 1.0):
-        x_root = sxs * (HALF - WALL)                 # +-137, inside the wall
-        x_tip = sxs * (HALF + INTERFACE.MOUNT_TAB_OUT)
-        hx = sxs * (HALF + INTERFACE.MOUNT_TAB_HOLE_OUT)
-        for ty in INTERFACE.MOUNT_TAB_Y:
-            box(comp, (x_root + x_tip) / 2.0, ty, 0.0,
-                abs(x_tip - x_root), INTERFACE.MOUNT_TAB_W, th, JOIN, [sh])
-            # gusset: ties the tab into the side wall against the peel moment
-            rib_tip = sxs * (HALF + INTERFACE.MOUNT_RIB_L)
-            box(comp, (x_root + rib_tip) / 2.0, ty, 0.0,
-                abs(rib_tip - x_root), INTERFACE.MOUNT_RIB_W,
-                INTERFACE.MOUNT_RIB_H, JOIN, [sh])
-            # levelling slot: two round ends plus the waist between them
-            for dy in (-INTERFACE.MOUNT_TAB_SLOT / 2.0,
-                       INTERFACE.MOUNT_TAB_SLOT / 2.0):
-                cyl(comp, hx, ty + dy, -1.0, hole_d, th + 2.0, CUT, [sh])
-            box(comp, hx, ty, -1.0, hole_d, INTERFACE.MOUNT_TAB_SLOT,
-                th + 2.0, CUT, [sh])
-    pts = INTERFACE.mount_tab_points()
+    for hx, hy in INTERFACE.mount_hole_points():
+        pad_h = INTERFACE.mount_pad_h(hx, hy)     # thick unless a device is over it
+        pad_top = FLOOR + pad_h
+        cyl(comp, hx, hy, FLOOR, INTERFACE.MOUNT_PAD_D,
+            pad_h, JOIN, [sh])                                  # thickened pad
+        cyl(comp, hx, hy, pad_top - INTERFACE.MOUNT_CBORE_DEPTH,
+            INTERFACE.MOUNT_CBORE_D, INTERFACE.MOUNT_CBORE_DEPTH + 0.01,
+            CUT, [sh])                                          # head counterbore
+        cyl(comp, hx, hy, -1.0, INTERFACE.MOUNT_HOLE_D,
+            pad_top + 2.0, CUT, [sh])                           # through hole
+    pts = INTERFACE.mount_hole_points()
     SKIPPED.append(
         'WALL MOUNT (panel style): the 280x280 FLOOR lies flat on the wall and '
-        'the box stands 120mm out, screen facing the room. Four M5/#10 anchors '
-        'at (X{:.0f}, Y{:.0f}) and (X{:.0f}, Y{:.0f}) on each side, in {:.0f}mm '
-        'levelling slots. Mark through the tabs, drill, hang, level, tighten.'
-        .format(pts[0][0], pts[0][1], pts[1][0], pts[1][1],
-                INTERFACE.MOUNT_TAB_SLOT))
+        'the box stands 120mm out, screen facing the room. SIX M5 anchors '
+        'through the floor at X+-{:.0f}, Y{:.0f}/{:.0f}/{:.0f}, heads '
+        'counterbored flush into thickened pads that tie into the side walls. '
+        'Nothing projects past the 280 footprint, so the tub still fits the '
+        '300mm bed. Mark through the holes, drill, screw the box on, then fit '
+        'the devices and the cap.'
+        .format(abs(pts[0][0]), INTERFACE.MOUNT_HOLE_Y[0],
+                INTERFACE.MOUNT_HOLE_Y[1], INTERFACE.MOUNT_HOLE_Y[2]))
     SKIPPED.append(
         'ORIENTATION: the floor lies on the wall, so model +Z points OUT of '
         'the wall, not up, and the port face (+Y) runs DOWN the wall so cables '
@@ -652,15 +646,14 @@ def build(comp):
 
     # (BUZZER/alarm seat REMOVED - Francis will just bolt it; no cradle needed)
 
-    # ================= WALL MOUNT: four floor-plane mounting tabs ============
+    # ================= WALL MOUNT: six anchors through the floor =============
     # The box mounts like an electrical panel - its 280 x 280 FLOOR flat on
-    # the wall, standing 120mm out into the room with the screen facing the
-    # viewer.  Earlier attempts assumed it hung off its BACK wall, which is
-    # why they read as useless: keyholes (weak, heads inside the box), then a
-    # cleat plate, then back-wall ears.  All gone.  These four tabs grow out
-    # of the floor itself, so the face that carries the load is the same face
-    # that touches the wall.
-    build_mount_tabs(comp, sh)
+    # the wall, standing 120mm out with the screen facing the room.  The
+    # anchors go THROUGH the floor because the Ender 3 Plus bed is 300mm
+    # square and the tub is already 280: projecting tabs made it 328mm wide,
+    # i.e. unprintable.  Earlier dead ends: keyholes, a separate cleat plate,
+    # and back-wall ears (which assumed the box hung off its back).
+    build_mount_anchors(comp, sh)
 
     # ================= SIDE-BOLT bosses at the lid overlap    # ================= SIDE-BOLT bosses at the lid overlap (lid skirt bolts in from the SIDE) =================
     # block on the side-wall INNER face + a HORIZONTAL (X) pilot - the bolt
@@ -1028,10 +1021,10 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v38: PANEL-STYLE WALL MOUNT - the 280x280 floor lies on the wall and '
-           'four floor-plane tabs (gusseted, slotted) take the anchors; box '
-           'stands 120mm out, screen facing the room. FOUR cap screws, two per '
-           'side / interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v39: SIX floor anchors (counterbored flush, pads tied into the side '
+           'walls) replace the projecting tabs - the tub stays inside its 280 '
+           'footprint and fits the 300mm Ender bed. Panel-style mount, FOUR cap '
+           'screws / interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):
@@ -1072,6 +1065,15 @@ def run(context):
             build_components(design.rootComponent)
             build_cables(design.rootComponent)
         app.activeViewport.fit()
+        tub_w = BOX_W + 2.0 * INTERFACE.CAP_SNAP_PROUD
+        cap_w = BOX_W + 6.0 + 2.0 * INTERFACE.CAP_SEAT_PAD_H
+        SKIPPED.append(
+            'PRINT ENVELOPE (Ender 3 Plus {:.0f}x{:.0f}): tub {:.1f}mm wide '
+            '({:.1f}mm spare), deep cap {:.1f}mm wide ({:.1f}mm spare). The cap '
+            'is the tight one - centre it on the bed and skip a brim, or say '
+            'the word and the screw seat pads flatten to buy 5mm.'
+            .format(INTERFACE.BED_X, INTERFACE.BED_Y, tub_w,
+                    INTERFACE.BED_X - tub_w, cap_w, INTERFACE.BED_X - cap_w))
         # ALWAYS report the version + cleanup count so you KNOW Fusion ran the newest code
         ui.messageBox('FIR_Shell {} built.\nCleared {} old body(ies).{}'.format(
             VERSION, removed, ('\nSkipped:\n - ' + '\n - '.join(SKIPPED)) if SKIPPED else ''))
