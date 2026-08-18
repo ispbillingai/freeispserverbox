@@ -79,9 +79,10 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v3: cover gets a HARD end stop (flush lock bosses) + the rail-top '
-           'orientation key block; rails now derive from the shared contract; '
-           '6 face screws in visible counterbored pads / interface {}'
+VERSION = ('v4: TAMPER REED groove in the shelf (shell X+15, D4 wire hole into '
+           'the box) + hard end stop, orientation key block, contract-driven '
+           'rails; 6 face screws in visible pads (side pair now D10 - a D12 '
+           'pad clipped the cover end wall) / interface {}'
            .format(INTERFACE.INTERFACE_VERSION))
 
 
@@ -215,7 +216,11 @@ def build(comp):
     pad_h = INTERFACE.LID_SEAT_PAD_H
     cb_floor = PT + pad_h - INTERFACE.LID_SEAT_CBORE_DEPTH
     for (bx, by) in ((-120, 72), (-40, 72), (40, 72), (120, 72), (-132, 44), (132, 44)):
-        cyl(comp, bx, by, PT - 0.5, INTERFACE.M3_SEAT_PAD_D,
+        # The side pair at +-132 is D10, not D12: a D12 pad there overlaps
+        # the CurvedLid's end wall (inner face |X|137.5) by 0.5mm - a real
+        # collision the 18 Aug reed work uncovered.
+        pad_d = 10.0 if abs(bx) == 132 else INTERFACE.M3_SEAT_PAD_D
+        cyl(comp, bx, by, PT - 0.5, pad_d,
             pad_h + 0.5, JOIN, [plate])                               # seat pad, root in the plate
         cyl(comp, bx, by, -1, 3.5, PT + pad_h + 2, CUT, [plate])              # M3 through-hole
         cyl(comp, bx, by, cb_floor, INTERFACE.M3_SEAT_CBORE_D,
@@ -251,6 +256,18 @@ def build(comp):
             JOIN, [plate])                                    # boss = end stop
         cyl(comp, sx, 12, PT + 54, INTERFACE.COVER_LOCK_BOSS_PILOT_D, 8,
             CUT, [plate])                                     # pilot (self-tap or insert bore)
+    # ===== TAMPER REED (owner, 18 Aug): recessed groove in the shelf top =====
+    # The reed lies along X in a 3.2-wide, 2.0-deep groove (1mm of shelf left
+    # under it) at lid-local X-15 = SHELL +X15 - this plate is turned over.
+    # The cover's magnet stops head-on ~10.6mm away; glue the reed in, run
+    # its wires back along the shelf and through the D4 hole into the box
+    # (the hole lands between the router frame wall and the port row).
+    box(comp, -INTERFACE.REED_X, PT - INTERFACE.REED_SLOT_DEPTH / 2.0,
+        INTERFACE.REED_SLOT_Z0, INTERFACE.REED_SLOT_LEN,
+        INTERFACE.REED_SLOT_DEPTH, INTERFACE.REED_SLOT_W, CUT, [plate])
+    wx, wy = INTERFACE.REED_WIRE_HOLE_XY
+    cyl(comp, wx, wy, -1, INTERFACE.REED_WIRE_HOLE_D, PT + 2, CUT, [plate])
+
     # ===== TOP GROOVE: build OUT 3mm at the top (lid top now meets cover top) + a 1mm channel =====
     box(comp, 0, PH + 1.5, 0, PW, 3, PT, JOIN, [plate])       # extend lid top UP 3mm -> Y 80-83
     box(comp, 0, PH + 1.5, PT - 1, 250, 1.6, 2, CUT, [plate]) # 1mm-deep groove in the outer face, full width

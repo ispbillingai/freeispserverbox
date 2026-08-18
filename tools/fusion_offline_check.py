@@ -870,10 +870,15 @@ def check_tree(root, label):
         world, p('FIR_BottomLid'), 'bottomlid')
     c.check('FIR_BottomLid run() completed',
             msgs and 'failed' not in msgs[-1])
-    c.check('FIR_BottomLid popup states v3', any('v3' in m for m in msgs))
+    c.check('FIR_BottomLid popup states v4', any('v4' in m for m in msgs))
     lid = body_named(lid_design, 'FIR Bottom Lid')
     lpads = [s for s in lid.solids('join', 'circle', 'xY')
-             if near(s.shape[2], interface.M3_SEAT_PAD_D / 2.0)]
+             if near(s.shape[2], interface.M3_SEAT_PAD_D / 2.0)
+             or near(s.shape[2], 5.0)]
+    # NO face feature may reach the CurvedLid end walls (inner face |X|137.5):
+    # a D12 pad at +-132 did exactly that, caught 18 Aug.
+    c.check('BottomLid: no outer-face feature reaches the cover end walls',
+            all(abs(s.shape[0]) + s.shape[2] <= 137.0 for s in lpads))
     # the router's DC-jack port is also 6.5mm: keep only cuts that start at
     # the counterbore floor (above the plate mid), never full-depth port holes
     lcb = [s for s in lid.solids('cut', 'circle', 'xY')
@@ -918,6 +923,18 @@ def check_tree(root, label):
     c.check('BottomLid: orientation key block on the lid-local -X rail '
             '(shell +X)', len(keys) == 1 and
             near(keys[0].a1, 3.0 + interface.COVER_KEY_BLOCK_LEN))
+    # reed: recessed shelf groove at lid-local -REED_X plus the D4 wire hole
+    grooves = [s for s in lid.solids('cut', 'rect', 'xY')
+               if near(s.shape[0], -interface.REED_X)
+               and near(2 * s.shape[3], interface.REED_SLOT_DEPTH)]
+    holes4 = [s for s in lid.solids('cut', 'circle', 'xY')
+              if near(s.shape[2], interface.REED_WIRE_HOLE_D / 2.0)]
+    c.check('BottomLid: reed groove in the shelf (shell X+{:.0f}) + D4 wire '
+            'hole'.format(interface.REED_X),
+            len(grooves) == 1 and len(holes4) == 1
+            and near(grooves[0].a0, interface.REED_SLOT_Z0)
+            and near(holes4[0].shape[0], interface.REED_WIRE_HOLE_XY[0])
+            and near(holes4[0].shape[1], interface.REED_WIRE_HOLE_XY[1]))
 
     # ---------------- FIR_CurvedLid --------------------------------------
     cov_mod, cov_design, msgs = run_script(
@@ -954,6 +971,20 @@ def check_tree(root, label):
             len(nubs) == 2 and
             sorted(round(s.shape[0], 1) for s in nubs) ==
             [-interface.COVER_RAIL_X, interface.COVER_RAIL_X])
+    # tamper magnet: pad on the inner face + press-fit pocket, floor keeping
+    # >=1mm of outer face closed, and the closed-cover distance to the reed
+    mpads = [s for s in cover.solids('join', 'rect', 'xY')
+             if near(s.shape[0], interface.REED_X)
+             and near(2 * s.shape[2], interface.MAGNET_PAD_SQ)]
+    mpockets = [s for s in cover.solids('cut', 'circle', 'xY')
+                if near(s.shape[2], interface.MAGNET_POCKET_D / 2.0)]
+    c.check('CurvedLid: magnet pad + D{:.2f} press pocket, reed..magnet '
+            '{:.1f}mm when closed'.format(interface.MAGNET_POCKET_D,
+                                          interface.reed_magnet_distance()),
+            len(mpads) == 1 and len(mpockets) == 1
+            and near(mpockets[0].a0, interface.MAGNET_POCKET_FLOOR)
+            and interface.MAGNET_POCKET_FLOOR - 2.5 >= 1.0
+            and interface.reed_magnet_distance() <= 13.0)
     relief = [s for s in cover.solids('cut', 'rect', 'xY')
               if near(s.shape[0], interface.COVER_RAIL_X)
               and s.a0 > 40.0]

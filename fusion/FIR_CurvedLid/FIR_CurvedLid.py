@@ -103,9 +103,10 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v3: ONE shared rail clearance ({}mm, the 0.4-vs-0.3 conflict is dead), '
-           'tongue split into 3 tabs, anti-rattle nubs, and the +X channel key '
-           'relief so a reversed cover refuses to seat / interface {}'
+VERSION = ('v4: TAMPER MAGNET pocket (D12.05 press fit, hidden 1.2mm behind the '
+           'face at shell X+15) + ONE shared rail clearance ({}mm), 4 locator '
+           'tabs, anti-rattle nubs, and the +X channel key relief so a reversed '
+           'cover refuses to seat / interface {}'
            .format(INTERFACE.COVER_RAIL_CLR, INTERFACE.INTERFACE_VERSION))
 
 
@@ -207,6 +208,25 @@ def build(comp):
         cyl(comp, sx, -31.0, -1.0, INTERFACE.COVER_SEAT_D,
             INTERFACE.COVER_SEAT_DEPTH + 1.0, CUT, [front])
         cyl(comp, sx, -31.0, -1.0, 3.4, WALL + 2.0, CUT, [front])
+
+    # TAMPER MAGNET (owner, 18 Aug): a 16x16 pad on the inner face carries a
+    # press-fit pocket for the measured D12.1 disc magnet, pressed in from
+    # the inside - the pocket floor keeps 1.2mm of face, so nothing shows
+    # outside.  At shell X+15 the closed cover holds the magnet head-on at
+    # ~10.6mm from the reed recessed in the BottomLid shelf; the pad bottom
+    # sweeps 0.5mm above the reed on its way in.  BENCH-TEST the actual
+    # reed+magnet pair at that distance before printing.
+    box(comp, INTERFACE.REED_X, INTERFACE.MAGNET_CY, WALL,
+        INTERFACE.MAGNET_PAD_SQ, INTERFACE.MAGNET_PAD_SQ,
+        INTERFACE.MAGNET_PAD_H, JOIN, [front])
+    cyl(comp, INTERFACE.REED_X, INTERFACE.MAGNET_CY,
+        INTERFACE.MAGNET_POCKET_FLOOR, INTERFACE.MAGNET_POCKET_D,
+        WALL + INTERFACE.MAGNET_PAD_H, CUT, [front])
+    if not INTERFACE.MAGNET_TH_MEASURED:
+        SKIPPED.append(
+            'magnet THICKNESS is ASSUMED {:.1f}mm (diameter 12.1 is measured). '
+            'Measure it: the pocket floor moves with it.'
+            .format(INTERFACE.MAGNET_TH))
     return front
 
 

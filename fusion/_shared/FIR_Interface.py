@@ -234,6 +234,45 @@ COVER_KEY_BLOCK_LEN = 9.0         # from the lid plate face
 COVER_KEY_RELIEF_LEN = 9.5        # web shortened by this at the tub end
 
 # ---------------------------------------------------------------------------
+# Front-closure TAMPER SENSING: reed switch + press-fit magnet (owner, 18 Aug)
+# ---------------------------------------------------------------------------
+# The magnet (measured D12.1) press-fits into a pocket on the CurvedLid's
+# inner front face; the reed lies in a recessed groove in the BottomLid shelf
+# directly in the magnet's slide path.  Closed cover = magnet ~10.6mm from
+# the reed, head-on; sliding the cover off opens the reed within millimetres
+# of travel.  Removing the BottomLid itself first requires removing the cover
+# (its 6 screws are inside the hood), so one reed covers the whole front.
+# Position: shell X +15 - between the power notch (X-10) and the router
+# notches (X>31), invisible from outside, clear of the magnet-pad sweep.
+REED_X = 15.0                     # shell X of the reed/magnet pair
+MAGNET_D = 12.1                   # measured
+MAGNET_POCKET_D = 12.05           # light press; PETG rim is 2mm - do not
+                                  # tighten this without a coupon test
+MAGNET_TH = 3.0                   # ASSUMED disc thickness - measure it!
+MAGNET_TH_MEASURED = False
+MAGNET_PAD_SQ = 16.0              # square pad on the cover's inner face
+MAGNET_PAD_H = 4.5                # proud of the 2.5 face
+MAGNET_CY = -31.0                 # cover-local Y of magnet centre (shell Z12)
+MAGNET_POCKET_FLOOR = 3.7         # cover-local Z: leaves 1.2mm over the
+                                  # outer face - nothing shows outside
+REED_SLOT_W = 3.2                 # groove in the shelf top, reed along X
+REED_SLOT_DEPTH = 2.0             # into the 3mm shelf (1mm left under it)
+REED_SLOT_LEN = 18.0
+REED_SLOT_Z0 = 57.0               # BottomLid-local Z (shell Y194..197.2)
+REED_WIRE_HOLE_XY = (-15.0, 8.0)  # BottomLid-local; shell (+15, Z8), between
+                                  # the router frame wall and the port row
+REED_WIRE_HOLE_D = 4.0
+
+
+def reed_magnet_distance():
+    """Centre-to-centre reed..magnet distance with the cover closed, mm."""
+    magnet_y = 205.0 - (MAGNET_POCKET_FLOOR + MAGNET_TH / 2.0)   # shell Y
+    magnet_z = 43.0 + MAGNET_CY
+    reed_y = 137.0 + REED_SLOT_Z0 + REED_SLOT_W / 2.0            # slot centre
+    reed_z = 3.0 - REED_SLOT_DEPTH + 1.25
+    return math.hypot(magnet_y - reed_y, magnet_z - reed_z)
+
+# ---------------------------------------------------------------------------
 # Wall mounting: printed wall plate + French cleat (replaces the keyholes)
 # ---------------------------------------------------------------------------
 # The two 11mm keyholes could barely hold a 2-3kg loaded box, and their screw
@@ -589,6 +628,29 @@ def validate():
         errors.append('cover key block too low: a REVERSED cover would ride over it')
     if len(COVER_TAB_X) != len(set(COVER_TAB_X)):
         errors.append('cover locator tabs are degenerate')
+    # Reed/magnet: the pocket rim must survive a press fit, the pad must
+    # sweep clear over the recessed reed, the pocket floor must keep the
+    # outer face closed, and the closed-cover distance must stay inside a
+    # 12mm disc magnet's realistic reed pull-in range.
+    if (MAGNET_PAD_SQ - MAGNET_POCKET_D) / 2.0 < 1.8:
+        errors.append('magnet pocket rim under 1.8mm would split on press-fit')
+    if MAGNET_POCKET_D < MAGNET_D - 0.15 or MAGNET_POCKET_D > MAGNET_D + 0.1:
+        errors.append('magnet pocket is not a press fit on the measured 12.1 magnet')
+    if MAGNET_POCKET_FLOOR - 2.5 < 1.0:
+        errors.append('magnet pocket floor leaves under 1mm over the cover face')
+    pad_bottom_z = 43.0 + MAGNET_CY - MAGNET_PAD_SQ / 2.0
+    reed_top_z = 3.0 - REED_SLOT_DEPTH + 2.5
+    if pad_bottom_z - reed_top_z < 0.5:
+        errors.append('magnet pad would crash into the recessed reed on slide-by')
+    if reed_magnet_distance() > 13.0:
+        errors.append('reed..magnet distance {:.1f}mm - too far for reliable pull-in'
+                      .format(reed_magnet_distance()))
+    if abs(REED_X - (-10.0)) < MAGNET_PAD_SQ / 2.0 + 4.5 or \
+            REED_X + MAGNET_PAD_SQ / 2.0 > 30.0:
+        errors.append('reed/magnet X crowds the power notch (X-10) or the router notches')
+    wx, wy = REED_WIRE_HOLE_XY
+    if abs(wx) != REED_X:
+        errors.append('reed wire hole is not behind the reed (BottomLid is mirrored)')
     if max(COVER_TAB_X) + COVER_TAB_LEN / 2.0 > 125.0 - 8.0:
         errors.append('a cover locator tab runs off the BottomLid groove')
     # Cap screw rows: all four on each side wall, clear of each other, of the

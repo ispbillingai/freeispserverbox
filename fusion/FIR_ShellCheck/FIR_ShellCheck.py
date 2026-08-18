@@ -355,6 +355,14 @@ def build_actual_front_closure(comp):
     # fix: CurvedLid's notches are now written in real shell X, so its router
     # notches must land over the router and its switch notches over the switch.
     check_cover_handedness(lid_source, cover_source)
+    SKIPPED.append(
+        'tamper sensing: cover magnet (D12.1 press-fit, hidden behind the face '
+        'at shell X{:.0f}) sits {:.1f}mm head-on from the reed recessed in the '
+        'BottomLid shelf when closed. BENCH-TEST the real reed+magnet pair at '
+        'that distance before printing. Magnet thickness is {}.'
+        .format(INTERFACE.REED_X, INTERFACE.reed_magnet_distance(),
+                'measured' if INTERFACE.MAGNET_TH_MEASURED
+                else 'ASSUMED {:.1f}mm - measure it'.format(INTERFACE.MAGNET_TH)))
     return lid, cover
 
 
