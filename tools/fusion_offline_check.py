@@ -1051,12 +1051,13 @@ def check_tree(root, label):
             reaches.append(205.0 - z1)
         top_z = max(tops)
         back_y = min(reaches)
-        c.check('CurvedLid: the shoulder rises to shell Z{:.1f} - the cap roof '
-                'underside is Z117, so the front reads as one surface'
-                .format(top_z), near(top_z, 117.0, 0.05))
-        c.check('CurvedLid: it sweeps back to shell Y{:.1f}, just clear of the '
-                'cap skirt at Y143 ({:.1f}mm)'.format(back_y, back_y - 143.0),
-                0.2 <= back_y - 143.0 <= 1.5)
+        c.check('CurvedLid: the shoulder lands FLUSH with the roof outer '
+                'surface at shell Z{:.1f} - one continuous shell, no step'
+                .format(top_z), near(top_z, 120.0, 0.05))
+        c.check('CurvedLid: its tip butts the roof edge at shell Y{:.1f} with '
+                'a single {:.1f}mm shadow line - the Ubiquiti joint'
+                .format(back_y, back_y - 143.0),
+                0.2 <= back_y - 143.0 <= 0.6)
         c.check('CurvedLid: the shoulder hides the busy middle seam at Z83',
                 min(43.0 + sh.aabb()[2] for sh in shoulders) <= 83.0 + 1e-6)
     # it prints standing on an end wall: 280 tall, no supports on the curve

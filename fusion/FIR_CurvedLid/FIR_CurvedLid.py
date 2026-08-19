@@ -82,18 +82,20 @@ POWER_CABLE_X = -10.0
 # He is right about the middle: the cover top, the BottomLid groove and
 # tongue, and the cap's front wall all stack up around shell Z83, and it
 # reads as clutter.  So the cover grows a curved SHOULDER that starts at its
-# top front edge and sweeps up and back to finish flush under the cap roof.
-# From the front you now see one surface: flat panel, smooth curve, roof.
-# Everything fussy ends up hidden behind the curve.
+# top front edge and sweeps up and back - and, per the SEAMLESS decision
+# (19 Aug, "like Ubiquiti M2"), it finishes FLUSH with the cap roof's OUTER
+# surface at Z120, its tip butting the roof edge with a single 0.3mm shadow
+# line.  From the front and from above the box reads as one shell.
 #
 # The profile is a quarter ellipse, vertical where it leaves the front panel
-# and horizontal where it meets the roof, so both joins are tangent:
-#     shell (Y205, Z83)  ->  (Y143.5, Z117)      62 back, 34 up
-# In this part's own frame that is local (Y40, Z0) -> (Y74, Z61.5).
-SHOULDER_RISE = 34.0              # local Y: shell Z83 -> Z117 (roof underside)
-SHOULDER_REACH = 61.5             # local Z: shell Y205 -> Y143.5, just outside
-                                  # the cap skirt at Y143
-SHOULDER_STEPS = 48               # polyline segments; smooth and always closes
+# and horizontal where it lands, so both joins are tangent:
+#     shell (Y205, Z83)  ->  (Y143.3, Z120 = the roof plane)
+# The numbers live in the shared contract, because the cap's roof edge and
+# skirt are what they must agree with - validate() enforces the flush plane
+# and the hairline gap.
+SHOULDER_RISE = INTERFACE.COVER_SHOULDER_RISE
+SHOULDER_REACH = INTERFACE.COVER_SHOULDER_REACH
+SHOULDER_STEPS = INTERFACE.COVER_SHOULDER_STEPS
 
 # The rails guide the cover. The two front M3 screws are the positive lock;
 # there is no pretend snap/detent feature in this part.
@@ -125,14 +127,12 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v5: CURVED - a quarter-ellipse shoulder sweeps from the top of the '
-           'front panel up and back to finish flush under the cap roof, so the '
-           'front reads as one surface and the busy middle seam is hidden. '
-           'PRINT IT STANDING ON AN END WALL (280mm tall, no supports, perfect '
-           'curve); face-down would need supports on the show surface. Tamper '
-           'magnet, shared rail clearance, 4 locator tabs, anti-rattle nubs and '
-           'the reversed-cover key relief all unchanged / interface {}'
-           .format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v6: SEAMLESS - the shoulder now lands FLUSH with the roof outer '
+           'surface (Z120), tip butting the roof edge with one 0.3mm shadow '
+           'line, so you cannot tell cover from cap. ASSEMBLY ORDER CHANGED: '
+           'slide the cover on LAST, after the cap is closed - its hard end '
+           'stop sets the hairline. PRINT STANDING ON AN END WALL '
+           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 
 def _ext(comp, prof, z0, sz, op, parts):

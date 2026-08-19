@@ -409,6 +409,35 @@ def key_inner_skin():
 
 
 # ---------------------------------------------------------------------------
+# SEAMLESS cover-to-cap joint (owner, 19 Aug: "like Ubiquiti M2 covers - you
+# will not know there is a joining")
+# ---------------------------------------------------------------------------
+# What makes a joint invisible on commercial gear: the two OUTER surfaces are
+# flush in the same plane, the parting line is a uniform hairline shadow gap,
+# and the real assembly clearance hides BEHIND the surface, never on it.  So
+# the cover's curved shoulder no longer stops under the roof edge (which left
+# a 3mm step + a gap - exactly what the owner photographed): it rises to
+# Z120, FLUSH with the cap roof's outer surface, and its tip butts the roof
+# edge with one 0.3mm shadow line.  From the front and from above the box
+# reads as a single shell: flat panel, curve, roof.
+#
+# ASSEMBLY ORDER CONSEQUENCE: the cover now goes on LAST, sliding in
+# horizontally after the cap is closed.  (If the cap dropped down with the
+# cover already fitted, its skirt would scrape past the shoulder tip with
+# only the shadow gap to spare.)  The cover's hard end stop on the BottomLid
+# bosses is what fixes the tip at exactly one shadow gap from the roof edge.
+COVER_SHOULDER_RISE = 37.0        # local: cover top (shell Z83) -> Z120 flush
+COVER_SHOULDER_REACH = 61.7       # tip lands at shell Y = 205 - 61.7 = 143.3
+COVER_SHOULDER_GAP = 0.3          # the one visible hairline, to the roof edge
+COVER_SHOULDER_STEPS = 48
+
+
+def cover_shoulder_tip_y():
+    """Where the shoulder tip ends, in shell Y (roof edge is at 143.0)."""
+    return 205.0 - COVER_SHOULDER_REACH
+
+
+# ---------------------------------------------------------------------------
 # Alarm horn: INSIDE the box, on the floor behind the switch
 # ---------------------------------------------------------------------------
 # The bought part is a 12V 15W siren horn on a swivel foot.  Owner-measured
