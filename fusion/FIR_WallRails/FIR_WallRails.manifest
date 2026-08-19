@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "The two wall rails the FreeISP box hangs on: a top rail with two studs and the anti-lift upstand, and a bottom spacer rail. Print both flat, no supports."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

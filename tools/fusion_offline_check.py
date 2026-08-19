@@ -727,12 +727,14 @@ def check_tree(root, label):
     def p(script):
         return os.path.join(root, script, script + '.py')
 
+    p_ = p
+
     # ---------------- FIR_Shell ------------------------------------------
     shell_mod, shell_design, msgs = run_script(world, p('FIR_Shell'), 'shell')
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v39', any('v39' in m for m in msgs))
+    c.check('FIR_Shell popup states v40', any('v40' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -896,9 +898,9 @@ def check_tree(root, label):
             'INTERFERENCE' not in shell_notes)
     c.check('FIR_Shell: insert decision is raised in the popup',
             'DECISION PENDING' in shell_notes and 'insert' in shell_notes)
-    c.check('FIR_Shell: wall-mount instructions and the orientation '
-            'consequence are stated',
-            'WALL MOUNT' in shell_notes and 'anchors' in shell_notes
+    c.check('FIR_Shell: the hanging mount and the orientation are both '
+            'stated in the popup',
+            'WALL MOUNT' in shell_notes and 'HANGS' in shell_notes
             and 'ORIENTATION' in shell_notes
             and 'SETTLED' in shell_notes)
 
@@ -1034,61 +1036,91 @@ def check_tree(root, label):
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
-    # ---------------- wall mounting: anchors through the floor -------------
-    pads = [s for s in tub.solids('join', 'circle', 'xY')
-            if near(s.shape[2], interface.MOUNT_PAD_D / 2.0)
-            and near(s.a0, 3.0)]
+    # ---------------- wall mounting: keyholes + hanging rails --------------
+    entries = [s for s in tub.solids('cut', 'circle', 'xY')
+               if near(s.shape[2], interface.KEY_ENTRY_D / 2.0)]
+    locks = [s for s in tub.solids('cut', 'circle', 'xY')
+             if near(s.shape[2], interface.KEY_SLOT_W / 2.0)]
+    want = sorted((round(x, 1), round(y, 1)) for x, y in interface.KEYHOLE_XY)
+    c.check('tub: {} keyholes in the floor at {}'.format(len(want), want),
+            len(entries) == len(want) and len(locks) == len(want)
+            and sorted((round(l.shape[0], 1), round(l.shape[1], 1))
+                       for l in locks) == want
+            and sorted((round(e.shape[0], 1),
+                        round(e.shape[1] - interface.KEY_TRAVEL, 1))
+                       for e in entries) == want)
+    c.check('tub: every keyhole cuts right through to the wall face',
+            all(e.a0 < 0.0 for e in entries) and all(l.a0 < 0.0 for l in locks))
+    # THE point of this design: the floor must still print dead flat, so
+    # nothing on the tub may stand proud of the wall face at Z0
+    proud = []
+    for op, solid in tub.records:
+        if op == 'cut':
+            continue
+        if solid.aabb()[4] < -0.001:
+            proud.append(solid)
+    c.check('tub: nothing stands proud of the floor - it still prints dead '
+            'flat on the bed', not proud)
+    # stud heads must hide inside the floor: counterbore from the inside
     cbores = [s for s in tub.solids('cut', 'circle', 'xY')
-              if near(s.shape[2], interface.MOUNT_CBORE_D / 2.0)]
-    holes = [s for s in tub.solids('cut', 'circle', 'xY')
-             if near(s.shape[2], interface.MOUNT_HOLE_D / 2.0)]
-    want = sorted((round(x, 1), round(y, 1))
-                  for x, y in interface.mount_hole_points())
-    got = sorted((round(h.shape[0], 1), round(h.shape[1], 1)) for h in holes)
-    c.check('tub: 6 wall anchors through the floor at {}'.format(want),
-            len(pads) == 6 and len(cbores) == 6 and len(holes) == 6
-            and got == want)
-    if holes and pads:
-        c.check('tub: every anchor hole goes right through the floor to the '
-                'wall face',
-                all(h.a0 < interface.mount_plane_z() and h.a1 > 5.0
-                    for h in holes))
-        # pad thickness is per-anchor: thick everywhere, thinner only where a
-        # device sits over it, so check each head against its own pad
-        head_ok, clear_ok, thinnest = True, True, 99.0
-        for hx, hy in interface.mount_hole_points():
-            ph = interface.mount_pad_h(hx, hy)
-            top = 3.0 + ph
-            land = top - interface.MOUNT_CBORE_DEPTH
-            thinnest = min(thinnest, land)
-            match = [cb for cb in cbores
-                     if near(cb.shape[0], hx) and near(cb.shape[1], hy)]
-            if len(match) != 1 or match[0].a1 < top - 1e-6:
-                head_ok = False
-            # only the anchors that actually sit under the router owe it
-            # clearance; the rest are free to be as thick as possible
-            if ph == interface.MOUNT_PAD_H_TIGHT and                     top > interface.MIK_UNDERSIDE_Z - 1.0:
-                clear_ok = False
-        c.check('tub: every M5 head is buried flush in its own pad, thinnest '
-                'land {:.1f}mm, and no pad fouls the MikroTik at Z{:.1f}'
-                .format(thinnest, interface.MIK_UNDERSIDE_Z),
-                head_ok and clear_ok and thinnest >= 2.0)
-        c.check('tub: anchor pads tie into the side walls (that is where the '
-                'strength is)',
-                all(abs(p.shape[0]) + interface.MOUNT_PAD_D / 2.0 >= 137.0
-                    for p in pads))
-        # the driver must reach each head straight down the box's depth
-        clear = True
-        for hx, hy in interface.mount_hole_points():
-            for dz in range(8, 60, 4):
-                if tub.material_at((hx, hy, float(dz))):
-                    clear = False
-        c.check('tub: a driver reaches every anchor head straight out of the '
-                'box (Z8..60 clear)', clear)
+              if near(s.shape[2], interface.KEY_CBORE_D / 2.0)]
+    c.check('tub: {} stud-head counterbores, each leaving {:.1f}mm of floor '
+            'against the wall'.format(len(cbores), interface.KEY_CBORE_LAND),
+            len(cbores) == 2 * len(want)
+            and all(near(cb.a0, interface.KEY_CBORE_LAND) for cb in cbores))
+    heads_hidden = True
+    for hx, hy in interface.KEYHOLE_XY:
+        pad_top = 3.0 + interface.key_pad_h(hx, hy)
+        if interface.KEY_CBORE_LAND + interface.STUD_HEAD_TH > pad_top:
+            heads_hidden = False
+    c.check('tub: no stud head protrudes into the box to foul a device',
+            heads_hidden)
+    bosses = [s for s in tub.solids('join', 'rect', 'xY')
+              if near(2 * s.shape[2], interface.ANTILIFT_BOSS)
+              and near(s.a1 - s.a0, interface.ANTILIFT_BOSS)
+              and near(s.a0, 3.0)
+              and near(s.shape[1], -140.0 + 3.0 + interface.ANTILIFT_BOSS / 2.0)]
+    pilots = [s for s in tub.solids('cut', 'circle', 'xZ')
+              if near(s.shape[2], interface.ANTILIFT_PILOT_D / 2.0)]
+    c.check('tub: 2 anti-lift bosses on the back wall with their pilots at '
+            'Z{:.0f}'.format(interface.ANTILIFT_Z),
+            len(bosses) == 2 and len(pilots) == 2
+            and all(near(p.world_centre()[2], interface.ANTILIFT_Z)
+                    for p in pilots)
+            and sorted(round(p.world_centre()[0], 1) for p in pilots) ==
+            sorted(interface.ANTILIFT_X))
+
+    # ---------------- FIR_WallRails ---------------------------------------
+    wr_mod, wr_design, msgs = run_script(world, p_('FIR_WallRails'), 'wallrails')
+    c.check('FIR_WallRails run() completed',
+            msgs and 'failed' not in msgs[-1])
+    rails = [b for b in wr_design.rootComponent.bodies_list
+             if b.name.startswith('FIR WALL RAIL')]
+    c.check('WallRails: top rail + bottom spacer built', len(rails) == 2)
+    studs = []
+    for rail in rails:
+        studs += [s for s in rail.solids('join', 'circle', 'xY')
+                  if near(s.shape[2], interface.STUD_HEAD_D / 2.0)]
+    stud_xy = sorted((round(s.shape[0], 1), round(s.shape[1], 1))
+                     for s in studs)
+    c.check('WallRails: 2 stud heads, exactly under the tub keyholes',
+            len(studs) == 2 and stud_xy == want)
+    if studs:
+        stand = interface.stud_standoff()
+        c.check('WallRails: stud head stands {:.1f}mm off the rail, so it sits '
+                'in the floor counterbore with {:.1f}mm of slide clearance'
+                .format(stand, stand - interface.KEY_CBORE_LAND),
+                all(near(s.a0, interface.RAIL_TH + stand) for s in studs)
+                and stand > interface.KEY_CBORE_LAND)
+    for rail in rails:
+        bb = rail.world_aabb()
+        dims = sorted((bb[1] - bb[0], bb[3] - bb[2]), reverse=True)
+        c.check('PRINTABLE: {:.30s}... is {:.1f} x {:.1f}mm'
+                .format(rail.name.split('(')[0], dims[0], dims[1]),
+                dims[0] + 2 * interface.BED_MARGIN <= interface.BED_X
+                and dims[1] + 2 * interface.BED_MARGIN <= interface.BED_Y)
 
     # ---------------- PRINTABILITY: the Ender 3 Plus envelope --------------
-    # This is the guard that would have caught the projecting tabs before
-    # they ever reached the slicer.
     bed = (interface.BED_X - 2 * interface.BED_MARGIN,
            interface.BED_Y - 2 * interface.BED_MARGIN,
            interface.BED_Z)
@@ -1096,14 +1128,13 @@ def check_tree(root, label):
         bb = body.world_aabb()
         dims = sorted((bb[1] - bb[0], bb[3] - bb[2]), reverse=True)
         tall = bb[5] - bb[4]
-        fits = (dims[0] <= max(bed[0], bed[1]) and dims[1] <= min(bed[0], bed[1])
-                and tall <= bed[2])
         c.check('PRINTABLE: {} is {:.1f} x {:.1f} x {:.1f}mm - fits the '
                 '{:.0f}x{:.0f}x{:.0f} bed with {:.1f}mm to spare'
                 .format(label, dims[0], dims[1], tall, interface.BED_X,
                         interface.BED_Y, interface.BED_Z,
                         max(bed[0], bed[1]) - dims[0]),
-                fits)
+                dims[0] <= max(bed[0], bed[1]) and dims[1] <= min(bed[0], bed[1])
+                and tall <= bed[2])
 
     # ---------------- FIR_FitCoupons -------------------------------------
     fc_mod, fc_design, msgs = run_script(
@@ -1137,8 +1168,8 @@ def check_tree(root, label):
                     b for b in chk_design.rootComponent.bodies_list
                     if b.name.startswith('CHECK: ALL-UP')]
                 c.check('FIR_ShellCheck SHELLS_ONLY: exactly the four printed '
-                        'shells, no loose inspection hardware',
-                        len(printed_shells) == 4)
+                        'shells plus the two wall rails, no loose hardware',
+                        len(printed_shells) == 6)
             c.check('FIR_ShellCheck {}: no interference / handedness faults'
                     .format(mode),
                     'INTERFERENCE' not in text

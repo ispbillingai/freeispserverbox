@@ -498,45 +498,65 @@ def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, la
     return
 
 
-def build_mount_anchors(comp, sh):
-    """Six counterbored wall anchors straight through the floor.
+def build_mount_keyholes(comp, sh):
+    """Two keyhole slots in the floor plus the two anti-lift bosses.
 
-    Nothing may project past the 280 footprint - the Ender 3 Plus bed is
-    300 square - so the anchors go through the floor, which is how a
-    back-panel enclosure is normally fixed anyway.  Each is a locally
-    thickened pad that grows into the side wall (that is where the stiffness
-    comes from), a counterbore that buries the M5 head flush with the pad,
-    and the through hole.  Six of them, because a box standing 120mm off a
-    wall puts a peel moment on the outermost screws.
+    The box hangs on the top wall rail: its two studs pass through the round
+    ends of these keyholes, then the box DROPS 20mm and the stud heads are
+    trapped behind the floor.  Two M4 screws through the rail's upstand into
+    the back-wall bosses stop it ever sliding back up.
+
+    Everything here is a RECESS or a hole - never a bump - so the floor still
+    prints dead flat on the bed.  Each stud head hides inside a counterbore
+    in the floor's INNER face, so nothing protrudes into the box either.
     """
-    for hx, hy in INTERFACE.mount_hole_points():
-        pad_h = INTERFACE.mount_pad_h(hx, hy)     # thick unless a device is over it
+    entry_d = INTERFACE.KEY_ENTRY_D
+    slot_w = INTERFACE.KEY_SLOT_W
+    travel = INTERFACE.KEY_TRAVEL
+    for hx, hy in INTERFACE.KEYHOLE_XY:
+        pad_h = INTERFACE.key_pad_h(hx, hy)
         pad_top = FLOOR + pad_h
-        cyl(comp, hx, hy, FLOOR, INTERFACE.MOUNT_PAD_D,
-            pad_h, JOIN, [sh])                                  # thickened pad
-        cyl(comp, hx, hy, pad_top - INTERFACE.MOUNT_CBORE_DEPTH,
-            INTERFACE.MOUNT_CBORE_D, INTERFACE.MOUNT_CBORE_DEPTH + 0.01,
-            CUT, [sh])                                          # head counterbore
-        cyl(comp, hx, hy, -1.0, INTERFACE.MOUNT_HOLE_D,
-            pad_top + 2.0, CUT, [sh])                           # through hole
-    pts = INTERFACE.mount_hole_points()
+        entry_y = hy + travel
+        # local floor thickening, long enough to back the whole keyhole
+        box(comp, hx, (hy + entry_y) / 2.0, FLOOR,
+            INTERFACE.KEY_PAD_D, travel + INTERFACE.KEY_PAD_D,
+            pad_h, JOIN, [sh])
+        # counterbore from the INSIDE: the stud head lives in here
+        cbore_z0 = INTERFACE.KEY_CBORE_LAND
+        cyl(comp, hx, hy, cbore_z0, INTERFACE.KEY_CBORE_D,
+            pad_top - cbore_z0 + 0.01, CUT, [sh])
+        cyl(comp, hx, entry_y, cbore_z0, INTERFACE.KEY_CBORE_D,
+            pad_top - cbore_z0 + 0.01, CUT, [sh])
+        box(comp, hx, (hy + entry_y) / 2.0, cbore_z0,
+            INTERFACE.KEY_CBORE_D, travel, pad_top - cbore_z0 + 0.01,
+            CUT, [sh])
+        # the keyhole itself, right through to the wall face
+        cyl(comp, hx, entry_y, -1.0, entry_d, pad_top + 2.0, CUT, [sh])
+        cyl(comp, hx, hy, -1.0, slot_w, pad_top + 2.0, CUT, [sh])
+        box(comp, hx, (hy + entry_y) / 2.0, -1.0, slot_w, travel,
+            pad_top + 2.0, CUT, [sh])
+    # anti-lift bosses on the back wall's inner face, with their pilots
+    for ax in INTERFACE.ANTILIFT_X:
+        box(comp, ax, -HALF + WALL + INTERFACE.ANTILIFT_BOSS / 2.0,
+            FLOOR, INTERFACE.ANTILIFT_BOSS, INTERFACE.ANTILIFT_BOSS,
+            INTERFACE.ANTILIFT_BOSS, JOIN, [sh])
+        cyl_y(comp, ax, INTERFACE.ANTILIFT_Z, -HALF + WALL,
+              INTERFACE.ANTILIFT_PILOT_D, 26.0, CUT, [sh])
     SKIPPED.append(
-        'WALL MOUNT (panel style): the 280x280 FLOOR lies flat on the wall and '
-        'the box stands 120mm out, screen facing the room. SIX M5 anchors '
-        'through the floor at X+-{:.0f}, Y{:.0f}/{:.0f}/{:.0f}, heads '
-        'counterbored flush into thickened pads that tie into the side walls. '
-        'Nothing projects past the 280 footprint, so the tub still fits the '
-        '300mm bed. Mark through the holes, drill, screw the box on, then fit '
-        'the devices and the cap.'
-        .format(abs(pts[0][0]), INTERFACE.MOUNT_HOLE_Y[0],
-                INTERFACE.MOUNT_HOLE_Y[1], INTERFACE.MOUNT_HOLE_Y[2]))
+        'WALL MOUNT: the box HANGS on the two top-rail studs through the '
+        'keyholes at X+-{:.0f} (drop it {:.0f}mm to lock), then two M4 '
+        'anti-lift screws go through the rail upstand into the back-wall '
+        'bosses at X+-{:.0f}. Both are driven from OUTSIDE, so the box comes '
+        'off the wall without ever being opened. Print FIR_WallRails for the '
+        'other half.'
+        .format(abs(INTERFACE.KEYHOLE_XY[0][0]), INTERFACE.KEY_TRAVEL,
+                abs(INTERFACE.ANTILIFT_X[0])))
     SKIPPED.append(
         'ORIENTATION: the floor lies on the wall, so model +Z points OUT of '
         'the wall, not up, and the port face (+Y) runs DOWN the wall so cables '
         'hang and drip clear. Internal retention is SETTLED (owner, 18 Aug): '
         'the cradles, extension lips and adapter strap were designed for this '
-        'orientation and hold their parts trapped in shear - do not redesign '
-        'them for a floor-standing box.')
+        'orientation and hold their parts trapped in shear.')
     return
 
 
@@ -646,14 +666,15 @@ def build(comp):
 
     # (BUZZER/alarm seat REMOVED - Francis will just bolt it; no cradle needed)
 
-    # ================= WALL MOUNT: six anchors through the floor =============
+    # ================= WALL MOUNT: keyholes + anti-lift bosses ===============
     # The box mounts like an electrical panel - its 280 x 280 FLOOR flat on
-    # the wall, standing 120mm out with the screen facing the room.  The
-    # anchors go THROUGH the floor because the Ender 3 Plus bed is 300mm
-    # square and the tub is already 280: projecting tabs made it 328mm wide,
-    # i.e. unprintable.  Earlier dead ends: keyholes, a separate cleat plate,
-    # and back-wall ears (which assumed the box hung off its back).
-    build_mount_anchors(comp, sh)
+    # the wall, standing 120mm out with the screen facing the room - and it
+    # HANGS on two studs so it can be taken down without being opened.
+    # Dead ends before this: keyholes in the back wall (wrong face), a cleat
+    # plate (wrong face again), projecting tabs (328mm wide - would not fit
+    # the 300mm bed) and screws through the floor (needed the box gutted to
+    # mount it).  Everything here is a recess, so the floor prints flat.
+    build_mount_keyholes(comp, sh)
 
     # ================= SIDE-BOLT bosses at the lid overlap    # ================= SIDE-BOLT bosses at the lid overlap (lid skirt bolts in from the SIDE) =================
     # block on the side-wall INNER face + a HORIZONTAL (X) pilot - the bolt
@@ -1021,10 +1042,10 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v39: SIX floor anchors (counterbored flush, pads tied into the side '
-           'walls) replace the projecting tabs - the tub stays inside its 280 '
-           'footprint and fits the 300mm Ender bed. Panel-style mount, FOUR cap '
-           'screws / interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v40: the box HANGS - two floor keyholes drop onto the top wall '
+           'rail studs and two M4 anti-lift screws lock it, all from outside. '
+           'Floor still prints flat (recesses only); tub stays inside its 280 '
+           'footprint / interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):

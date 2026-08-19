@@ -140,7 +140,7 @@ SHOW_SCREW_MARKERS = False
 # interference view.
 PRESENTATION = True
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v48: SIX floor anchors inside the 280 footprint (Ender 3 Plus is 300 square); panel-style mount; FOUR cap screws; no horn cage. '
+CHECK_VERSION = ('v49: the box HANGS on two wall rails (keyholes + anti-lift, both driven from outside); panel-style mount; FOUR cap screws. '
                  'PRESENTATION=True gives an opaque, fastener-marked review view '
                  '(transparent stays for interference only). Five printed shells - tub, '
                  'deep cap, BottomLid, CurvedLid - with every outside screw '
@@ -823,11 +823,19 @@ def build_screw_markers(comp):
             body.name = CHECK_PREFIX + ' cap SIDE screw M3 (Y{:.0f}, {}X wall)'.format(
                 sy, '+' if sxs > 0 else '-')
             set_opacity(body, 0.85)
-    for ex, ey in INTERFACE.mount_hole_points():  # 6 wall anchors, through the floor
-        body = cyl(comp, ex, ey, INTERFACE.mount_plane_z() - 14.0, 4.5, 22.0,
-                   NEW).bodies.item(0)
-        body.name = (CHECK_PREFIX + ' WALL ANCHOR M5 (X{:.0f}, Y{:.0f}) - through '
-                     'the floor, INTO the wall'.format(ex, ey))
+    for sx in INTERFACE.RAIL_SCREW_X:             # wall screws, both rails
+        for ry in (INTERFACE.RAIL_TOP_Y + INTERFACE.RAIL_H / 2.0,
+                   INTERFACE.RAIL_BOTTOM_Y + INTERFACE.RAIL_H / 2.0):
+            body = cyl(comp, sx, ry, -INTERFACE.RAIL_TH - 14.0, 4.5, 20.0,
+                       NEW).bodies.item(0)
+            body.name = (CHECK_PREFIX + ' WALL SCREW M5 (X{:.0f}, Y{:.0f}) - rail '
+                         'into the wall'.format(sx, ry))
+            set_opacity(body, 0.85)
+    for ax in INTERFACE.ANTILIFT_X:               # 2 anti-lift screws
+        body = cyl_y(comp, ax, INTERFACE.ANTILIFT_Z, -150.0, 4.0, 26.0,
+                     NEW).bodies.item(0)
+        body.name = (CHECK_PREFIX + ' ANTI-LIFT M4 (X{:.0f}) - rail upstand into '
+                     'the back wall'.format(ax))
         set_opacity(body, 0.85)
     for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72),
                      (-132, 44), (132, 44)):    # 6 BottomLid screws
@@ -858,20 +866,31 @@ def build_screw_markers(comp):
         'into their skirt windows (the cap holds itself), then 8 M3 screws lock it.')
 
 
-def report_wall_mount():
-    """State the mount and the printability limit that shaped it."""
-    pts = INTERFACE.mount_hole_points()
+def build_actual_wall_rails(comp):
+    """Build the real FIR_WallRails where they actually sit behind the box.
+
+    The rails are authored in shell coordinates already (local Z is out of
+    the wall), so they only need pushing back by their own thickness to sit
+    behind the tub floor.
+    """
+    rail_source = _load_active_builder('FIR_WallRails')
+    for builder, label in ((rail_source.build_top_rail, 'TOP (studs)'),
+                           (rail_source.build_bottom_rail, 'BOTTOM (spacer)')):
+        rail = builder(comp)
+        rail.name = CHECK_PREFIX + ' wall rail ' + label + ' (actual FIR_WallRails)'
+        translate_body(comp, rail, 0.0, 0.0, -INTERFACE.RAIL_TH)
+        set_opacity(rail, 0.45)
+
     SKIPPED.append(
-        'WALL MOUNT (panel style): the 280x280 FLOOR lies flat against the '
-        'wall and the box stands 120mm out into the room, so the cap - screen '
-        'and LEDs - faces the viewer. SIX M5 anchors go THROUGH the floor at '
-        'X+-{:.0f}, Y{:.0f}/{:.0f}/{:.0f}, heads counterbored flush into '
-        'thickened pads that tie into the side walls. Nothing projects past '
-        'the 280 footprint - the Ender 3 Plus bed is {:.0f}mm square, and '
-        'projecting tabs had made the tub {:.0f}mm wide.'
-        .format(abs(pts[0][0]), INTERFACE.MOUNT_HOLE_Y[0],
-                INTERFACE.MOUNT_HOLE_Y[1], INTERFACE.MOUNT_HOLE_Y[2],
-                INTERFACE.BED_X, 280.0 + 48.0))
+        'WALL MOUNT: the box HANGS. Two studs on the TOP rail pass through the '
+        'keyholes in the tub floor at X+-{:.0f}, Y{:.0f}; drop the box {:.0f}mm '
+        'and the heads are trapped behind the floor. Two M4 screws through the '
+        'rail upstand into the back-wall bosses at X+-{:.0f} stop it lifting. '
+        'Both driven from OUTSIDE - the box comes off the wall without being '
+        'opened. Rail pitch {:.0f}mm; the bottom rail is a plain spacer.'
+        .format(abs(INTERFACE.KEYHOLE_XY[0][0]), INTERFACE.KEYHOLE_XY[0][1],
+                INTERFACE.KEY_TRAVEL, abs(INTERFACE.ANTILIFT_X[0]),
+                INTERFACE.RAIL_BOTTOM_Y - INTERFACE.RAIL_TOP_Y))
     SKIPPED.append(
         'ORIENTATION: model +Z points OUT of the wall, not up; the port face '
         '(+Y) runs DOWN the wall. Internal retention is SETTLED (owner, 18 '
@@ -948,7 +967,7 @@ def run(context):
         removed = clear_old(comp)
         sh, cap = build_actual_shell_and_cap(comp)
         lid, cover = build_actual_front_closure(comp)
-        report_wall_mount()
+        build_actual_wall_rails(comp)
         horn_points = ()
         if SHELLS_ONLY:
             SKIPPED.append(
@@ -966,7 +985,7 @@ def run(context):
         if SHOW_SCREW_MARKERS or PRESENTATION:
             build_screw_markers(comp)
         app.activeViewport.fit()
-        built = ('the four printed shells ONLY (tub, deep cap, BottomLid, CurvedLid)'
+        built = ('the four printed shells plus the two wall rails'
                  if SHELLS_ONLY else
                  'the assembled tub, BottomLid, CurvedLid, cap, actual '
                  'brain case, actual tray, PCB/module envelopes, router, PoE switch, '
