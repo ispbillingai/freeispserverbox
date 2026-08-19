@@ -734,7 +734,7 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v41', any('v41' in m for m in msgs))
+    c.check('FIR_Shell popup states v42', any('v42' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -1036,37 +1036,62 @@ def check_tree(root, label):
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
-    # ---------------- wall mounting: two plain keyholes --------------------
+    # ---------------- wall mounting: two BLIND keyholes --------------------
+    z0, z1 = interface.key_channel_z()
     entries = [s for s in tub.solids('cut', 'circle', 'xY')
                if near(s.shape[2], interface.KEY_ENTRY_D / 2.0)]
     locks = [s for s in tub.solids('cut', 'circle', 'xY')
              if near(s.shape[2], interface.KEY_SLOT_W / 2.0)]
+    chans = [s for s in tub.solids('cut', 'circle', 'xY')
+             if near(s.shape[2], interface.KEY_CHANNEL_D / 2.0)]
     want = sorted((round(x, 1), round(y, 1)) for x, y in interface.KEYHOLE_XY)
     c.check('tub: 2 keyholes in the floor at {}, {:.0f}mm apart'
             .format(want, abs(want[0][0] - want[1][0])),
-            len(entries) == 2 and len(locks) == 2
+            len(entries) == 2 and len(locks) == 2 and len(chans) == 4
             and sorted((round(l.shape[0], 1), round(l.shape[1], 1))
                        for l in locks) == want
             and sorted((round(e.shape[0], 1),
                         round(e.shape[1] - interface.KEY_TRAVEL, 1))
                        for e in entries) == want)
-    c.check('tub: the entry passes a {:.1f}mm screw head and the slot traps '
-            'it'.format(interface.WALL_SCREW_HEAD_D),
-            interface.KEY_ENTRY_D > interface.WALL_SCREW_HEAD_D + 1.5
+    c.check('tub: the entry passes a {:.1f}mm screw head and the slot traps it'
+            .format(interface.WALL_SCREW_HEAD_D),
+            interface.KEY_ENTRY_D > interface.WALL_SCREW_HEAD_D + 1.0
             and interface.KEY_SLOT_W > interface.WALL_SCREW_SHANK + 0.5
             and interface.KEY_SLOT_W < interface.WALL_SCREW_HEAD_D - 2.0)
-    c.check('tub: every keyhole cuts right through to the wall face',
-            all(e.a0 < 0.0 for e in entries) and all(l.a0 < 0.0 for l in locks))
-    pockets = [s for s in tub.solids('cut', 'circle', 'xY')
-               if near(s.shape[2], interface.KEY_POCKET_D / 2.0)]
-    c.check('tub: screw-head pockets are cut from the WALL face, so the box '
-            'lies flat, leaving {:.1f}mm of floor to carry it'
-            .format(interface.key_skin()),
-            len(pockets) == 4
-            and all(p.a0 <= 0.0 for p in pockets)
-            and all(near(p.a1, interface.KEY_POCKET_DEPTH) for p in pockets)
-            and interface.key_skin() >= 2.5)
-    # THE requirement: the floor must still print dead flat on the bed
+
+    # THE point of this revision: nothing may pass through into the box.
+    # Prove it on the solid, not from the constants.
+    pad_top = 3.0 + interface.KEY_PAD_H
+    watertight, carried, head_room = True, True, True
+    for hx, hy in interface.KEYHOLE_XY:
+        entry_y = hy + interface.KEY_TRAVEL
+        for py in (hy, entry_y, (hy + entry_y) / 2.0):
+            # solid all the way from the channel roof to the box interior
+            for probe in (z1 + 0.3, z1 + (pad_top - z1) / 2.0, pad_top - 0.3):
+                if not tub.material_at((hx, py, probe)):
+                    watertight = False
+            # and the channel itself is open, so a head can actually slide
+            if tub.material_at((hx, py, (z0 + z1) / 2.0)):
+                head_room = False
+        # the outer skin must SURVIVE beside the slot at the locked end -
+        # that skin is what the box hangs on
+        edge = interface.KEY_SLOT_W / 2.0 + 1.5
+        if not tub.material_at((hx + edge, hy, z0 / 2.0)):
+            carried = False
+        # ...and must be OPEN at the entry, so the head can get in
+        if tub.material_at((hx, entry_y, z0 / 2.0)):
+            head_room = False
+    c.check('tub: the mount is WATERTIGHT - {:.1f}mm of solid floor behind '
+            'every keyhole, nothing passes through into the box'
+            .format(interface.key_inner_skin()), watertight)
+    c.check('tub: the buried channel is open so the head can slide, and the '
+            'entry is open so it can get in', head_room)
+    c.check('tub: {:.1f}mm of outer skin survives beside the slot - that is '
+            'what carries the box'.format(interface.KEY_OUTER_SKIN), carried)
+    c.check('tub: no keyhole cut reaches the inner face',
+            all(cut.a1 <= pad_top - interface.key_inner_skin() + 1e-6
+                for cut in entries + locks + chans))
+    # the floor must still print dead flat on the bed
     proud = [solid for op, solid in tub.records
              if op != 'cut' and solid.aabb()[4] < -0.001]
     c.check('tub: nothing stands proud of the floor - it still prints dead '

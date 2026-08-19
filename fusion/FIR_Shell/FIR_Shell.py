@@ -499,48 +499,54 @@ def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, la
 
 
 def build_mount_keyholes(comp, sh):
-    """Two keyholes in the floor - the whole wall mount.
+    """Two BLIND keyholes in the floor - the whole wall mount.
 
-    Exactly what a router or an extension strip does: drive two screws into
-    the wall, leave the heads proud, offer the box up so the heads pass
-    through the round ends, drop it 15mm, done.  Nothing else to print.
+    Nothing passes through into the box.  The screw head lives buried inside
+    the floor's own thickness, between a 2mm outer skin (which is what the
+    box actually hangs on) and a 2mm inner skin that is never cut - so the
+    mount cannot let water, dust or an insect into the sealed volume, and no
+    fastener enters it either.
 
-    The head sits in a pocket recessed into the floor's OUTER face so the box
-    still lies flat on the wall.  That pocket is a cavity rather than a bump,
-    so the floor still prints face-down flat on the bed - the 3mm skin over
-    it simply bridges.
+        wall  |==== outer skin ====|   entry hole + shank slot cut here
+              |     head channel   |   the head slides along here
+              |==== inner skin ====|   SOLID - the box side stays closed
+              |      box inside    |
+
+    Every cut is made from the wall side, so the floor still prints
+    face-down flat on the bed.
     """
-    entry_d = INTERFACE.KEY_ENTRY_D
-    slot_w = INTERFACE.KEY_SLOT_W
-    pocket_d = INTERFACE.KEY_POCKET_D
+    z0, z1 = INTERFACE.key_channel_z()
     travel = INTERFACE.KEY_TRAVEL
     pad_h = INTERFACE.KEY_PAD_H
-    pad_top = FLOOR + pad_h
     for hx, hy in INTERFACE.KEYHOLE_XY:
         entry_y = hy + travel
         mid_y = (hy + entry_y) / 2.0
         # local thickening, long enough to back the whole keyhole
         box(comp, hx, mid_y, FLOOR, INTERFACE.KEY_PAD_D,
             travel + INTERFACE.KEY_PAD_D, pad_h, JOIN, [sh])
-        # head pocket, cut UP from the wall face so the box lies flat
+        # the buried channel the head slides in - blind at BOTH faces
         for py in (hy, entry_y):
-            cyl(comp, hx, py, -0.01, pocket_d,
-                INTERFACE.KEY_POCKET_DEPTH + 0.01, CUT, [sh])
-        box(comp, hx, mid_y, -0.01, pocket_d, travel,
-            INTERFACE.KEY_POCKET_DEPTH + 0.01, CUT, [sh])
-        # the keyhole itself: round entry, slot, through to the inside
-        cyl(comp, hx, entry_y, -1.0, entry_d, pad_top + 2.0, CUT, [sh])
-        cyl(comp, hx, hy, -1.0, slot_w, pad_top + 2.0, CUT, [sh])
-        box(comp, hx, mid_y, -1.0, slot_w, travel, pad_top + 2.0, CUT, [sh])
+            cyl(comp, hx, py, z0, INTERFACE.KEY_CHANNEL_D, z1 - z0, CUT, [sh])
+        box(comp, hx, mid_y, z0, INTERFACE.KEY_CHANNEL_D, travel,
+            z1 - z0, CUT, [sh])
+        # through the OUTER skin only: the round entry the head passes,
+        # and the slot the shank slides along
+        cyl(comp, hx, entry_y, -1.0, INTERFACE.KEY_ENTRY_D,
+            z0 + 1.0, CUT, [sh])
+        cyl(comp, hx, hy, -1.0, INTERFACE.KEY_SLOT_W, z0 + 1.0, CUT, [sh])
+        box(comp, hx, mid_y, -1.0, INTERFACE.KEY_SLOT_W, travel,
+            z0 + 1.0, CUT, [sh])
     SKIPPED.append(
-        'WALL MOUNT - as simple as a router: drive two wall screws {:.0f}mm '
-        'apart (4.5mm shank, head under {:.1f}mm), leave the heads ~4mm proud, '
-        'hang the box on them through the keyhole entries and let it DROP '
-        '{:.0f}mm. Screw heads hide in pockets so the box lies flat on the '
-        'wall, and {:.1f}mm of floor carries it. Nothing else to print.'
+        'WALL MOUNT - as simple as a router, and CLOSED: drive two wall screws '
+        '{:.0f}mm apart (4.5mm shank, head under {:.1f}mm) leaving about '
+        '{:.0f}mm proud, hang the box on them and let it DROP {:.0f}mm. The '
+        'heads end up buried INSIDE the floor: {:.1f}mm of skin carries the '
+        'box, and the {:.1f}mm skin behind them is never cut - nothing passes '
+        'through, so no water or dust can get in through the mount.'
         .format(abs(INTERFACE.KEYHOLE_XY[0][0] - INTERFACE.KEYHOLE_XY[1][0]),
-                INTERFACE.WALL_SCREW_HEAD_D, INTERFACE.KEY_TRAVEL,
-                INTERFACE.key_skin()))
+                INTERFACE.WALL_SCREW_HEAD_D, INTERFACE.WALL_SCREW_PROUD,
+                INTERFACE.KEY_TRAVEL, INTERFACE.KEY_OUTER_SKIN,
+                INTERFACE.key_inner_skin()))
     SKIPPED.append(
         'ORIENTATION: the floor lies on the wall, so model +Z points OUT of '
         'the wall, not up, and the port face (+Y) runs DOWN the wall so cables '
@@ -1030,9 +1036,9 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v41: SIMPLEST MOUNT - two keyholes in the floor, hang it on two '
-           'wall screws like a router. Nothing else to print; heads hide in '
-           'pockets so the box lies flat; floor still prints flat '
+VERSION = ('v42: BLIND keyholes - the wall screw heads are buried inside the '
+           'floor and the box side is never cut, so the mount is watertight; '
+           'hang it on two wall screws like a router; floor still prints flat '
            '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 

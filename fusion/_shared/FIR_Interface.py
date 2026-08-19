@@ -362,20 +362,32 @@ BED_MARGIN = 2.0                  # keep this much clear of the bed edge
 # the heads pass through the round ends, drop it 15mm, done.  No extra part
 # to print, no bracket, nothing to align.
 #
-# The head sits in a POCKET recessed into the floor's outer face, so the box
-# still lies flat against the wall - the same trick every consumer device
-# uses.  That pocket is a cavity, not a bump, so the floor still prints
-# face-down flat on the bed; the 3mm skin over it just bridges.
+# NOTHING PASSES THROUGH THE FLOOR (owner, 19 Aug): the keyhole is a BLIND
+# undercut, closed on the inside by a solid skin, so no water, dust or insect
+# can get in through the mount and no screw ever enters the sealed volume.
+# The screw head lives INSIDE the floor's thickness:
+#
+#   wall  |==== outer skin ====|          <- 2.0mm, this is what carries the box
+#         |     head channel   |          <- 3.5mm, the head slides along here
+#         |==== inner skin ====|          <- 2.0mm, SOLID: the box side is closed
+#         |      box inside    |
+#
+# The outer skin has a round ENTRY the head passes through, and a narrow SLOT
+# the shank slides along; the head is then trapped behind that skin.  All of
+# it is cut from the wall side, so the floor still prints face-down flat.
 KEYHOLE_XY = ((-129.0, -125.0), (129.0, -125.0))
 KEY_TRAVEL = 15.0                 # how far the box drops to lock
-KEY_ENTRY_D = 12.0                # passes a screw head up to ~11mm
+KEY_ENTRY_D = 11.0                # passes a screw head up to ~10mm
 KEY_SLOT_W = 5.5                  # passes the shank, traps the head
-KEY_POCKET_D = 16.0               # head pocket in the OUTER (wall) face
-KEY_POCKET_DEPTH = 3.5            # so the box still lies flat on the wall
-KEY_PAD_D = 22.0                  # local floor thickening around it all
-KEY_PAD_H = 3.5                   # -> 6.5mm of floor, 3.0mm skin over the pocket
+KEY_CHANNEL_D = 13.0              # the buried channel the head slides in
+KEY_OUTER_SKIN = 2.0              # wall-side skin: what the box hangs on
+KEY_HEAD_CHANNEL = 3.5            # depth of the buried channel
+KEY_INNER_SKIN = 2.0              # box-side skin: SOLID, never broken
+KEY_PAD_D = 20.0                  # local floor thickening around it all
+KEY_PAD_H = 4.5                   # -> 7.5mm of floor: 2.0 + 3.5 + 2.0
 WALL_SCREW_SHANK = 4.5            # a normal 4.5 x 40 wall-plug screw
 WALL_SCREW_HEAD_D = 8.5
+WALL_SCREW_PROUD = 5.0            # leave this much of the screw out of the wall
 MIK_UNDERSIDE_Z = 6.5
 MIK_STANDOFF_XY = ((129.0, 122.5), (129.0, 5.5), (27.0, 122.5), (27.0, 5.5))
 MIK_STANDOFF_D = 7.0
@@ -386,9 +398,14 @@ def mount_plane_z():
     return 0.0
 
 
-def key_skin():
-    """Material left over the head pocket, i.e. what carries the box."""
-    return 3.0 + KEY_PAD_H - KEY_POCKET_DEPTH
+def key_channel_z():
+    """The buried head channel, as (z0, z1) from the wall face."""
+    return (KEY_OUTER_SKIN, KEY_OUTER_SKIN + KEY_HEAD_CHANNEL)
+
+
+def key_inner_skin():
+    """Solid floor left on the BOX side of the channel - the water barrier."""
+    return 3.0 + KEY_PAD_H - (KEY_OUTER_SKIN + KEY_HEAD_CHANNEL)
 
 
 # ---------------------------------------------------------------------------
@@ -762,26 +779,31 @@ def validate():
     if any(abs(y) > 133.0 - M3_SEAT_PAD_D / 2.0 for y in CAP_SIDE_SCREW_Y):
         errors.append('a cap screw row runs into the corner radius')
     # Keyhole mount.  The box may not grow past its 280 footprint (the Ender
-    # 3 Plus bed is 300 square); the keyholes must pass a screw head but trap
-    # it; the head pocket must leave real material over it; and both must
-    # land on floor that is free of internal hardware.
+    # 3 Plus bed is 300 square); the keyhole must pass a screw head but trap
+    # it; and - the whole point of this revision - it must stay BLIND, with a
+    # solid skin on the box side so nothing passes through the floor.
     if 280.0 + 2.0 * BED_MARGIN > BED_X:
         errors.append('the tub footprint no longer fits the printer bed')
-    if KEY_ENTRY_D <= WALL_SCREW_HEAD_D + 1.5:
+    if KEY_ENTRY_D <= WALL_SCREW_HEAD_D + 1.0:
         errors.append('keyhole entry will not pass a normal screw head')
     if KEY_SLOT_W <= WALL_SCREW_SHANK + 0.5:
         errors.append('keyhole slot will not pass the screw shank')
     if KEY_SLOT_W >= WALL_SCREW_HEAD_D - 2.0:
         errors.append('keyhole slot is so wide the head would pull through')
-    if KEY_POCKET_D <= WALL_SCREW_HEAD_D + 2.0:
-        errors.append('head pocket is too tight around the screw head')
-    if KEY_POCKET_D >= KEY_PAD_D - 4.0:
-        errors.append('head pocket leaves no ring of floor around it')
-    if key_skin() < 2.5:
-        errors.append('only {:.1f}mm of floor left over the head pocket'
-                      .format(key_skin()))
-    if KEY_POCKET_DEPTH < 3.0:
-        errors.append('head pocket is too shallow to let the box lie flat')
+    if KEY_CHANNEL_D <= max(KEY_ENTRY_D, WALL_SCREW_HEAD_D + 2.0):
+        errors.append('the buried channel is too tight for the head to slide')
+    if KEY_CHANNEL_D >= KEY_PAD_D - 4.0:
+        errors.append('the buried channel leaves no ring of floor around it')
+    if KEY_OUTER_SKIN < 1.6:
+        errors.append('outer skin under {:.1f}mm cannot carry the box'
+                      .format(KEY_OUTER_SKIN))
+    if key_inner_skin() < 2.0:
+        errors.append('inner skin is only {:.1f}mm - the mount would not be '
+                      'watertight'.format(key_inner_skin()))
+    if KEY_HEAD_CHANNEL < 3.0:
+        errors.append('buried channel is too shallow for a screw head')
+    if WALL_SCREW_PROUD < KEY_OUTER_SKIN + 2.0:
+        errors.append('the screw would not stand proud enough to hang the box')
     if KEY_TRAVEL < KEY_ENTRY_D / 2.0 + KEY_SLOT_W:
         errors.append('keyhole travel is too short to trap the head')
     if len(KEYHOLE_XY) != 2 or len(set(KEYHOLE_XY)) != 2:

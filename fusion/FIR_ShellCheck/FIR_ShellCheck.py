@@ -140,7 +140,7 @@ SHOW_SCREW_MARKERS = False
 # interference view.
 PRESENTATION = True
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v50: SIMPLEST MOUNT - two keyholes in the floor, hang it on two wall screws like a router; panel-style, FOUR cap screws. '
+CHECK_VERSION = ('v51: BLIND keyholes - heads buried in the floor, box side never cut, so the mount is watertight; panel-style, FOUR cap screws. '
                  'PRESENTATION=True gives an opaque, fastener-marked review view '
                  '(transparent stays for interference only). Five printed shells - tub, '
                  'deep cap, BottomLid, CurvedLid - with every outside screw '
@@ -824,9 +824,12 @@ def build_screw_markers(comp):
                 sy, '+' if sxs > 0 else '-')
             set_opacity(body, 0.85)
     for hx, hy in INTERFACE.KEYHOLE_XY:           # the 2 wall screws
-        body = cyl(comp, hx, hy, -18.0, 4.5, 22.0, NEW).bodies.item(0)
-        body.name = (CHECK_PREFIX + ' WALL SCREW (X{:.0f}, Y{:.0f}) - the box '
-                     'hangs on this'.format(hx, hy))
+        # they stop INSIDE the floor - nothing passes through into the box
+        head_top = INTERFACE.key_channel_z()[1]
+        body = cyl(comp, hx, hy, -18.0, 4.5, 18.0 + head_top,
+                   NEW).bodies.item(0)
+        body.name = (CHECK_PREFIX + ' WALL SCREW (X{:.0f}, Y{:.0f}) - head buried '
+                     'in the floor, nothing enters the box'.format(hx, hy))
         set_opacity(body, 0.85)
     for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72),
                      (-132, 44), (132, 44)):    # 6 BottomLid screws
@@ -861,13 +864,14 @@ def report_wall_mount():
     """State the mount - it is now just two keyholes in the tub floor."""
     pitch = abs(INTERFACE.KEYHOLE_XY[0][0] - INTERFACE.KEYHOLE_XY[1][0])
     SKIPPED.append(
-        'WALL MOUNT: two keyholes in the floor, {:.0f}mm apart at Y{:.0f} - '
-        'drive two wall screws, hang the box on the heads, let it drop {:.0f}mm. '
-        'The heads hide in {:.0f}mm pockets in the floor\'s outer face so the '
-        'box lies flat on the wall, with {:.1f}mm of floor carrying it. No '
-        'bracket, no rail, nothing else to print.'
+        'WALL MOUNT: two BLIND keyholes in the floor, {:.0f}mm apart at Y{:.0f} '
+        '- drive two wall screws, hang the box on the heads, let it drop '
+        '{:.0f}mm. The heads end up buried inside the floor: {:.1f}mm of skin '
+        'carries the box and the {:.1f}mm skin behind them is never cut, so '
+        'nothing passes through and the mount cannot let water in. No bracket, '
+        'no rail, nothing else to print.'
         .format(pitch, INTERFACE.KEYHOLE_XY[0][1], INTERFACE.KEY_TRAVEL,
-                INTERFACE.KEY_POCKET_D, INTERFACE.key_skin()))
+                INTERFACE.KEY_OUTER_SKIN, INTERFACE.key_inner_skin()))
     SKIPPED.append(
         'ORIENTATION: model +Z points OUT of the wall, not up; the port face '
         '(+Y) runs DOWN the wall. Internal retention is SETTLED (owner, 18 '
