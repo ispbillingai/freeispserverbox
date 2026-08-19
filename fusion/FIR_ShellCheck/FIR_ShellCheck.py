@@ -86,7 +86,7 @@ SW_PORT_SIDE_LAND = INTERFACE.POE_PORT_SIDE_LAND
 SW_PORT_W, SW_PORT_H = INTERFACE.POE_PORT_W, INTERFACE.POE_PORT_H
 SW_PORT_FROM_BOTTOM = INTERFACE.POE_PORT_FROM_BOTTOM
 SW_PORT_Z0 = BASE + SW_PORT_FROM_BOTTOM
-# ---- top cap (FIR_Shell build_top_lid, assembled) ----
+# ---- top cap (FIR_TopLid build_top_lid, assembled) ----
 CAP_LIFT = 0.0        # 0 = fully seated. Set to e.g. 40.0 to HOVER the cap above the tub and
                       # watch how it drops on (open edge stays at the front).
 COVER_TRAVEL = 0.0    # 0 = fully slid home; positive mm moves the cover outward (+Y) to inspect rail entry.
@@ -140,7 +140,7 @@ SHOW_SCREW_MARKERS = False
 # interference view.
 PRESENTATION = True
 CHECK_PREFIX = 'CHECK: ALL-UP'
-CHECK_VERSION = ('v51: BLIND keyholes - heads buried in the floor, box side never cut, so the mount is watertight; panel-style, FOUR cap screws. '
+CHECK_VERSION = ('v52: one script per part (cap = FIR_TopLid); horn bolts direct, no sled; tamper reed on the CURVED LID only; blind watertight keyholes. '
                  'PRESENTATION=True gives an opaque, fastener-marked review view '
                  '(transparent stays for interference only). Five printed shells - tub, '
                  'deep cap, BottomLid, CurvedLid - with every outside screw '
@@ -649,38 +649,17 @@ def build_horn_preview(comp, brain):
     fx, fy = INTERFACE.horn_foot_centre()
     make_check_cyl(comp, 'alarm horn 69mm bracket foot', fx, fy,
                    FLOOR + HORN_PAD_H, HORN_FOOT_D, 3.0, 0.45)
-    # The sled: bench-assembled with ALL THREE measured foot bolts, then the
-    # whole horn+sled is clamped by two
-    # wing screws.  Show the assembled sled and prove the wing corridors open.
-    sled_cx = (INTERFACE.HORN_SLED_X0 + INTERFACE.HORN_SLED_X1) / 2.0
-    sled_cy = (INTERFACE.HORN_SLED_Y0 + INTERFACE.HORN_SLED_Y1) / 2.0
-    make_check_box(comp, 'horn SLED (bench-bolted adapter plate)',
-                   sled_cx, sled_cy, FLOOR,
-                   INTERFACE.HORN_SLED_X1 - INTERFACE.HORN_SLED_X0,
-                   INTERFACE.HORN_SLED_Y1 - INTERFACE.HORN_SLED_Y0,
-                   INTERFACE.HORN_SLED_TH, 0.50)
-    for index, (px, py) in enumerate(INTERFACE.horn_mount_points()):
-        make_check_cyl(comp, 'horn foot bolt {} (driven on the BENCH into the sled)'
-                       .format(index + 1), px, py,
-                       INTERFACE.horn_foot_plane_z() - INTERFACE.HORN_SLED_BOSS_H,
-                       HORN_HOLE_D, INTERFACE.HORN_SLED_BOSS_H
+    # Direct bolting (owner, 19 Aug): the horn's foot sits straight on two
+    # 14mm floor pads and takes two M4 x 10 through its REAR holes; the apex
+    # hole is unused and the sled is retired.
+    for index, (px, py) in enumerate(INTERFACE.horn_mount_points()[1:]):
+        make_check_cyl(comp, 'horn bolt {} (M4x10, direct into the floor pad)'
+                       .format(index + 1), px, py, FLOOR,
+                       HORN_HOLE_D, HORN_PAD_H
                        + INTERFACE.HORN_FOOT_PLATE_TH + 4.0, 0.30)
-    for index, (px, py) in enumerate(INTERFACE.horn_wing_points()):
-        make_check_cyl(comp, 'horn wing screw {} (M4x10, in-box clamp)'.format(index + 1),
-                       px, py, FLOOR, 4.0, HORN_PAD_H + 12.0, 0.30)
-        make_check_cyl(comp, 'horn wing screw {} driver corridor'.format(index + 1),
-                       px, py, FLOOR + HORN_PAD_H + 12.0, 12.0, 85.0, 0.10)
-        # the corridor must dodge the horn body AND the hanging brain case
-        if hy0 < py < hy1 and hx0 < px < hx1:
-            SKIPPED.append('horn wing screw {} is under the body - move the wing line'
-                           .format(index + 1))
-        case_y0 = brain['case_y'] - brain['gadget'].H / 2.0
-        if py + 6.0 > case_y0 and brain['case_x'] - brain['gadget'].W / 2.0 < px + 6.0:
-            SKIPPED.append('horn wing corridor {} runs into the hanging brain case'
-                           .format(index + 1))
     # The bracket arm / tightening-bolt zone above the rear foot holes is NOT
-    # measured; nothing of ours may claim that space.  This zone is exactly why
-    # in-box foot bolts were impossible and the sled exists.
+    # measured; nothing of ours may claim that space.  The owner accepts
+    # driving the two rear bolts beside it (19 Aug, sled retired).
     make_check_box(comp, 'horn bracket arm + tightening bolts (UNMEASURED zone)',
                    (hx0 + hx1) / 2.0, hy0 - HORN_BOLT_TAIL / 2.0,
                    INTERFACE.horn_foot_plane_z(), 60.0, HORN_BOLT_TAIL, 60.0, 0.15)
@@ -887,12 +866,13 @@ def build_actual_shell_and_cap(comp):
     shell.name = CHECK_PREFIX + ' shell / actual FIR_Shell tub (see-through)'
     set_opacity(shell, 0.22)
 
-    # FIR_Shell builds the cap plate-down for printing: its external roof is
-    # local Z=0 and its inner roof face is Z=3.  Rotate 180 degrees around Y
-    # and lift to Z=120, preserving +Y as the front.  The cap is symmetric in
-    # X, so the X mirror does not change any placement datum.
-    cap = shell_source.build_top_lid(comp, 0.0)
-    cap.name = CHECK_PREFIX + ' top cap / actual FIR_Shell (see-through)'
+    # The cap is its own part now (FIR_TopLid, split 19 Aug).  It builds
+    # plate-down for printing: external roof at local Z=0, inner face Z=3.
+    # Rotate 180 degrees around Y and lift to Z=120, preserving +Y as front.
+    toplid_source = _load_active_builder('FIR_TopLid')
+    del toplid_source.SKIPPED[:]
+    cap = toplid_source.build_top_lid(comp, 0.0)
+    cap.name = CHECK_PREFIX + ' top cap / actual FIR_TopLid (see-through)'
     coll = adsk.core.ObjectCollection.create()
     coll.add(cap)
     matrix = adsk.core.Matrix3D.create()
@@ -906,6 +886,8 @@ def build_actual_shell_and_cap(comp):
     # by anyone running the all-up view instead of FIR_Shell directly.
     for note in shell_source.SKIPPED:
         SKIPPED.append('FIR_Shell: ' + note)
+    for note in toplid_source.SKIPPED:
+        SKIPPED.append('FIR_TopLid: ' + note)
     return shell, cap
 
 

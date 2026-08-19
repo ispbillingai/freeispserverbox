@@ -8,15 +8,21 @@ is the running log; this block is what is true right now.
 
 ### The parts to print, in order
 
-| # | Fusion script | Body / part | Size (mm) | Print orientation |
+| # | Fusion script | Part | Size (mm) | Print orientation |
 |---|---|---|---|---|
 | 1 | `FIR_FitCoupons` | 3 coupon PAIRS (6 bodies) | small | as built, flat |
-| 2 | `FIR_Shell` | FIR SHELL (tub) | 282.4 x 278.2 x 80 | floor down (flat on bed) |
-| 3 | `FIR_BottomLid` | FIR Bottom Lid (port face) | 280 x 83 + shelf | as built |
-| 4 | `FIR_CurvedLid` | FIR Lid Cover (curved) | 280 x 114 x 66 | STANDING ON AN END WALL |
-| 5 | `FIR_Shell` | FIR TOP LID (deep cap) | 291 x 286 x 55 | roof down (as built) - ONLY 5mm bed margin: centre it, no brim |
-| 6 | `FIR_Shell` | FIR HORN SLED | 76 x 102 x ~9 | as built, flat |
-| + | `FIR_ModuleGadget` / `FIR_ModulePlate` | brain case + tray | settled earlier | per their own scripts |
+| 2 | `FIR_Shell` | the tub | 282.4 x 278.2 x 80 | floor down (flat on bed) |
+| 3 | `FIR_BottomLid` | port face | 280 x 83 + shelf | as built |
+| 4 | `FIR_CurvedLid` | curved cover | 280 x 114 x 66 | STANDING ON AN END WALL |
+| 5 | `FIR_TopLid` | deep cap | 291 x 286 x 55 | roof down - ONLY 5mm bed margin: centre it, no brim |
+| 6 | `FIR_ModuleGadget` | brain case | settled earlier | per its script |
+| 7 | `FIR_ModulePlate` | electronics tray | settled earlier | per its script |
+
+ONE SCRIPT PER PART (owner, 19 Aug): FIR_Shell builds only the tub; the deep
+cap moved to the new `FIR_TopLid`; the horn sled NO LONGER EXISTS - the horn
+bolts directly to two floor pads (M4 x 10, rear foot holes, apex unused); and
+the tamper reed/magnet senses the CURVED LID only (the top-cap pair was
+removed - the cover must come off first anyway, so that is the alarm event).
 
 DO NOT print the cap (#5) until the Landzo 3.5" screen is measured - its
 window and seat are typical-shield ASSUMPTIONS (`SCREEN_MEASURED = False`)

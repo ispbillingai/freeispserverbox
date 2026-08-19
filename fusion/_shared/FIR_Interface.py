@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-18.12'
+INTERFACE_VERSION = '2026-08-19.13'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -267,60 +267,30 @@ REED_WIRE_HOLE_D = 4.0
 
 
 # ---------------------------------------------------------------------------
-# TOP-CAP tamper sensing: second magnet + reed (owner, 18 Aug)
-# ---------------------------------------------------------------------------
-# Same D12.1 x 4.7 magnet, press-fit into a pillar hanging from the cap roof
-# at assembled (X-60, Y+125) - over the switch bay, in front of the tub's top
-# rail, clear of the brain case (Y<=77), the cradle hooks (Z<=48) and the
-# rail itself (Y134..137).  The pocket opens DOWNWARD, which prints as a
-# clean vertical bore in the roof-down cap.  The reed lies in a groove cut
-# into the rail's FRONT face; lifting the cap pulls the magnet straight up
-# and off.  Wires join the existing tub-to-cap service loop (horn lead).
-# The pillar is asymmetric in X: build_top_lid must mirror it exactly once,
-# like the brain-case bosses.
-CAP_MAGNET_X = -60.0              # assembled shell X
-CAP_MAGNET_Y = 125.0
-CAP_MAG_PILLAR_SQ = 16.0
-CAP_MAG_PILLAR_BOT_Z = 75.0       # pillar hangs from the roof (Z117) to here
-CAP_REED_GROOVE_DEPTH = 2.0       # into the 3mm rail front face (1mm left)
-CAP_REED_GROOVE_W = 3.2           # groove height (reed lies along X)
-CAP_REED_GROOVE_LEN = 18.0
-CAP_REED_GROOVE_Z0 = 74.8
-
-# ---------------------------------------------------------------------------
 # INDOOR variant: 3.5" TFT + indicator LEDs in the cap roof (owner, 18 Aug)
 # ---------------------------------------------------------------------------
-# Two build variants exist and this ONE flag switches them:
-#   True  = INDOOR: the Landzo 3.5" TFT shows through a roof window (module
-#           sits in a shallow seat under the roof, glued/clamped from below,
-#           wired to the brain PCB's J4), plus two 5mm LED holes (green/red,
-#           push through + superglue).  The roof is NO LONGER top-rain-tight
-#           - that is the owner's explicit trade for the indoor model.
-#   False = WEATHERPROOF: sealed continuous roof, exactly as before; the
-#           screen will later live inside the CurvedLid instead.
-# Position (assembled): front-of-roof strip, clear of the brain case plan
-# (Y<=77), its bosses, and the cap magnet pillar (X-68..-52 at Y125).
-# ASYMMETRIC roof features -> build_top_lid mirrors X exactly once.
+# Two build variants, one flag: True = the Landzo 3.5" TFT shows through a
+# roof window (module in a shallow seat under the roof, glued/clamped, wired
+# to the brain's J4) plus two 5mm LED holes - the roof is NOT top-rain-tight,
+# the owner's explicit trade for the indoor model.  False = sealed continuous
+# roof (the weatherproof model will hide a screen inside the CurvedLid).
+# Position: centred in X (owner), front strip of the roof, clear of the
+# brain-case plan and its bosses.  ASYMMETRIC -> FIR_TopLid mirrors X once.
 INDOOR_SCREEN = True
-# Landzo "3.5 inch TFT Ultra HD (UNO/Mega256)" - typical UNO-shield numbers,
-# NOT measured: PCB ~86.5 x 57, visible glass window 76 x 51 (active 73.4 x
-# 49 + alignment margin).  MEASURE THE REAL BOARD before printing the cap.
+# Typical UNO-shield numbers, NOT measured - MEASURE THE REAL BOARD before
+# printing the cap.
 SCREEN_MEASURED = False
 SCREEN_PCB_W, SCREEN_PCB_H = 86.5, 57.0
 SCREEN_VIS_W, SCREEN_VIS_H = 76.0, 51.0
 SCREEN_SEAT_DEPTH = 1.0           # into the 3mm roof: module registers flat
 SCREEN_CX, SCREEN_CY = 0.0, 108.0    # assembled shell X/Y of window centre
-                                     # (centred in X, owner request 18 Aug)
 LED_HOLE_D = 5.0                  # standard 5mm LED, push fit + superglue
 LED_HOLES = ((78.0, 100.0), (78.0, 116.0))   # green, red (assembled X/Y)
 
-
-def cap_reed_magnet_distance():
-    """Centre-to-centre distance of the CAP pair with the cap seated, mm."""
-    magnet_z = CAP_MAG_PILLAR_BOT_Z + 0.6 + MAGNET_TH / 2.0
-    reed_y = 134.0 + 1.25                 # recessed into the rail front face
-    reed_z = CAP_REED_GROOVE_Z0 + CAP_REED_GROOVE_W / 2.0
-    return math.hypot(reed_y - CAP_MAGNET_Y, reed_z - magnet_z)
+# TOP-CAP tamper pair: REMOVED (owner, 19 Aug).  The reed/magnet senses the
+# CURVED LID only - the cover must come off before anything else can be
+# opened, so that one event is the alarm trigger.  The pillar, the rail
+# groove and their numbers live in git history if ever wanted back.
 
 
 def reed_magnet_distance():
@@ -466,24 +436,13 @@ HORN_BASE_C2C, HORN_SIDE_C2C = 38.5, 50.0
 # three floor pads move with this one number, so it is worth a tape measure.
 HORN_FOOT_FROM_MOUTH = 99.0
 HORN_FOOT_MEASURED = False
-# Fastening rework (16 Aug 2026, after the owner rejected the peg): ALL THREE
-# measured foot holes get real bolts again.  They are driven ON THE BENCH into
-# a small printed SLED (adapter plate) where nothing hangs over them - the
-# bracket arm and its tightening bolts sit right above the rear foot holes, so
-# no in-box driver path to them exists in any orientation.  The bolted-up
-# horn+sled is then held by TWO M4 wing
-# screws, on wings that stick out BEHIND everything, clamp it down.  Adapter
-# plates are the standard answer to fastening under an unreachable overhang.
+# Fastening (owner, 19 Aug 2026, superseding the sled): the horn bolts
+# DIRECTLY to two 14mm floor pads with M4 x 10, using the foot's two REAR
+# holes; the apex hole is unused.  "It should just be two buttons to tighten
+# the horn on."  The sled and its wing screws are retired (git history keeps
+# them).  The foot sits on the pad tops, so the foot plane stays at Z9 and
+# every clearance number derived from it is unchanged.
 HORN_FOOT_PLATE_TH = 3.0          # the horn's own steel foot plate
-HORN_SLED_TH = 3.0                # printed sled plate on the tub floor
-HORN_SLED_BOSS_H = 3.0            # foot bosses on the sled -> foot plane Z9
-HORN_SLED_X0, HORN_SLED_X1 = -111.0, -35.0
-HORN_SLED_Y0, HORN_SLED_Y1 = -58.0, 30.0
-HORN_SLED_PILOT_D = 3.4           # bench screws: M4 x 8 max (6mm of plastic)
-HORN_SLED_PILOT_DEPTH = 5.5
-HORN_WING_W, HORN_WING_L = 24.0, 14.0
-HORN_WING_Y = -65.0               # wing screw line, behind the foot and bell
-HORN_WING_SCREW_X = (-93.0, -53.0)
 # NO CURB (owner, 18 Aug: "we don't need this cage for horns, just the bolt
 # is enough").  The four-sided curb pocket the sled used to drop into is gone;
 # the two M4 x 10 wing screws hold the bolted-up horn+sled by themselves.
@@ -549,14 +508,9 @@ def horn_mount_points():
     )
 
 
-def horn_wing_points():
-    """The two in-box clamp screws, on wings clear of everything above."""
-    return tuple((wx, HORN_WING_Y) for wx in HORN_WING_SCREW_X)
-
-
 def horn_foot_plane_z():
-    """Where the horn's steel foot sits: floor + sled + bosses."""
-    return 3.0 + HORN_SLED_TH + HORN_SLED_BOSS_H
+    """Where the horn's steel foot sits: on top of the two floor pads."""
+    return 3.0 + HORN_PAD_H
 
 
 def horn_axis_z():
@@ -648,26 +602,12 @@ def validate():
         errors.append('horn floor pilot would break through the 3mm tub floor')
     if min(HORN_W, HORN_L, HORN_H, HORN_BOLT_TAIL) <= 0.0:
         errors.append('horn envelope must be positive')
-    # The sled layout only works if (a) every foot hole lands on the sled,
-    # (b) both wing screws sit behind the horn body AND behind the sled plate,
-    # clear for a straight-down driver.
-    body_rear = HORN_MOUTH_Y - HORN_L
-    for hx_, hy_ in horn_mount_points():
-        if not (HORN_SLED_X0 + 7.0 <= hx_ <= HORN_SLED_X1 - 7.0
-                and HORN_SLED_Y0 + 2.0 <= hy_ <= HORN_SLED_Y1 - 7.0):
-            errors.append('horn foot hole ({:.1f},{:.1f}) misses the sled'
+    # Direct horn bolting: both rear foot holes must land on tub floor that
+    # is clear of the walls, and the pads must not collide with each other.
+    for hx_, hy_ in horn_mount_points()[1:]:
+        if abs(hx_) > 137.0 - HORN_PAD_D / 2.0 or abs(hy_) > 133.0:
+            errors.append('horn pad at ({:.1f},{:.1f}) runs into a wall'
                           .format(hx_, hy_))
-    for wx_, wy_ in horn_wing_points():
-        if wy_ > body_rear - 2.0:
-            errors.append('horn wing screw at Y{:.1f} is under the body'.format(wy_))
-        if wy_ > HORN_SLED_Y0 - HORN_WING_L / 2.0 + 1e-9:
-            errors.append('horn wing screw is not behind the sled plate')
-    if abs(HORN_PROFILE[-1][1] - HORN_W) > 1e-9 or HORN_PROFILE[-1][0] != 1.0:
-        errors.append('horn profile must end at the measured 102mm mouth')
-    if any(b[1] < a[1] for a, b in zip(HORN_PROFILE, HORN_PROFILE[1:])):
-        errors.append('horn profile must flare outward toward the mouth')
-    if HORN_SLED_PILOT_DEPTH > HORN_SLED_TH + HORN_SLED_BOSS_H - 0.5:
-        errors.append('horn sled pilot would pierce the sled bottom')
     # Snap detents must stay clear of the screw rows and the crush ribs, and
     # their window must fully swallow the bump.  The back wall no longer has
     # screws or keyholes; its bumps must only clear the cleat bar's top edge.
@@ -754,23 +694,6 @@ def validate():
     if 2.5 + MAGNET_PAD_H - MAGNET_POCKET_FLOOR < MAGNET_TH + 0.4:
         errors.append('cover magnet pocket too shallow for the {:.1f}mm disc'
                       .format(MAGNET_TH))
-    # Cap pair: the pillar must hang clear of the brain case, the cradle
-    # hooks and the rail; the recessed reed must clear the descending pillar;
-    # and the seated distance must stay in reed pull-in range.
-    if CAP_MAGNET_Y - CAP_MAG_PILLAR_SQ / 2.0 < CASE_TO_CAP_Y + CASE_OUTER_H / 2.0 + 2.0:
-        errors.append('cap magnet pillar runs into the hanging brain case')
-    if CAP_MAGNET_Y + CAP_MAG_PILLAR_SQ / 2.0 > 133.0:
-        errors.append('cap magnet pillar hits the tub top rail (Y134)')
-    if CAP_MAG_PILLAR_BOT_Z < 50.0:
-        errors.append('cap magnet pillar descends into the cradle hook zone')
-    reed_proud = 2.5 - CAP_REED_GROOVE_DEPTH
-    if 134.0 - reed_proud - (CAP_MAGNET_Y + CAP_MAG_PILLAR_SQ / 2.0) < 0.4:
-        errors.append('descending cap pillar would strike the rail-mounted reed')
-    if CAP_REED_GROOVE_DEPTH > 2.0:
-        errors.append('cap reed groove leaves under 1mm of rail behind it')
-    if cap_reed_magnet_distance() > 13.0:
-        errors.append('cap reed..magnet distance {:.1f}mm - too far for pull-in'
-                      .format(cap_reed_magnet_distance()))
     # Roof screen + LEDs (checked whether or not the indoor variant is on,
     # so a bad number cannot hide behind the flag): the window must keep a
     # bezel land inside the seat, the seat must clear the brain-case plan,
@@ -786,9 +709,6 @@ def validate():
         if seat_x0 - 8.0 < bx_ < seat_x1 + 8.0 and \
                 seat_y0 - 8.0 < by_ < SCREEN_CY + SCREEN_PCB_H / 2.0 + 8.0:
             errors.append('screen seat crowds a brain-case cap boss')
-    if seat_x0 < CAP_MAGNET_X + CAP_MAG_PILLAR_SQ / 2.0 + 2.0 and \
-            SCREEN_CY + SCREEN_PCB_H / 2.0 > CAP_MAGNET_Y - CAP_MAG_PILLAR_SQ / 2.0:
-        errors.append('screen seat crowds the cap magnet pillar')
     if SCREEN_CY + SCREEN_PCB_H / 2.0 > 138.0 or abs(SCREEN_CX) + SCREEN_PCB_W / 2.0 > 135.0:
         errors.append('screen seat runs off the roof / into the cap walls')
     for lx_, ly_ in LED_HOLES:

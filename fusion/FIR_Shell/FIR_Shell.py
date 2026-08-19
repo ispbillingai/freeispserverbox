@@ -1,5 +1,7 @@
 # FIR_Shell.py - Autodesk Fusion 360 script
-# The REAL 280x280 FreeISP TUB, fully detailed so you can SEE how the final holds together:
+# THE TUB, and nothing else (owner, 19 Aug: one script per part - the deep
+# cap moved to FIR_TopLid, the horn sled is gone).  Fully detailed so you can
+# SEE how the final holds together:
 #  - RB951 + PoE bays: sectioned snap-tab cradles on airflow standoffs (devices drop in + click)
 #  - integrated BOTTOM LID closes the front opening + bolts on with 6 self-tap screws
 #  - EXTENSION strip: a tall guide wall it rests against + wedge tabs that clamp it down
@@ -134,9 +136,6 @@ POE_JACK_POST_MAX_H = 8.0
 HORN_PAD_D, HORN_PAD_H = INTERFACE.HORN_PAD_D, INTERFACE.HORN_PAD_H
 HORN_PILOT_D, HORN_PILOT_DEPTH = INTERFACE.HORN_PILOT_D, INTERFACE.HORN_PILOT_DEPTH
 HORN_FOOT_D = INTERFACE.HORN_FOOT_D
-SLED_X0, SLED_X1 = INTERFACE.HORN_SLED_X0, INTERFACE.HORN_SLED_X1
-SLED_Y0, SLED_Y1 = INTERFACE.HORN_SLED_Y0, INTERFACE.HORN_SLED_Y1
-SLED_TH, SLED_BOSS_H = INTERFACE.HORN_SLED_TH, INTERFACE.HORN_SLED_BOSS_H
 # Cap-to-tub fastening: FOUR screws per SIDE wall, all horizontal, all
 # drivable with the box hanging on its wall.  The old back pair at X=+-115
 # could not be reached behind a wall-hung box (8mm of air), so it moved to
@@ -262,43 +261,6 @@ def poly_x(comp, pts_yz, xcenter, span, op, parts=None):
     if parts:
         ei.participantBodies = parts
     return f.add(ei)
-
-
-def poly_y(comp, pts_xz, ycenter, span, op, parts=None):
-    # closed polygon on the xZ plane (points are (x, z) mm), extruded along Y
-    # symmetric about ycenter - used for the skirt lead-in chamfer wedges.
-    # MEASURED xZ convention: sketch-U = world +X, sketch-V = world -Z.
-    sk = comp.sketches.add(comp.xZConstructionPlane)
-    lines = sk.sketchCurves.sketchLines
-    n = len(pts_xz)
-    for i in range(n):
-        x0, z0 = pts_xz[i]
-        x1, z1 = pts_xz[(i + 1) % n]
-        lines.addByTwoPoints(adsk.core.Point3D.create(mm(x0), mm(-z0), 0),
-                             adsk.core.Point3D.create(mm(x1), mm(-z1), 0))
-    f = comp.features.extrudeFeatures
-    ei = f.createInput(sk.profiles.item(0), op)
-    if abs(ycenter) > 1e-9:
-        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
-            adsk.core.ValueInput.createByReal(mm(ycenter)))
-    ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
-    if parts:
-        ei.participantBodies = parts
-    return f.add(ei)
-
-
-def poly_z(comp, pts_xy, z0, sz, op, parts=None):
-    # closed polygon on the xY plane, extruded along Z - used for the engraved
-    # front arrow (a triangle survives the assembly mirror; text would not).
-    sk = comp.sketches.add(comp.xYConstructionPlane)
-    lines = sk.sketchCurves.sketchLines
-    n = len(pts_xy)
-    for i in range(n):
-        x0, y0 = pts_xy[i]
-        x1, y1 = pts_xy[(i + 1) % n]
-        lines.addByTwoPoints(adsk.core.Point3D.create(mm(x0), mm(y0), 0),
-                             adsk.core.Point3D.create(mm(x1), mm(y1), 0))
-    return _ext(comp, sk.profiles.item(0), z0, sz, op, parts)
 
 
 def fillet_corners(comp, body, r, cx=0.0, half=None, back_only=False):
@@ -568,27 +530,6 @@ def build(comp):
     box(comp,  HALF - WALL / 2, -WALL / 2, FLOOR, WALL, BOX_D - WALL, BOX_H - FLOOR, JOIN, [sh]) # right wall (ends Y137)
     box(comp, 0, -HALF + WALL / 2, FLOOR, BOX_W, WALL, BOX_H - FLOOR, JOIN, [sh]) # back wall
     box(comp, 0, FRONT_Y - 1.5, BOX_H - 8, BOX_W - 2 * WALL, 3, 8, JOIN, [sh])    # top rail BEHIND the lid (Y134-137)
-    # TOP-CAP TAMPER REED (owner, 18 Aug): a groove in the rail's FRONT face
-    # holds the reed (glue it in, recessed so the cap's descending magnet
-    # pillar passes 0.5mm in front of it).  Wires join the tub-to-cap
-    # service loop alongside the horn lead.
-    box(comp, INTERFACE.CAP_MAGNET_X,
-        FRONT_Y - 3.0 + INTERFACE.CAP_REED_GROOVE_DEPTH / 2.0,
-        INTERFACE.CAP_REED_GROOVE_Z0, INTERFACE.CAP_REED_GROOVE_LEN,
-        INTERFACE.CAP_REED_GROOVE_DEPTH, INTERFACE.CAP_REED_GROOVE_W,
-        CUT, [sh])
-    SKIPPED.append(
-        'tamper sensing (cap): magnet pillar bottoms at Z{:.0f}, reed in the top-rail '
-        'groove {:.1f}mm away when seated. BENCH-TEST the reed+magnet pair at that '
-        'distance (magnet face-down, reed beside it) before printing.'
-        .format(INTERFACE.CAP_MAG_PILLAR_BOT_Z,
-                INTERFACE.cap_reed_magnet_distance()))
-    fillet_corners(comp, sh, CORNER_R - WALL, 0, HALF - WALL, back_only=True)     # inner cavity corners R7 FIRST (corner-gap bug)
-    fillet_corners(comp, sh, CORNER_R)                                            # then the 2 back outer corners R10 full height
-
-    # ---- AC/DC DIVIDER FRAME REMOVED - there is no separate divider; the extension guide wall + the
-    #      bottom-lid power section handle the AC zone now. ----
-
     # ================= RB951 ROUTER BAY (front-left) =================
     m_back = FRONT_Y - 0.5                             # 951 port face right against the lid inside (0.5mm clearance)
     m_cy = m_back - MIK_D / 2
@@ -805,62 +746,28 @@ def build_poe_plate(comp, ox, oy):
 
 
 def horn_floor_mount(comp, sh):
-    """Two clamp-screw pads for the horn's printed SLED.  Bolts only.
+    """Two pads; the horn's foot bolts STRAIGHT onto them.  No sled, no cage.
 
-    The horn's own bracket arm and tightening bolts hang over its foot holes,
-    so no driver reaches any foot bolt inside the box; all three are driven on
-    the bench into the separate FIR HORN SLED.  In the tub there is now
-    nothing but two 14mm pads whose M4 x 10 wing screws sit at Y-65, behind
-    the foot, the bell and the bracket, with nothing above them to the roof.
-    The old four-sided curb pocket is deleted at the owner's request - the
-    bolts hold it, a cage adds print time and traps swarf.
+    Owner (19 Aug): "why is there a horn sled - it should just be two buttons
+    to tighten the horn on."  So: two 14mm pads on the floor under the foot's
+    two REAR holes (the pair that stays reachable beside the bracket arm),
+    each with an M4 pilot sized so an M4 x 10 bottoms at the pilot floor with
+    2mm of tub floor beneath.  The apex hole goes unused, by owner decision.
+    NEVER use a screw longer than M4 x 10 here.
     """
-    for px, py in INTERFACE.horn_wing_points():
+    for px, py in INTERFACE.horn_mount_points()[1:]:
         cyl(comp, px, py, FLOOR, HORN_PAD_D, HORN_PAD_H, JOIN, [sh])
         cyl(comp, px, py, FLOOR + HORN_PAD_H - HORN_PILOT_DEPTH,
             HORN_PILOT_D, HORN_PILOT_DEPTH, CUT, [sh])
+    SKIPPED.append(
+        'horn: bolts DIRECTLY to two floor pads with M4 x 10 (owner, 19 Aug - '
+        'no sled, no cage; the foot\'s apex hole is unused).')
     if not INTERFACE.HORN_FOOT_MEASURED:
         SKIPPED.append(
-            'horn foot triangle on the SLED assumes the foot centre {:.0f}mm back '
-            'from the mouth. If the measurement differs, only the small sled '
-            'reprints - the tub does not change.'
-            .format(INTERFACE.HORN_FOOT_FROM_MOUTH))
+            'horn foot triangle assumes the foot centre {:.0f}mm back from the '
+            'mouth - the two pads move with that number, so measure it before '
+            'printing the tub.'.format(INTERFACE.HORN_FOOT_FROM_MOUTH))
     return
-
-
-def build_horn_sled(comp, ox, oy):
-    """The printable adapter plate the horn's foot bolts to ON THE BENCH.
-
-    Plate + three 14mm bosses on the measured foot triangle (M4 x 8 max: the
-    pilot stops 0.5mm above the plate bottom) + two rear wing tabs for the
-    in-box clamp screws.  Shown beside the tub in print orientation.
-    """
-    w, l = SLED_X1 - SLED_X0, SLED_Y1 - SLED_Y0
-    cx, cy = ox, oy
-    sled = box(comp, cx, cy, 0, w, l, SLED_TH, NEW).bodies.item(0)
-    sled.name = 'FIR HORN SLED (bench-bolt the horn to this)'
-    fillet_vertical(comp, sled, 4.0)
-    mid_x = (SLED_X0 + SLED_X1) / 2.0
-    mid_y = (SLED_Y0 + SLED_Y1) / 2.0
-    for hx, hy in INTERFACE.horn_mount_points():            # foot bosses
-        lx, ly = cx + (hx - mid_x), cy + (hy - mid_y)
-        cyl(comp, lx, ly, SLED_TH, HORN_PAD_D, SLED_BOSS_H, JOIN, [sled])
-        cyl(comp, lx, ly, SLED_TH + SLED_BOSS_H - INTERFACE.HORN_SLED_PILOT_DEPTH,
-            INTERFACE.HORN_SLED_PILOT_D, INTERFACE.HORN_SLED_PILOT_DEPTH,
-            CUT, [sled])
-    # Wing tabs reach back past the plate edge; assembled they land on the tub
-    # pads at pad-top height, so each carries its screw with open air above.
-    for wx, wy in INTERFACE.horn_wing_points():
-        lx = cx + (wx - mid_x)
-        tab_len = (SLED_Y0 - wy) + INTERFACE.HORN_WING_L / 2.0
-        tab_cy = cy + (SLED_Y0 - mid_y) - tab_len / 2.0
-        box(comp, lx, tab_cy, HORN_PAD_H, INTERFACE.HORN_WING_W,
-            tab_len, SLED_TH, JOIN, [sled])
-        box(comp, lx, cy + (SLED_Y0 - mid_y) - 1.0, SLED_TH,
-            INTERFACE.HORN_WING_W, 2.0, HORN_PAD_H, JOIN, [sled])   # riser
-        cyl(comp, lx, cy + (wy - mid_y), HORN_PAD_H - 1.0, 4.5,
-            SLED_TH + 2.0, CUT, [sled])
-    return sled
 
 
 def horn_clearances():
@@ -882,168 +789,17 @@ def horn_clearances():
     return checks
 
 
-def build_top_lid(comp, ox):
-    # TALL-CAP lid: the tub is 80mm but the CLOSED BOX IS 120mm (12cm, Francis) - this cap adds
-    # the 37mm of headroom the adapters + hanging brain need. It overlaps the tub walls by just
-    # 15mm (Z65-80 assembled; anything deeper is wasted material and buries the keyholes), then
-    # its walls RISE to the plate: skirt Z65-117, plate Z117-120. Side bolts sit mid-overlap:
-    # tub bosses Z66-78 / pilots Z72 <-> cap holes at print z LH-4 (assembled Z72). The FRONT
-    # wall stops at assembled Z83.5 - below that the bottom lid (to Z83) + the cover top (Z83)
-    # close the front, and the cover slides in UNDER the cap wall with 0.5mm clearance. Brain
-    # bolts to the inner top. Shown beside the tub in print orientation (plate down, skirt up).
-    LW = BOX_W + 6.0          # outer - bulges out over the tub
-    inner = BOX_W + 1.0       # slides over the 280 tub with clearance
-    LH = CAP_SKIRT_H          # skirt: 15mm tub overlap + 37mm headroom -> closed box 120mm
-    lid = box(comp, ox, 0, 0, LW, LW, CAP_ROOF_TH, NEW).bodies.item(0)
-    lid.name = 'FIR TOP LID (deep cap)'
-    box(comp, ox, 0, 3.0, LW, LW, LH, JOIN, [lid])                   # skirt block up
-    # Start the hollow at the roof's inner face, not 1mm into it.  This keeps
-    # the full 3mm roof and makes the brain-boss flange join the roof at z=3.
-    box(comp, ox, 0, 3.0, inner, inner, LH + 2, CUT, [lid])          # hollow -> skirt walls
-    fillet_corners(comp, lid, CORNER_R, ox, LW / 2.0)               # round the 4 outer corners FULL HEIGHT (after the skirt)
-    # Reinforced BRAIN CASE attachment: each M3 pilot is inside a 9mm boss
-    # with a 13mm root flange fused into the cap roof.  FIR_ModuleGadget's
-    # four easy-access roof holes map here when its case is installed +10mm
-    # toward +Y.  No case screw sits at a rounded case corner.
-    # PRINT-ORIENTATION WARNING: this cap is built roof-DOWN and is physically
-    # FLIPPED left/right on assembly, so a feature at cap-local +X lands at
-    # assembled -X. The boss pattern used to be symmetric, which hid that
-    # completely; now the brain case sits +47mm off centre it does not, so the
-    # assembled X is mirrored here exactly once.
-    for bx, byo in BRAIN_CAP_MOUNT:
-        lx = ox - bx
-        cyl(comp, lx, byo, 3.0,
-            BRAIN_CAP_FLANGE_D, BRAIN_CAP_FLANGE_H, JOIN, [lid])
-        cyl(comp, lx, byo, 3.0,
-            BRAIN_CAP_BOSS_D, BRAIN_CAP_BOSS_H, JOIN, [lid])
-        cyl(comp, lx, byo, 3.0,
-            BRAIN_CAP_PILOT, BRAIN_CAP_BOSS_H + 1.0, CUT, [lid])
-    # click ribs: TRUE crush ribs - 0.8mm proud of the skirt inner face, 0.3mm bite into the
-    # tub wall (the old ones bulged 4mm inboard = 3.5mm bite, the cap could never slide on).
-    # 2 sides + back only; they land at assembled Z73-75, where the FRONT wall doesn't exist.
-    for dx, dy in ((1, 0), (-1, 0), (0, -1)):
-        box(comp, ox + dx * (inner / 2 + 0.2), dy * (inner / 2 + 0.2), 3 + LH - 10,
-            2 if dx else 20, 20 if dx else 2, 2.0, JOIN, [lid])
-    # SHORTEN THE FRONT WALL: cut its lower part (inner 281 width only - the rounded corners +
-    # side walls stay full) from print z LH-15.5 down past the rim. Assembled, the front wall
-    # then spans Z83.5-117: below it the bottom lid's build-out (to Z83) + the cover top (Z83)
-    # close the front, and the sliding cover passes UNDER the wall with 0.5mm clearance.
-    # ASSEMBLY NOTE: flip the printed cap over about the FRONT-BACK axis (left<->right swap) so
-    # the short-wall edge stays at the FRONT; the bolt-hole pattern is symmetric either way.
-    box(comp, ox, 141.75, LH - 15.5, inner, 5.5, 20, CUT, [lid])
-    # 8 clearance holes for the tub's side bolts (4 per side wall at the
-    # shared CAP_SIDE_SCREW_Y rows; tub pilot Z72 -> print z LH-4), and the
-    # fix for the owner's real complaint - he exported the box and could not
-    # find anywhere to screw the lids together, because a flush 3.4mm hole on
-    # a 286mm face is invisible in a shaded render.  Every hole now sits in a
-    # 12mm round pad standing 2.5mm proud of the skirt, with a 6.5mm
-    # counterbore cut back to the ORIGINAL skirt face: the location reads at
-    # a glance, the M3 pan head disappears fully into the pad, and the head
-    # still seats on the same face as before, so no engagement number moved.
-    # Rows are identical on both walls, so the assembly flip cannot misplace
-    # them.  (The old back pair is gone: it could not be driven behind a
-    # wall-hung box.  Its replacement is the fourth row at Y-118.)
-    pad_h = INTERFACE.CAP_SEAT_PAD_H
-    for sxs in (-1, 1):
-        for byy in CAP_SIDE_SCREW_Y:
-            cyl_x(comp, byy, LH - 4, ox + sxs * (LW / 2 + (pad_h - 1) / 2),
-                  INTERFACE.M3_SEAT_PAD_D, pad_h + 1, JOIN, [lid])     # seat pad, root 1mm in the skirt
-            cyl_x(comp, byy, LH - 4, ox + sxs * (inner / 2 + 1.5), 3.4, 6, CUT, [lid])
-            cyl_x(comp, byy, LH - 4, ox + sxs * (LW / 2 + pad_h),
-                  INTERFACE.M3_SEAT_CBORE_D, 2 * pad_h, CUT, [lid])    # head counterbore
-    # LEAD-IN CHAMFER (18 Aug review): a 1.2mm 45-degree bevel on the skirt's
-    # lower inner edge - print z = 3+LH is the skirt's top face roof-down,
-    # which is the edge that meets the tub rim first at assembly.  The 0.5mm
-    # per-side slide fit starts itself instead of biting the rim.  Two side
-    # walls + the back (the front wall does not reach this height); the wedge
-    # runs the full span, so the corners get the same bevel.
-    ch = INTERFACE.CAP_LEADIN_CH
-    top = 3.0 + LH
-    for sxs in (-1, 1):
-        poly_y(comp, ((ox + sxs * inner / 2, top),
-                      (ox + sxs * (inner / 2 + ch), top),
-                      (ox + sxs * inner / 2, top - ch)),
-               0.0, inner + 4, CUT, [lid])
-    poly_x(comp, ((-(inner / 2), top),
-                  (-(inner / 2 + ch), top),
-                  (-(inner / 2), top - ch)),
-           ox, inner + 4, CUT, [lid])
-    # FRONT ARROW, engraved 0.6mm into the roof's INNER face (print z3, up in
-    # print).  A triangle survives the left/right assembly flip that would
-    # mirror any text; it always points at the short front wall.  It lives at
-    # assembled X-90 (print +90), between the magnet pillar and the wall,
-    # because the screen seat now owns the roof centre-front.
-    poly_z(comp, ((ox + 90.0, 126.0), (ox + 83.0, 112.0), (ox + 97.0, 112.0)),
-           2.4, 1.0, CUT, [lid])
-    # INDOOR VARIANT (owner, 18 Aug): the Landzo 3.5" TFT shows through a
-    # roof window; the module drops into a 1mm registration seat cut into
-    # the roof's inner face and is glued/clamped from below, wired to the
-    # brain's J4.  Two 5mm holes take the green/red indicator LEDs (push
-    # through, superglue).  INDOOR_SCREEN=False restores the sealed
-    # weatherproof roof untouched.  Asymmetric -> X mirrored exactly once.
-    if INTERFACE.INDOOR_SCREEN:
-        scx = ox - INTERFACE.SCREEN_CX
-        box(comp, scx, INTERFACE.SCREEN_CY, 3.0 - INTERFACE.SCREEN_SEAT_DEPTH,
-            INTERFACE.SCREEN_PCB_W, INTERFACE.SCREEN_PCB_H,
-            INTERFACE.SCREEN_SEAT_DEPTH + 1.0, CUT, [lid])     # module seat
-        box(comp, scx, INTERFACE.SCREEN_CY, -1.0,
-            INTERFACE.SCREEN_VIS_W, INTERFACE.SCREEN_VIS_H,
-            CAP_ROOF_TH + 2.0, CUT, [lid])                     # view window
-        for ledx, ledy in INTERFACE.LED_HOLES:
-            cyl(comp, ox - ledx, ledy, -1.0, INTERFACE.LED_HOLE_D,
-                CAP_ROOF_TH + 2.0, CUT, [lid])
-        SKIPPED.append(
-            'INDOOR VARIANT: roof carries the 3.5" TFT window + 2 LED holes - '
-            'this cap is NOT top-rain-tight, by owner decision. '
-            'INDOOR_SCREEN=False in FIR_Interface.py restores the sealed roof.')
-        if not INTERFACE.SCREEN_MEASURED:
-            SKIPPED.append(
-                'SCREEN DIMENSIONS ARE ASSUMED (typical UNO-shield 3.5" TFT: PCB '
-                '{:.1f}x{:.1f}, window {:.0f}x{:.0f}). MEASURE the real Landzo '
-                'board before printing the cap - the seat and window move with it.'
-                .format(INTERFACE.SCREEN_PCB_W, INTERFACE.SCREEN_PCB_H,
-                        INTERFACE.SCREEN_VIS_W, INTERFACE.SCREEN_VIS_H))
-    # TOP-CAP TAMPER MAGNET (owner, 18 Aug): a pillar hangs from the roof to
-    # assembled Z75 with a downward-opening press pocket for the D12.1 x 4.7
-    # disc - a clean vertical bore in this roof-down print.  Assembled it
-    # stands at (X-60, Y+125), just in front of the tub's top rail where the
-    # reed lies in its groove ~10mm away; lifting the cap breaks the field
-    # immediately.  ASYMMETRIC cap feature -> the X is mirrored exactly once,
-    # same as the brain-case bosses above.
-    mag_lx = ox - INTERFACE.CAP_MAGNET_X
-    pillar_h = (CAP_ROOF_INNER_Z - INTERFACE.CAP_MAG_PILLAR_BOT_Z)
-    box(comp, mag_lx, INTERFACE.CAP_MAGNET_Y, 3.0,
-        INTERFACE.CAP_MAG_PILLAR_SQ, INTERFACE.CAP_MAG_PILLAR_SQ,
-        pillar_h, JOIN, [lid])
-    cyl(comp, mag_lx, INTERFACE.CAP_MAGNET_Y,
-        3.0 + pillar_h - INTERFACE.MAGNET_POCKET_DEPTH,
-        INTERFACE.MAGNET_POCKET_D, INTERFACE.MAGNET_POCKET_DEPTH + 1.0,
-        CUT, [lid])
-    # SELF-CLICK windows: through-cuts in the skirt that swallow the tub's
-    # detent bumps at full seat.  Assembled Z70..76.5 -> print z 43.5..50.
-    # All positions are symmetric, so the assembly flip cannot misplace them.
-    wz0 = 120.0 - INTERFACE.CAP_SNAP_WIN_Z1          # assembled Z = 120 - print z
-    wh = INTERFACE.CAP_SNAP_WIN_Z1 - INTERFACE.CAP_SNAP_WIN_Z0
-    for sy in INTERFACE.CAP_SNAP_SIDE_Y:
-        for sxs in (-1, 1):
-            box(comp, ox + sxs * (LW / 2.0 - 1.5), sy, wz0,
-                5.0, INTERFACE.CAP_SNAP_WIN_W, wh, CUT, [lid])
-    for bx in INTERFACE.CAP_SNAP_BACK_X:
-        box(comp, ox + bx, -(LW / 2.0 - 1.5), wz0,
-            INTERFACE.CAP_SNAP_WIN_W, 5.0, wh, CUT, [lid])
-    if SHOW_PARTS:
-        box(comp, ox, 0, 16, 135, 120, 40, NEW).bodies.item(0).name = '=brain (bolts to lid)'
-    return lid
-
-
-VERSION = ('v42: BLIND keyholes - the wall screw heads are buried inside the '
-           'floor and the box side is never cut, so the mount is watertight; '
-           'hang it on two wall screws like a router; floor still prints flat '
-           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v43: TUB ONLY (the cap is FIR_TopLid now); horn bolts DIRECTLY to '
+           'two floor pads - no sled, no cage; tamper reed senses the CURVED '
+           'LID only, so the top-rail groove is gone; blind watertight '
+           'keyholes; floor prints flat / interface {}'
+           .format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):
-    # delete THIS script's bodies from earlier runs so you never look at stale/floating geometry
+    # delete THIS script's bodies from earlier runs so you never look at
+    # stale geometry (TOP LID / HORN prefixes stay listed so bodies from
+    # pre-split runs are still cleaned out of old documents)
     old = [b for b in root.bRepBodies
            if b.name.startswith(('FIR SHELL', 'FIR TOP LID', 'FIR HORN', '=', '~'))]
     for b in old:
@@ -1072,23 +828,19 @@ def run(context):
         removed = clear_old(design.rootComponent)                  # wipe stale bodies from earlier runs FIRST
         # parts laid out. The integrated BOTTOM LID + curved cover are their OWN scripts now
         # (FIR_BottomLid / FIR_CurvedLid) - not rebuilt here; this tub just SEATS + BOLTS them.
-        build(design.rootComponent)                                # 1 TUB (now with front lid seat + bolts)
-        build_top_lid(design.rootComponent, BOX_W + 50)            # 2 DEEP TOP LID
-        build_horn_sled(design.rootComponent, 0, 220)              # 3 HORN SLED (bench part)
-        # (3 old front cover, 4 951 plate, 5 PoE plate REMOVED - replaced by the integrated bottom lid)
+        build(design.rootComponent)                                # THE TUB - the only part here now
+        # (the deep cap is FIR_TopLid; BottomLid / CurvedLid / brain parts are
+        #  their own scripts; the horn sled no longer exists)
         if SHOW_PARTS:
             build_components(design.rootComponent)
             build_cables(design.rootComponent)
         app.activeViewport.fit()
         tub_w = BOX_W + 2.0 * INTERFACE.CAP_SNAP_PROUD
-        cap_w = BOX_W + 6.0 + 2.0 * INTERFACE.CAP_SEAT_PAD_H
         SKIPPED.append(
-            'PRINT ENVELOPE (Ender 3 Plus {:.0f}x{:.0f}): tub {:.1f}mm wide '
-            '({:.1f}mm spare), deep cap {:.1f}mm wide ({:.1f}mm spare). The cap '
-            'is the tight one - centre it on the bed and skip a brim, or say '
-            'the word and the screw seat pads flatten to buy 5mm.'
+            'PRINT ENVELOPE (Ender 3 Plus {:.0f}x{:.0f}): tub {:.1f}mm wide, '
+            '{:.1f}mm spare. Print floor-down, flat on the bed.'
             .format(INTERFACE.BED_X, INTERFACE.BED_Y, tub_w,
-                    INTERFACE.BED_X - tub_w, cap_w, INTERFACE.BED_X - cap_w))
+                    INTERFACE.BED_X - tub_w))
         # ALWAYS report the version + cleanup count so you KNOW Fusion ran the newest code
         ui.messageBox('FIR_Shell {} built.\nCleared {} old body(ies).{}'.format(
             VERSION, removed, ('\nSkipped:\n - ' + '\n - '.join(SKIPPED)) if SKIPPED else ''))

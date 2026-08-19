@@ -734,9 +734,19 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v42', any('v42' in m for m in msgs))
+    c.check('FIR_Shell popup states v43 (tub only)',
+            any('v43' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
-    cap = body_named(shell_design, 'FIR TOP LID')
+    c.check('FIR_Shell builds ONLY the tub - no cap, no sled (one script per '
+            'part, owner 19 Aug)',
+            len(shell_design.rootComponent.bodies_list) == 1)
+
+    toplid_mod, toplid_design, tmsgs = run_script(
+        world, p('FIR_TopLid'), 'toplid')
+    c.check('FIR_TopLid run() completed',
+            tmsgs and 'failed' not in tmsgs[-1])
+    c.check('FIR_TopLid popup states v1', any('v1' in m for m in tmsgs))
+    cap = body_named(toplid_design, 'FIR TOP LID')
 
     rows = interface.CAP_SIDE_SCREW_Y
     z72 = interface.CAP_SCREW_Z
@@ -764,10 +774,20 @@ def check_tree(root, label):
             not [s for s in tub.solids('cut', 'circle', 'xZ')
                  if near(s.shape[2], 5.5)])
 
-    c.check('tub: cleat bar and floor locks are gone (mount is now the ears)',
+    c.check('tub: no cleat bar, no floor locks, no top-cap reed groove, no '
+            'sled parts - the tub is clean',
             not tub.solids('join', 'poly', 'yZ')
             and not [s for s in tub.solids('cut', 'circle', 'xY')
                      if near(s.shape[2], 2.25)])
+    horn_pads = [s for s in tub.solids('join', 'circle', 'xY')
+                 if near(s.shape[2], interface.HORN_PAD_D / 2.0)
+                 and s.world_centre()[1] < -30.0]
+    want_horn = sorted((round(x, 1), round(y, 1))
+                       for x, y in interface.horn_mount_points()[1:])
+    c.check('tub: horn bolts DIRECTLY - two pads under its rear foot holes at '
+            '{} (no sled)'.format(want_horn),
+            sorted((round(h.shape[0], 1), round(h.shape[1], 1))
+                   for h in horn_pads) == want_horn)
 
     # cap: 8 seat pads + counterbores + through holes, aligned through the flip
     pads = [s for s in cap.solids('join', 'circle', 'yZ')
@@ -779,7 +799,7 @@ def check_tree(root, label):
     c.check('cap: 4 visible seat pads / 4 counterbores / 4 through holes',
             len(pads) == 4 and len(cbores) == 4 and len(through) == 4)
     lh = 52.0
-    cap_ox = shell_mod.BOX_W + 50.0        # the cap is laid out beside the tub
+    cap_ox = 0.0                           # the cap builds alone, at the origin
     align = []
     for sy in rows:
         for sxs in (-1, 1):
@@ -848,30 +868,18 @@ def check_tree(root, label):
                  (-132.0, 44.0), (132.0, 44.0))),
             '{}'.format(seat_xz))
 
-    # cap tamper pair: pillar + downward pocket on the cap (mirrored once),
-    # reed groove in the tub top rail, and the seated pair distance
-    pillars = [s for s in cap.solids('join', 'rect', 'xY')
-               if near(2 * s.shape[2], interface.CAP_MAG_PILLAR_SQ)
-               and near(s.shape[1], interface.CAP_MAGNET_Y)]
-    cpockets = [s for s in cap.solids('cut', 'circle', 'xY')
-                if near(s.shape[2], interface.MAGNET_POCKET_D / 2.0)]
-    c.check('cap: magnet pillar (mirrored to assembled X{:.0f}) + D{:.2f} '
-            'pocket, seated reed..magnet {:.1f}mm'
-            .format(interface.CAP_MAGNET_X, interface.MAGNET_POCKET_D,
-                    interface.cap_reed_magnet_distance()),
-            len(pillars) == 1 and len(cpockets) == 1
-            and near(pillars[0].shape[0] - cap_ox, -interface.CAP_MAGNET_X)
-            and near(120.0 - pillars[0].a1, interface.CAP_MAG_PILLAR_BOT_Z)
-            and near(cpockets[0].a0,
-                     pillars[0].a1 - interface.MAGNET_POCKET_DEPTH)
-            and interface.cap_reed_magnet_distance() <= 13.0)
-    rail_grooves = [s for s in tub.solids('cut', 'rect', 'xY')
-                    if near(s.shape[0], interface.CAP_MAGNET_X)
-                    and near(s.a0, interface.CAP_REED_GROOVE_Z0)]
-    c.check('tub: cap-reed groove in the top rail front face',
-            len(rail_grooves) == 1
-            and near(rail_grooves[0].shape[1] - rail_grooves[0].shape[3], 134.0))
-    # indoor variant: screen seat + window + LED holes, mirrored once so they
+    # top-cap tamper pair REMOVED (owner, 19 Aug): the reed senses the
+    # CURVED LID only - prove the cap carries no magnet pillar or pocket
+    c.check('cap: NO tamper pillar/pocket - sensing is on the curved lid only',
+            not [x for x in cap.solids('join', 'rect', 'xY')
+                 if near(2 * x.shape[2], 16.0) and near(2 * x.shape[3], 16.0)]
+            and not [x for x in cap.solids('cut', 'circle', 'xY')
+                     if near(x.shape[2], interface.MAGNET_POCKET_D / 2.0)])
+    c.check('tub: no top-rail reed groove remains',
+            not [x for x in tub.solids('cut', 'rect', 'xY')
+                 if near(2 * x.shape[3], 1.0) and x.world_centre()[1] > 130.0])
+
+    # indoor variant: screen seat + window + LED holes    # indoor variant: screen seat + window + LED holes, mirrored once so they
     # land at the assembled coordinates; the window must sit inside the seat
     if interface.INDOOR_SCREEN:
         wins = [s for s in cap.solids('cut', 'rect', 'xY')
@@ -1188,7 +1196,8 @@ def check_tree(root, label):
                     .format(mode),
                     'INTERFERENCE' not in text
                     and 'handedness is wrong' not in text
-                    and 'misses the sled' not in text)
+                    and 'misses the sled' not in text
+                    and 'SLED' not in text.replace('RETIRED', ''))
             if not shells_only:
                 for needle, why in (
                         ('horn clearance', 'horn clearances reported'),

@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "The deep top cap alone (split from FIR_Shell): 4 seated side screws, snap-detent windows, lead-in chamfer, brain-case bosses, and the indoor 3.5-inch screen window + LED holes. Prints roof-down."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
