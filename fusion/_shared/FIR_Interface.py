@@ -345,7 +345,7 @@ BED_X, BED_Y, BED_Z = 300.0, 300.0, 340.0
 BED_MARGIN = 2.0                  # keep this much clear of the bed edge
 
 # ---------------------------------------------------------------------------
-# Wall mounting: HANGER PLATE + KEYHOLES (owner's choice, 18 Aug 2026)
+# Wall mounting: TWO KEYHOLES, exactly like a router or an extension strip
 # ---------------------------------------------------------------------------
 # ORIENTATION - read before touching any mounting geometry.  The box mounts
 # like a wall panel: the flat 280 x 280 FLOOR lies against the wall and the
@@ -356,85 +356,39 @@ BED_MARGIN = 2.0                  # keep this much clear of the bed edge
 #     model X/Y = the plane of the wall
 #     model +Y  = DOWN the wall (the port face runs downward so cables hang)
 #
-# The owner chose a separate plate over screws through the floor, because the
-# box has to come off the wall WITHOUT being opened or gutted.  How it works:
-#   1. the plate screws to the wall on its own, heads countersunk flush so
-#      the box can lie flat against it;
-#   2. four studs stand off the plate and the tub floor carries four KEYHOLE
-#      slots; offer the box up, drop it 20mm, and the stud heads are trapped
-#      behind the floor - it hangs on its own with both hands free;
-#   3. two M4 screws through the plate's top upstand, into bosses inside the
-#      tub's back wall, stop it sliding back up.  Both are driven from
-#      OUTSIDE with the box closed.
+# The owner asked for the simplest possible mount - "the one in extensions or
+# even in the 951, where there is a hole and we just fit our box in".  So:
+# drive two wall screws, leave the heads standing proud, offer the box up so
+# the heads pass through the round ends, drop it 15mm, done.  No extra part
+# to print, no bracket, nothing to align.
 #
-# Everything on the BOX side is a recess or a hole - never a bump - so the
-# floor still prints dead flat on the bed, which is what the owner asked for.
-# Every stud head hides inside a counterbore in the floor's inner face, so
-# nothing protrudes into the box to foul a device either.
-# TWO RAILS, not one big plate: a 274 x 274 plate would be a 250g print that
-# warps, while two 55mm rails carry the same load, print in an hour and level
-# independently.  Both come off one build plate.
-RAIL_W = 274.0                    # X, fits the 300 bed
-RAIL_H = 55.0                     # Y
-RAIL_TH = 5.0
-RAIL_TOP_Y = -143.0               # top rail's upper edge, past the back wall
-RAIL_BOTTOM_Y = 88.0              # lower rail's upper edge
-RAIL_SCREW_D = 5.5                # M5 / #10 into the wall
-RAIL_SCREW_HEAD_D = 11.0          # countersunk flush with the rail front
-RAIL_SCREW_X = (-110.0, 0.0, 110.0)
-# The bottom rail is a plain SPACER of identical thickness - it carries no
-# studs, it just keeps the box square to the wall and stops it tipping out.
-RAIL_BOTTOM_IS_SPACER = True
-# Studs and their keyholes.  TWO studs, on the top rail only: the whole front
-# half of the floor has the router over it, and a stud head needs ~6.2mm of
-# floor thickness while the router leaves 5.5 - so no keyhole can live there.
-# That is fine, and it is how a cleat and spacer batten normally works: the
-# top rail carries the weight, the bottom rail is a plain spacer that stops
-# the box tipping out, and the anti-lift screws stop it being lifted off.
-# Both patches at Y-125 are clear of the extension strip (|X| <= 120).
+# The head sits in a POCKET recessed into the floor's outer face, so the box
+# still lies flat against the wall - the same trick every consumer device
+# uses.  That pocket is a cavity, not a bump, so the floor still prints
+# face-down flat on the bed; the 3mm skin over it just bridges.
 KEYHOLE_XY = ((-129.0, -125.0), (129.0, -125.0))
-KEY_TRAVEL = 20.0                 # how far the box drops to lock
-STUD_SHAFT_D = 9.0
-STUD_HEAD_D = 16.0
-STUD_HEAD_TH = 3.0
-KEY_ENTRY_D = STUD_HEAD_D + 1.5   # the hole the head passes through
-KEY_SLOT_W = STUD_SHAFT_D + 0.6   # the slot the shaft slides along
-KEY_PAD_D = 20.0                  # local floor thickening at each keyhole
-KEY_PAD_H = 3.5                   # normal; trimmed where a device sits over
-KEY_PAD_H_TIGHT = 2.0
-KEY_CBORE_D = STUD_HEAD_D + 2.0   # head hides inside the floor thickness
-KEY_CBORE_LAND = 3.0              # material left between head and the wall
-# Anti-lift: two M4 through the plate's top upstand into back-wall bosses.
-ANTILIFT_X = (-60.0, 60.0)
-ANTILIFT_Z = 9.0                  # screw axis height above the floor
-ANTILIFT_PILOT_D = 3.4
-ANTILIFT_BOSS = 12.0              # cube boss on the back wall inner face
-PLATE_UPSTAND_H = 14.0            # rises out of the wall at the plate's top
-PLATE_UPSTAND_TH = 3.0
+KEY_TRAVEL = 15.0                 # how far the box drops to lock
+KEY_ENTRY_D = 12.0                # passes a screw head up to ~11mm
+KEY_SLOT_W = 5.5                  # passes the shank, traps the head
+KEY_POCKET_D = 16.0               # head pocket in the OUTER (wall) face
+KEY_POCKET_DEPTH = 3.5            # so the box still lies flat on the wall
+KEY_PAD_D = 22.0                  # local floor thickening around it all
+KEY_PAD_H = 3.5                   # -> 6.5mm of floor, 3.0mm skin over the pocket
+WALL_SCREW_SHANK = 4.5            # a normal 4.5 x 40 wall-plug screw
+WALL_SCREW_HEAD_D = 8.5
 MIK_UNDERSIDE_Z = 6.5
 MIK_STANDOFF_XY = ((129.0, 122.5), (129.0, 5.5), (27.0, 122.5), (27.0, 5.5))
 MIK_STANDOFF_D = 7.0
 
 
-def key_pad_h(hx, hy):
-    """Floor thickening at one keyhole - thinner where a device sits over."""
-    r = KEY_PAD_D / 2.0
-    mik_x0, mik_x1 = 78.0 - 114.0 / 2.0, 78.0 + 114.0 / 2.0
-    mik_y1 = 137.0 - 0.5
-    mik_y0 = mik_y1 - 139.0
-    over_router = (hx + r > mik_x0 and hx - r < mik_x1
-                   and hy + r > mik_y0 and hy - r < mik_y1)
-    return KEY_PAD_H_TIGHT if over_router else KEY_PAD_H
-
-
-def stud_standoff():
-    """How far a stud head stands off the plate, to sit in its counterbore."""
-    return KEY_CBORE_LAND + 0.4          # 0.4 slide clearance behind the floor
-
-
 def mount_plane_z():
-    """The face the box lies on: its floor underside, resting on the plate."""
+    """The face that touches the wall: the tub floor's underside."""
     return 0.0
+
+
+def key_skin():
+    """Material left over the head pocket, i.e. what carries the box."""
+    return 3.0 + KEY_PAD_H - KEY_POCKET_DEPTH
 
 
 # ---------------------------------------------------------------------------
@@ -807,45 +761,40 @@ def validate():
         errors.append('cap needs exactly two screw rows per side, well separated')
     if any(abs(y) > 133.0 - M3_SEAT_PAD_D / 2.0 for y in CAP_SIDE_SCREW_Y):
         errors.append('a cap screw row runs into the corner radius')
-    # Hanger mount.  The box may not grow past its 280 footprint (the Ender
-    # 3 Plus bed is 300 square), the plate must print flat on the same bed,
-    # every keyhole must land on free floor, and no stud head may protrude
-    # into the box or break through to the wall face.
+    # Keyhole mount.  The box may not grow past its 280 footprint (the Ender
+    # 3 Plus bed is 300 square); the keyholes must pass a screw head but trap
+    # it; the head pocket must leave real material over it; and both must
+    # land on floor that is free of internal hardware.
     if 280.0 + 2.0 * BED_MARGIN > BED_X:
         errors.append('the tub footprint no longer fits the printer bed')
-    if RAIL_W + 2.0 * BED_MARGIN > BED_X or RAIL_H + 2.0 * BED_MARGIN > BED_Y:
-        errors.append('a wall rail does not fit the printer bed')
-    if RAIL_TOP_Y > -140.0:
-        errors.append('the top rail does not reach the tub back wall')
-    if KEY_ENTRY_D <= STUD_HEAD_D:
-        errors.append('the keyhole entry will not pass its own stud head')
-    if KEY_SLOT_W <= STUD_SHAFT_D or KEY_SLOT_W >= STUD_HEAD_D - 3.0:
-        errors.append('keyhole slot must clear the shaft but trap the head')
-    if KEY_TRAVEL < KEY_ENTRY_D / 2.0 + STUD_SHAFT_D:
-        errors.append('keyhole travel is too short to trap the stud')
-    if KEY_CBORE_D <= STUD_HEAD_D:
-        errors.append('stud head does not fit its counterbore')
-    if len(KEYHOLE_XY) != 2:
-        errors.append('there must be exactly two keyholes, both on the top rail')
+    if KEY_ENTRY_D <= WALL_SCREW_HEAD_D + 1.5:
+        errors.append('keyhole entry will not pass a normal screw head')
+    if KEY_SLOT_W <= WALL_SCREW_SHANK + 0.5:
+        errors.append('keyhole slot will not pass the screw shank')
+    if KEY_SLOT_W >= WALL_SCREW_HEAD_D - 2.0:
+        errors.append('keyhole slot is so wide the head would pull through')
+    if KEY_POCKET_D <= WALL_SCREW_HEAD_D + 2.0:
+        errors.append('head pocket is too tight around the screw head')
+    if KEY_POCKET_D >= KEY_PAD_D - 4.0:
+        errors.append('head pocket leaves no ring of floor around it')
+    if key_skin() < 2.5:
+        errors.append('only {:.1f}mm of floor left over the head pocket'
+                      .format(key_skin()))
+    if KEY_POCKET_DEPTH < 3.0:
+        errors.append('head pocket is too shallow to let the box lie flat')
+    if KEY_TRAVEL < KEY_ENTRY_D / 2.0 + KEY_SLOT_W:
+        errors.append('keyhole travel is too short to trap the head')
+    if len(KEYHOLE_XY) != 2 or len(set(KEYHOLE_XY)) != 2:
+        errors.append('there must be exactly two keyholes')
+    if abs(KEYHOLE_XY[0][0] - KEYHOLE_XY[1][0]) < 150.0:
+        errors.append('the two keyholes are too close to stop the box rotating')
     for hx, hy in KEYHOLE_XY:
-        ph = key_pad_h(hx, hy)
-        pad_top = 3.0 + ph
-        if KEY_CBORE_LAND + STUD_HEAD_TH > pad_top - 0.2:
-            errors.append('stud head at ({:.0f},{:.0f}) stands proud into the box '
-                          '(pad {:.1f}, needs {:.1f})'
-                          .format(hx, hy, pad_top,
-                                  KEY_CBORE_LAND + STUD_HEAD_TH + 0.2))
-        if KEY_CBORE_LAND < 2.5:
-            errors.append('too little floor left between the stud head and the wall')
-        if ph == KEY_PAD_H_TIGHT and pad_top > MIK_UNDERSIDE_Z - 1.0:
-            errors.append('keyhole pad at ({:.0f},{:.0f}) fouls the MikroTik'
-                          .format(hx, hy))
-        if abs(hx) + KEY_PAD_D / 2.0 > 140.0:
-            errors.append('keyhole pad at X{:.0f} breaks the outer wall'.format(hx))
-        # the box is offered up and DROPPED, so the stud enters at hy+travel
-        # and locks at hy: the keyhole spans hy .. hy+KEY_TRAVEL
         if hy + KEY_TRAVEL > 133.0 or hy < -133.0:
             errors.append('keyhole at Y{:.0f} has no room for its travel'.format(hy))
+        if abs(hx) + KEY_PAD_D / 2.0 > 140.0:
+            errors.append('keyhole pad at X{:.0f} breaks the outer wall'.format(hx))
+        if 3.0 + KEY_PAD_H > MIK_UNDERSIDE_Z - 0.5 and hy > -20.0:
+            errors.append('keyhole pad at Y{:.0f} would foul the MikroTik'.format(hy))
         if abs(hx) <= 120.0 and -133.5 <= hy <= -86.5:
             errors.append('keyhole at ({:.0f},{:.0f}) lands under the extension strip'
                           .format(hx, hy))
@@ -853,20 +802,6 @@ def validate():
             if math.hypot(hx - sx, hy - sy) < (KEY_PAD_D + MIK_STANDOFF_D) / 2.0 + 1.0:
                 errors.append('keyhole pad at ({:.0f},{:.0f}) hits a router standoff'
                               .format(hx, hy))
-        if abs(hx) > RAIL_W / 2.0 - 8.0:
-            errors.append('stud at X{:.0f} hangs off its rail'.format(hx))
-        if not (RAIL_TOP_Y + 6.0 <= hy <= RAIL_TOP_Y + RAIL_H - 6.0):
-            errors.append('stud at Y{:.0f} is not on the top rail'.format(hy))
-        if hy + KEY_TRAVEL > RAIL_TOP_Y + RAIL_H - 4.0:
-            errors.append('the keyhole entry at Y{:.0f} runs off the top rail'
-                          .format(hy + KEY_TRAVEL))
-    for ax in ANTILIFT_X:
-        if abs(ax) + ANTILIFT_BOSS / 2.0 > RAIL_W / 2.0:
-            errors.append('anti-lift screw at X{:.0f} misses the top rail'.format(ax))
-    if ANTILIFT_Z - ANTILIFT_PILOT_D / 2.0 < 3.5:
-        errors.append('anti-lift screw would break out through the floor')
-    if ANTILIFT_Z + ANTILIFT_PILOT_D / 2.0 > PLATE_UPSTAND_H - 1.0:
-        errors.append('anti-lift screw sits above the plate upstand')
     return errors
 
 

@@ -499,58 +499,48 @@ def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, la
 
 
 def build_mount_keyholes(comp, sh):
-    """Two keyhole slots in the floor plus the two anti-lift bosses.
+    """Two keyholes in the floor - the whole wall mount.
 
-    The box hangs on the top wall rail: its two studs pass through the round
-    ends of these keyholes, then the box DROPS 20mm and the stud heads are
-    trapped behind the floor.  Two M4 screws through the rail's upstand into
-    the back-wall bosses stop it ever sliding back up.
+    Exactly what a router or an extension strip does: drive two screws into
+    the wall, leave the heads proud, offer the box up so the heads pass
+    through the round ends, drop it 15mm, done.  Nothing else to print.
 
-    Everything here is a RECESS or a hole - never a bump - so the floor still
-    prints dead flat on the bed.  Each stud head hides inside a counterbore
-    in the floor's INNER face, so nothing protrudes into the box either.
+    The head sits in a pocket recessed into the floor's OUTER face so the box
+    still lies flat on the wall.  That pocket is a cavity rather than a bump,
+    so the floor still prints face-down flat on the bed - the 3mm skin over
+    it simply bridges.
     """
     entry_d = INTERFACE.KEY_ENTRY_D
     slot_w = INTERFACE.KEY_SLOT_W
+    pocket_d = INTERFACE.KEY_POCKET_D
     travel = INTERFACE.KEY_TRAVEL
+    pad_h = INTERFACE.KEY_PAD_H
+    pad_top = FLOOR + pad_h
     for hx, hy in INTERFACE.KEYHOLE_XY:
-        pad_h = INTERFACE.key_pad_h(hx, hy)
-        pad_top = FLOOR + pad_h
         entry_y = hy + travel
-        # local floor thickening, long enough to back the whole keyhole
-        box(comp, hx, (hy + entry_y) / 2.0, FLOOR,
-            INTERFACE.KEY_PAD_D, travel + INTERFACE.KEY_PAD_D,
-            pad_h, JOIN, [sh])
-        # counterbore from the INSIDE: the stud head lives in here
-        cbore_z0 = INTERFACE.KEY_CBORE_LAND
-        cyl(comp, hx, hy, cbore_z0, INTERFACE.KEY_CBORE_D,
-            pad_top - cbore_z0 + 0.01, CUT, [sh])
-        cyl(comp, hx, entry_y, cbore_z0, INTERFACE.KEY_CBORE_D,
-            pad_top - cbore_z0 + 0.01, CUT, [sh])
-        box(comp, hx, (hy + entry_y) / 2.0, cbore_z0,
-            INTERFACE.KEY_CBORE_D, travel, pad_top - cbore_z0 + 0.01,
-            CUT, [sh])
-        # the keyhole itself, right through to the wall face
+        mid_y = (hy + entry_y) / 2.0
+        # local thickening, long enough to back the whole keyhole
+        box(comp, hx, mid_y, FLOOR, INTERFACE.KEY_PAD_D,
+            travel + INTERFACE.KEY_PAD_D, pad_h, JOIN, [sh])
+        # head pocket, cut UP from the wall face so the box lies flat
+        for py in (hy, entry_y):
+            cyl(comp, hx, py, -0.01, pocket_d,
+                INTERFACE.KEY_POCKET_DEPTH + 0.01, CUT, [sh])
+        box(comp, hx, mid_y, -0.01, pocket_d, travel,
+            INTERFACE.KEY_POCKET_DEPTH + 0.01, CUT, [sh])
+        # the keyhole itself: round entry, slot, through to the inside
         cyl(comp, hx, entry_y, -1.0, entry_d, pad_top + 2.0, CUT, [sh])
         cyl(comp, hx, hy, -1.0, slot_w, pad_top + 2.0, CUT, [sh])
-        box(comp, hx, (hy + entry_y) / 2.0, -1.0, slot_w, travel,
-            pad_top + 2.0, CUT, [sh])
-    # anti-lift bosses on the back wall's inner face, with their pilots
-    for ax in INTERFACE.ANTILIFT_X:
-        box(comp, ax, -HALF + WALL + INTERFACE.ANTILIFT_BOSS / 2.0,
-            FLOOR, INTERFACE.ANTILIFT_BOSS, INTERFACE.ANTILIFT_BOSS,
-            INTERFACE.ANTILIFT_BOSS, JOIN, [sh])
-        cyl_y(comp, ax, INTERFACE.ANTILIFT_Z, -HALF + WALL,
-              INTERFACE.ANTILIFT_PILOT_D, 26.0, CUT, [sh])
+        box(comp, hx, mid_y, -1.0, slot_w, travel, pad_top + 2.0, CUT, [sh])
     SKIPPED.append(
-        'WALL MOUNT: the box HANGS on the two top-rail studs through the '
-        'keyholes at X+-{:.0f} (drop it {:.0f}mm to lock), then two M4 '
-        'anti-lift screws go through the rail upstand into the back-wall '
-        'bosses at X+-{:.0f}. Both are driven from OUTSIDE, so the box comes '
-        'off the wall without ever being opened. Print FIR_WallRails for the '
-        'other half.'
-        .format(abs(INTERFACE.KEYHOLE_XY[0][0]), INTERFACE.KEY_TRAVEL,
-                abs(INTERFACE.ANTILIFT_X[0])))
+        'WALL MOUNT - as simple as a router: drive two wall screws {:.0f}mm '
+        'apart (4.5mm shank, head under {:.1f}mm), leave the heads ~4mm proud, '
+        'hang the box on them through the keyhole entries and let it DROP '
+        '{:.0f}mm. Screw heads hide in pockets so the box lies flat on the '
+        'wall, and {:.1f}mm of floor carries it. Nothing else to print.'
+        .format(abs(INTERFACE.KEYHOLE_XY[0][0] - INTERFACE.KEYHOLE_XY[1][0]),
+                INTERFACE.WALL_SCREW_HEAD_D, INTERFACE.KEY_TRAVEL,
+                INTERFACE.key_skin()))
     SKIPPED.append(
         'ORIENTATION: the floor lies on the wall, so model +Z points OUT of '
         'the wall, not up, and the port face (+Y) runs DOWN the wall so cables '
@@ -666,14 +656,12 @@ def build(comp):
 
     # (BUZZER/alarm seat REMOVED - Francis will just bolt it; no cradle needed)
 
-    # ================= WALL MOUNT: keyholes + anti-lift bosses ===============
-    # The box mounts like an electrical panel - its 280 x 280 FLOOR flat on
-    # the wall, standing 120mm out with the screen facing the room - and it
-    # HANGS on two studs so it can be taken down without being opened.
-    # Dead ends before this: keyholes in the back wall (wrong face), a cleat
-    # plate (wrong face again), projecting tabs (328mm wide - would not fit
-    # the 300mm bed) and screws through the floor (needed the box gutted to
-    # mount it).  Everything here is a recess, so the floor prints flat.
+    # ================= WALL MOUNT: two keyholes, nothing else ================
+    # The simplest mount there is, and the one the owner asked for: the same
+    # keyhole a router or an extension strip has.  Everything fancier was
+    # tried and dropped - a cleat plate, back-wall ears, projecting tabs
+    # (328mm wide, would not fit the 300mm bed), screws through the floor
+    # (needed the box gutted) and a two-rail hanger (two more parts to print).
     build_mount_keyholes(comp, sh)
 
     # ================= SIDE-BOLT bosses at the lid overlap    # ================= SIDE-BOLT bosses at the lid overlap (lid skirt bolts in from the SIDE) =================
@@ -1042,10 +1030,10 @@ def build_top_lid(comp, ox):
     return lid
 
 
-VERSION = ('v40: the box HANGS - two floor keyholes drop onto the top wall '
-           'rail studs and two M4 anti-lift screws lock it, all from outside. '
-           'Floor still prints flat (recesses only); tub stays inside its 280 '
-           'footprint / interface {}'.format(INTERFACE.INTERFACE_VERSION))
+VERSION = ('v41: SIMPLEST MOUNT - two keyholes in the floor, hang it on two '
+           'wall screws like a router. Nothing else to print; heads hide in '
+           'pockets so the box lies flat; floor still prints flat '
+           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):

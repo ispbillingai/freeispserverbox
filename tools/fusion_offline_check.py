@@ -734,7 +734,7 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v40', any('v40' in m for m in msgs))
+    c.check('FIR_Shell popup states v41', any('v41' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     cap = body_named(shell_design, 'FIR TOP LID')
 
@@ -898,9 +898,9 @@ def check_tree(root, label):
             'INTERFERENCE' not in shell_notes)
     c.check('FIR_Shell: insert decision is raised in the popup',
             'DECISION PENDING' in shell_notes and 'insert' in shell_notes)
-    c.check('FIR_Shell: the hanging mount and the orientation are both '
-            'stated in the popup',
-            'WALL MOUNT' in shell_notes and 'HANGS' in shell_notes
+    c.check('FIR_Shell: the mount and the orientation are both stated in '
+            'the popup',
+            'WALL MOUNT' in shell_notes and 'wall screws' in shell_notes
             and 'ORIENTATION' in shell_notes
             and 'SETTLED' in shell_notes)
 
@@ -1036,89 +1036,44 @@ def check_tree(root, label):
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
-    # ---------------- wall mounting: keyholes + hanging rails --------------
+    # ---------------- wall mounting: two plain keyholes --------------------
     entries = [s for s in tub.solids('cut', 'circle', 'xY')
                if near(s.shape[2], interface.KEY_ENTRY_D / 2.0)]
     locks = [s for s in tub.solids('cut', 'circle', 'xY')
              if near(s.shape[2], interface.KEY_SLOT_W / 2.0)]
     want = sorted((round(x, 1), round(y, 1)) for x, y in interface.KEYHOLE_XY)
-    c.check('tub: {} keyholes in the floor at {}'.format(len(want), want),
-            len(entries) == len(want) and len(locks) == len(want)
+    c.check('tub: 2 keyholes in the floor at {}, {:.0f}mm apart'
+            .format(want, abs(want[0][0] - want[1][0])),
+            len(entries) == 2 and len(locks) == 2
             and sorted((round(l.shape[0], 1), round(l.shape[1], 1))
                        for l in locks) == want
             and sorted((round(e.shape[0], 1),
                         round(e.shape[1] - interface.KEY_TRAVEL, 1))
                        for e in entries) == want)
+    c.check('tub: the entry passes a {:.1f}mm screw head and the slot traps '
+            'it'.format(interface.WALL_SCREW_HEAD_D),
+            interface.KEY_ENTRY_D > interface.WALL_SCREW_HEAD_D + 1.5
+            and interface.KEY_SLOT_W > interface.WALL_SCREW_SHANK + 0.5
+            and interface.KEY_SLOT_W < interface.WALL_SCREW_HEAD_D - 2.0)
     c.check('tub: every keyhole cuts right through to the wall face',
             all(e.a0 < 0.0 for e in entries) and all(l.a0 < 0.0 for l in locks))
-    # THE point of this design: the floor must still print dead flat, so
-    # nothing on the tub may stand proud of the wall face at Z0
-    proud = []
-    for op, solid in tub.records:
-        if op == 'cut':
-            continue
-        if solid.aabb()[4] < -0.001:
-            proud.append(solid)
+    pockets = [s for s in tub.solids('cut', 'circle', 'xY')
+               if near(s.shape[2], interface.KEY_POCKET_D / 2.0)]
+    c.check('tub: screw-head pockets are cut from the WALL face, so the box '
+            'lies flat, leaving {:.1f}mm of floor to carry it'
+            .format(interface.key_skin()),
+            len(pockets) == 4
+            and all(p.a0 <= 0.0 for p in pockets)
+            and all(near(p.a1, interface.KEY_POCKET_DEPTH) for p in pockets)
+            and interface.key_skin() >= 2.5)
+    # THE requirement: the floor must still print dead flat on the bed
+    proud = [solid for op, solid in tub.records
+             if op != 'cut' and solid.aabb()[4] < -0.001]
     c.check('tub: nothing stands proud of the floor - it still prints dead '
             'flat on the bed', not proud)
-    # stud heads must hide inside the floor: counterbore from the inside
-    cbores = [s for s in tub.solids('cut', 'circle', 'xY')
-              if near(s.shape[2], interface.KEY_CBORE_D / 2.0)]
-    c.check('tub: {} stud-head counterbores, each leaving {:.1f}mm of floor '
-            'against the wall'.format(len(cbores), interface.KEY_CBORE_LAND),
-            len(cbores) == 2 * len(want)
-            and all(near(cb.a0, interface.KEY_CBORE_LAND) for cb in cbores))
-    heads_hidden = True
-    for hx, hy in interface.KEYHOLE_XY:
-        pad_top = 3.0 + interface.key_pad_h(hx, hy)
-        if interface.KEY_CBORE_LAND + interface.STUD_HEAD_TH > pad_top:
-            heads_hidden = False
-    c.check('tub: no stud head protrudes into the box to foul a device',
-            heads_hidden)
-    bosses = [s for s in tub.solids('join', 'rect', 'xY')
-              if near(2 * s.shape[2], interface.ANTILIFT_BOSS)
-              and near(s.a1 - s.a0, interface.ANTILIFT_BOSS)
-              and near(s.a0, 3.0)
-              and near(s.shape[1], -140.0 + 3.0 + interface.ANTILIFT_BOSS / 2.0)]
-    pilots = [s for s in tub.solids('cut', 'circle', 'xZ')
-              if near(s.shape[2], interface.ANTILIFT_PILOT_D / 2.0)]
-    c.check('tub: 2 anti-lift bosses on the back wall with their pilots at '
-            'Z{:.0f}'.format(interface.ANTILIFT_Z),
-            len(bosses) == 2 and len(pilots) == 2
-            and all(near(p.world_centre()[2], interface.ANTILIFT_Z)
-                    for p in pilots)
-            and sorted(round(p.world_centre()[0], 1) for p in pilots) ==
-            sorted(interface.ANTILIFT_X))
-
-    # ---------------- FIR_WallRails ---------------------------------------
-    wr_mod, wr_design, msgs = run_script(world, p_('FIR_WallRails'), 'wallrails')
-    c.check('FIR_WallRails run() completed',
-            msgs and 'failed' not in msgs[-1])
-    rails = [b for b in wr_design.rootComponent.bodies_list
-             if b.name.startswith('FIR WALL RAIL')]
-    c.check('WallRails: top rail + bottom spacer built', len(rails) == 2)
-    studs = []
-    for rail in rails:
-        studs += [s for s in rail.solids('join', 'circle', 'xY')
-                  if near(s.shape[2], interface.STUD_HEAD_D / 2.0)]
-    stud_xy = sorted((round(s.shape[0], 1), round(s.shape[1], 1))
-                     for s in studs)
-    c.check('WallRails: 2 stud heads, exactly under the tub keyholes',
-            len(studs) == 2 and stud_xy == want)
-    if studs:
-        stand = interface.stud_standoff()
-        c.check('WallRails: stud head stands {:.1f}mm off the rail, so it sits '
-                'in the floor counterbore with {:.1f}mm of slide clearance'
-                .format(stand, stand - interface.KEY_CBORE_LAND),
-                all(near(s.a0, interface.RAIL_TH + stand) for s in studs)
-                and stand > interface.KEY_CBORE_LAND)
-    for rail in rails:
-        bb = rail.world_aabb()
-        dims = sorted((bb[1] - bb[0], bb[3] - bb[2]), reverse=True)
-        c.check('PRINTABLE: {:.30s}... is {:.1f} x {:.1f}mm'
-                .format(rail.name.split('(')[0], dims[0], dims[1]),
-                dims[0] + 2 * interface.BED_MARGIN <= interface.BED_X
-                and dims[1] + 2 * interface.BED_MARGIN <= interface.BED_Y)
+    c.check('tub: no bracket, plate or rail part is needed for the mount',
+            not any(os.path.isdir(os.path.join(root, name))
+                    for name in ('FIR_WallRails', 'FIR_WallPlate')))
 
     # ---------------- PRINTABILITY: the Ender 3 Plus envelope --------------
     bed = (interface.BED_X - 2 * interface.BED_MARGIN,
@@ -1168,8 +1123,8 @@ def check_tree(root, label):
                     b for b in chk_design.rootComponent.bodies_list
                     if b.name.startswith('CHECK: ALL-UP')]
                 c.check('FIR_ShellCheck SHELLS_ONLY: exactly the four printed '
-                        'shells plus the two wall rails, no loose hardware',
-                        len(printed_shells) == 6)
+                        'shells, no loose inspection hardware',
+                        len(printed_shells) == 4)
             c.check('FIR_ShellCheck {}: no interference / handedness faults'
                     .format(mode),
                     'INTERFERENCE' not in text
