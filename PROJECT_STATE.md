@@ -1,8 +1,76 @@
 # FreeISP CAD - current source of truth
 
+## STATUS 19 Aug 2026 - READY TO PRINT (coupons first)
+
+All 141 offline checks pass on the workspace AND the deployed Fusion tree,
+and both trees are byte-identical.  Everything below "Current user decisions"
+is the running log; this block is what is true right now.
+
+### The parts to print, in order
+
+| # | Fusion script | Body / part | Size (mm) | Print orientation |
+|---|---|---|---|---|
+| 1 | `FIR_FitCoupons` | 3 coupon PAIRS (6 bodies) | small | as built, flat |
+| 2 | `FIR_Shell` | FIR SHELL (tub) | 282.4 x 278.2 x 80 | floor down (flat on bed) |
+| 3 | `FIR_BottomLid` | FIR Bottom Lid (port face) | 280 x 83 + shelf | as built |
+| 4 | `FIR_CurvedLid` | FIR Lid Cover (curved) | 280 x 114 x 66 | STANDING ON AN END WALL |
+| 5 | `FIR_Shell` | FIR TOP LID (deep cap) | 291 x 286 x 55 | roof down (as built) - ONLY 5mm bed margin: centre it, no brim |
+| 6 | `FIR_Shell` | FIR HORN SLED | 76 x 102 x ~9 | as built, flat |
+| + | `FIR_ModuleGadget` / `FIR_ModulePlate` | brain case + tray | settled earlier | per their own scripts |
+
+DO NOT print the cap (#5) until the Landzo 3.5" screen is measured - its
+window and seat are typical-shield ASSUMPTIONS (`SCREEN_MEASURED = False`)
+and the popup nags about it.  Coupons (#1) gate everything: the pairs must
+slide, click, screw and reopen per the pass criteria in their popup.
+
+### Bought hardware this design expects
+
+- 2 wall screws 4.5 x 40 + plugs (the box hangs on their heads)
+- M3 self-tappers: 4 cap sides, 6 port face, 2 cover locks (+ the brain
+  stack's own M3s, settled earlier)
+- M4 x 10: 2 horn wing screws; M4 x 8: 3 horn foot bolts (bench, into sled)
+- 2 magnets D12.1 x 4.7 (measured), 2 reed switches, green + red 5mm LEDs
+- Landzo 3.5" TFT (UNO/Mega shield) for the cap roof window
+
+### Open items (all flagged in the Fusion popups too)
+
+1. MEASURE the Landzo screen (PCB outline, glass, visible area) -> then the
+   cap. 2. BENCH-TEST reed+magnet at ~10.5mm in both orientations (head-on
+   for the cover pair, face-down/beside for the cap pair). 3. Heat-set
+   inserts: geometry is one flag per closure; needs the purchase + the real
+   insert's bore. 4. Still unmeasured: horn foot 99mm (sled only), switch
+   jack height 11.5mm, adapter 46x46x52. 5. Wall-plate load test is OBSOLETE
+   (no plate any more); the keyhole mount hangs on two screws - sanity-check
+   on the wall with the empty tub before loading it.
+
+### Final design decisions (vs the dead ends they replaced)
+
+- MOUNT: two BLIND keyholes in the floor, hang on two wall screws; watertight
+  (2mm inner skin never cut).  Replaced: back-wall keyholes, cleat plate,
+  back-wall ears, projecting tabs (unprintable at 328mm), through-floor
+  screws, two-rail hanger.
+- ORIENTATION: wall panel - floor against the wall, +Z out of the wall, port
+  face runs DOWN.  Internal retention designed for this (owner) - SETTLED.
+- CAP: 4 screws (2 per side) in visible counterbored pads + 6 snap detents +
+  lead-in chamfer; INDOOR variant carries the centred screen window + 2 LED
+  holes (INDOOR_SCREEN=False restores the sealed weatherproof roof).
+- FRONT: BottomLid with seated screws + reed groove; CurvedLid CURVED to the
+  roof, landing FLUSH at Z120 with one 0.3mm shadow line (Ubiquiti-style
+  seamless joint) - cover therefore slides on LAST, after the cap.
+- TAMPER: two reed+magnet pairs (cover ~10.3mm, cap ~10.4mm), press-fit
+  D12.05 pockets, nothing visible outside.
+- HORN: bench-bolted to its sled, two wing screws, NO cage (owner).
+- PRINTER: Ender 3 Plus 300x300x340 is a hard envelope check in the harness.
+- VERIFICATION: `python tools/fusion_offline_check.py [deployed_dir]` after
+  every change - it measures real Fusion behaviour (plane conventions were
+  probe-measured after the floating-screws saga) and checks both trees.
+
+
 ## Active CAD task
 
-Finish the **small brain case** first. It houses the 128.3 x 128.3 mm snug-fit electronics tray, the wire-in power modules and cell, and the 115 x 115 mm rev-H brain PCB. The large outer shell is not the active design target until this small case is confirmed.
+The LARGE SHELL is print-ready (see STATUS above); the small brain case was
+settled earlier.  Current activity: print the fit coupons, measure the
+screen, then print the shells in the order listed.
 
 ## Edit and run this exact Fusion script
 
