@@ -1036,6 +1036,39 @@ def check_tree(root, label):
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
+    # ---- the curved shoulder: one surface from panel to roof --------------
+    shoulders = cover.solids('join', 'poly', 'yZ')
+    c.check('CurvedLid: curved shoulder built (shell + 2 end caps)',
+            len(shoulders) == 3)
+    if shoulders:
+        # local -> shell: shell Z = 43 + local Y, shell Y = 205 - local Z
+        tops, reaches = [], []
+        for sh in shoulders:
+            x0, x1, y0, y1, z0, z1 = sh.aabb()
+            # this solid is authored in the cover's own frame: aabb y is
+            # local Y, aabb z is local Z
+            tops.append(43.0 + y1)
+            reaches.append(205.0 - z1)
+        top_z = max(tops)
+        back_y = min(reaches)
+        c.check('CurvedLid: the shoulder rises to shell Z{:.1f} - the cap roof '
+                'underside is Z117, so the front reads as one surface'
+                .format(top_z), near(top_z, 117.0, 0.05))
+        c.check('CurvedLid: it sweeps back to shell Y{:.1f}, just clear of the '
+                'cap skirt at Y143 ({:.1f}mm)'.format(back_y, back_y - 143.0),
+                0.2 <= back_y - 143.0 <= 1.5)
+        c.check('CurvedLid: the shoulder hides the busy middle seam at Z83',
+                min(43.0 + sh.aabb()[2] for sh in shoulders) <= 83.0 + 1e-6)
+    # it prints standing on an end wall: 280 tall, no supports on the curve
+    bb = cover.world_aabb()
+    dims = sorted((bb[1] - bb[0], bb[3] - bb[2], bb[5] - bb[4]), reverse=True)
+    c.check('PRINTABLE: cover is {:.0f} x {:.0f} x {:.0f}mm - stands on an end '
+            'wall inside the {:.0f}mm Z of the bed'
+            .format(dims[0], dims[1], dims[2], interface.BED_Z),
+            dims[0] <= interface.BED_Z
+            and dims[1] + 2 * interface.BED_MARGIN <= interface.BED_X
+            and dims[2] + 2 * interface.BED_MARGIN <= interface.BED_Y)
+
     # ---------------- wall mounting: two BLIND keyholes --------------------
     z0, z1 = interface.key_channel_z()
     entries = [s for s in tub.solids('cut', 'circle', 'xY')

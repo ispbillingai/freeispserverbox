@@ -3,6 +3,7 @@
 # two end walls.  The open back seats over the BottomLid shelf.
 
 import importlib.util
+import math
 import os
 import sys
 
@@ -73,6 +74,27 @@ RJ45_X = MIKROTIK_LAN_X + list(INTERFACE.poe_cable_notch_x())
 # which sits at shell X=-10 once that plate is turned over.
 POWER_CABLE_X = -10.0
 
+# ---------------------------------------------------------------------------
+# THE CURVE (owner, 19 Aug): "make it curved actually, from the top - cover
+# the roof - down to the bottom; it will reduce the confusion at the middle,
+# there is a lot going on there."
+# ---------------------------------------------------------------------------
+# He is right about the middle: the cover top, the BottomLid groove and
+# tongue, and the cap's front wall all stack up around shell Z83, and it
+# reads as clutter.  So the cover grows a curved SHOULDER that starts at its
+# top front edge and sweeps up and back to finish flush under the cap roof.
+# From the front you now see one surface: flat panel, smooth curve, roof.
+# Everything fussy ends up hidden behind the curve.
+#
+# The profile is a quarter ellipse, vertical where it leaves the front panel
+# and horizontal where it meets the roof, so both joins are tangent:
+#     shell (Y205, Z83)  ->  (Y143.5, Z117)      62 back, 34 up
+# In this part's own frame that is local (Y40, Z0) -> (Y74, Z61.5).
+SHOULDER_RISE = 34.0              # local Y: shell Z83 -> Z117 (roof underside)
+SHOULDER_REACH = 61.5             # local Z: shell Y205 -> Y143.5, just outside
+                                  # the cap skirt at Y143
+SHOULDER_STEPS = 48               # polyline segments; smooth and always closes
+
 # The rails guide the cover. The two front M3 screws are the positive lock;
 # there is no pretend snap/detent feature in this part.
 # The slide interface (rail position, the ONE clearance value, the key and
@@ -103,11 +125,14 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v4: TAMPER MAGNET pocket (D12.05 press fit, hidden 1.2mm behind the '
-           'face at shell X+15) + ONE shared rail clearance ({}mm), 4 locator '
-           'tabs, anti-rattle nubs, and the +X channel key relief so a reversed '
-           'cover refuses to seat / interface {}'
-           .format(INTERFACE.COVER_RAIL_CLR, INTERFACE.INTERFACE_VERSION))
+VERSION = ('v5: CURVED - a quarter-ellipse shoulder sweeps from the top of the '
+           'front panel up and back to finish flush under the cap roof, so the '
+           'front reads as one surface and the busy middle seam is hidden. '
+           'PRINT IT STANDING ON AN END WALL (280mm tall, no supports, perfect '
+           'curve); face-down would need supports on the show surface. Tamper '
+           'magnet, shared rail clearance, 4 locator tabs, anti-rattle nubs and '
+           'the reversed-cover key relief all unchanged / interface {}'
+           .format(INTERFACE.INTERFACE_VERSION))
 
 
 def _ext(comp, prof, z0, sz, op, parts):
@@ -135,6 +160,67 @@ def cyl(comp, cx, cy, z0, d, sz, op, parts=None):
     sk.sketchCurves.sketchCircles.addByCenterRadius(
         adsk.core.Point3D.create(mm(cx), mm(cy), 0), mm(d / 2.0))
     return _ext(comp, sk.profiles.item(0), z0, sz, op, parts)
+
+
+def poly_x(comp, pts_yz, xcenter, span, op, parts=None):
+    """Closed polygon on the yZ plane (points are local (y, z)), swept along X.
+
+    MEASURED yZ convention (FIR_PlaneProbe v3): sketch-U is world -Z,
+    sketch-V is world +Y, and the offset/extrude runs along world +X.
+    """
+    sk = comp.sketches.add(comp.yZConstructionPlane)
+    lines = sk.sketchCurves.sketchLines
+    n = len(pts_yz)
+    for i in range(n):
+        y0, z0 = pts_yz[i]
+        y1, z1 = pts_yz[(i + 1) % n]
+        lines.addByTwoPoints(adsk.core.Point3D.create(mm(-z0), mm(y0), 0),
+                             adsk.core.Point3D.create(mm(-z1), mm(y1), 0))
+    f = comp.features.extrudeFeatures
+    ei = f.createInput(sk.profiles.item(0), op)
+    if abs(xcenter) > 1e-9:
+        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
+            adsk.core.ValueInput.createByReal(mm(xcenter)))
+    ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
+    if parts:
+        ei.participantBodies = parts
+    return f.add(ei)
+
+
+def shoulder_profile():
+    """Outer and inner curves of the shoulder, in local (y, z) mm.
+
+    A quarter ellipse: tangent-vertical where it leaves the front panel and
+    tangent-horizontal where it meets the roof, so neither join shows a
+    crease.  The inner curve is a true normal offset, so the wall stays
+    WALL thick all the way round instead of pinching at the ends.
+    """
+    outer, inner = [], []
+    for i in range(SHOULDER_STEPS + 1):
+        t = (math.pi / 2.0) * i / SHOULDER_STEPS
+        y = HEIGHT / 2.0 + SHOULDER_RISE * math.sin(t)
+        z = SHOULDER_REACH * (1.0 - math.cos(t))
+        dy = SHOULDER_RISE * math.cos(t)
+        dz = SHOULDER_REACH * math.sin(t)
+        length = math.hypot(dy, dz) or 1.0
+        ny, nz = -dz / length, dy / length          # inward normal
+        outer.append((y, z))
+        inner.append((y + WALL * ny, z + WALL * nz))
+    return outer, inner
+
+
+def build_shoulder(comp, front):
+    """The curved shoulder: a shell across the width, closed at both ends."""
+    outer, inner = shoulder_profile()
+    # the shell itself, stopping short of each end wall
+    shell_span = LEN - 2.0 * WALL
+    poly_x(comp, outer + list(reversed(inner)), 0.0, shell_span, JOIN, [front])
+    # solid end caps, filling between the top wall and the curve
+    top_y = HEIGHT / 2.0
+    cap_face = [(top_y, 0.0)] + outer + [(top_y, SHOULDER_REACH)]
+    for sx in (-(LEN - WALL) / 2.0, (LEN - WALL) / 2.0):
+        poly_x(comp, cap_face, sx, WALL, JOIN, [front])
+    return
 
 
 def build(comp):
@@ -197,6 +283,10 @@ def build(comp):
     box(comp, RAIL_X, web_cy + 0.1, TZ1 - INTERFACE.COVER_KEY_RELIEF_LEN,
         2.0 * (half + rib_w) + 0.4, 3.4,
         INTERFACE.COVER_KEY_RELIEF_LEN + 1.0, CUT, [front])
+
+    # The curved shoulder: from the top of this panel, up and back to finish
+    # flush under the cap roof, hiding the busy middle seam.
+    build_shoulder(comp, front)
 
     # Slide fully home, then drive two M3 screws through the front face into
     # the BottomLid shelf bosses.  These are the outermost screws on the whole
