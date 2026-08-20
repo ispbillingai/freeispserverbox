@@ -159,7 +159,15 @@ int med5(int *s) {
     for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
   return s[2];
 }
-int readRawY() { int s[5]; for (int i=0;i<5;i++) s[i]=yRead(); return med5(s); }
+// Same rule as the warm-up: never take these reads back to back. A zRead
+// between them reconfigures all four lines, so the sense node is not still
+// holding charge from the previous conversion. Without this the position
+// rails at 4095 exactly the way the pressure line used to.
+int readRawY() {
+  int s[5];
+  for (int i = 0; i < 5; i++) { zRead(); delayMicroseconds(400); s[i] = yRead(); }
+  return med5(s);
+}
 
 int screenY(int raw) {
   return constrain(40 + (int)((long)(raw - yBase) * 240 / ySpan), 0, 319);
@@ -277,18 +285,26 @@ void setup() {
   // it drew a whole screen before its first read. Throw the early ones away
   // or the resting level is learned as 4095 and no press can ever differ
   // from it, which is exactly the "nothing is tappable" symptom.
-  for (int i = 0; i < 40; i++) { zRead(); delay(10); }
+  // Replicate TouchProof's loop body exactly -- z read, THEN a y read, then
+  // a real draw, then a long pause. Reading z alone in a tight loop leaves
+  // the sense node charged from the previous done(), which drives it high;
+  // the y read reconfigures all four lines and lets it settle.
+  for (int i = 0; i < 16; i++) {
+    zRead(); yRead();
+    textAt(90, 180, 2, C_LABEL, ".");
+    delay(120);
+  }
 
   int s[24];                            // now measure the resting level
-  for (int i = 0; i < 24; i++) { s[i] = zRead(); delay(8); }
+  for (int i = 0; i < 24; i++) { s[i] = zRead(); yRead(); delay(20); }
   for (int i = 1; i < 24; i++)
     for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
   Z_IDLE = s[12];
   Serial.printf("idle z=%d, press = %d+ away\n", Z_IDLE, Z_MARGIN);
   if (Z_IDLE > 3500) {                  // still railed: keep waiting, say so
     Serial.println("WARN: resting level still railed - warming up longer");
-    for (int i = 0; i < 60; i++) { zRead(); delay(15); }
-    for (int i = 0; i < 24; i++) { s[i] = zRead(); delay(8); }
+    for (int i = 0; i < 30; i++) { zRead(); yRead(); delay(60); }
+    for (int i = 0; i < 24; i++) { s[i] = zRead(); yRead(); delay(20); }
     for (int i = 1; i < 24; i++)
       for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
     Z_IDLE = s[12];
