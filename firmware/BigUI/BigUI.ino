@@ -135,12 +135,19 @@ static uint32_t WR_MASK;
   #define RS_HIGH()  GPIO.out_w1ts = (1UL << PIN_RS)
 #endif
 
+// Timing matters more than speed here. Over 15cm of dupont wire the data
+// lines settle slowly, and a WR pulse that outruns them latches half-old
+// bytes -- which shows up as horizontal streaks through large fills while
+// text, being slower per pixel, still looks fine. Give the data time to
+// settle before the strobe, and give the strobe real width.
 static inline void wrByte(uint8_t v) {
   GPIO.out_w1ts = lutSet[v];
   GPIO.out_w1tc = lutClr[v];
+  __asm__ __volatile__("nop;nop;nop;nop;nop;nop");   // data setup
   GPIO.out_w1tc = WR_MASK;
-  __asm__ __volatile__("nop; nop");
+  __asm__ __volatile__("nop;nop;nop;nop;nop;nop");   // pulse width
   GPIO.out_w1ts = WR_MASK;
+  __asm__ __volatile__("nop;nop;nop");               // hold
 }
 static inline void writeCmd(uint8_t c)  { RS_LOW(); wrByte(c); RS_HIGH(); }
 static inline void writeData(uint8_t d) { wrByte(d); }
@@ -344,6 +351,34 @@ void runCalibration() {
   else           { xBase = ry[0]; xSpan = dX_ry; yBase = rx[0]; ySpan = dY_rx; }
   if (xSpan == 0) xSpan = 1;
   if (ySpan == 0) ySpan = 1;
+  calSave();
+}
+
+// Two taps, once in the unit's life, stored in NVS. Only the vertical axis
+// exists on this wiring, so two big full-width bars are all it takes -- and
+// they are hittable no matter how wrong the current numbers are.
+void runVerticalCal() {
+  int got[2];
+  const int bandY[2] = {20, 260};          // centres land on y=40 and y=280
+  for (int i = 0; i < 2; i++) {
+    tft.fillScreen(C_BG);
+    tft.setTextSize(2); tft.setTextColor(C_VALUE);
+    tft.setCursor(60, 140); tft.print(i == 0 ? "TAP THE TOP BAR" : "TAP THE BOTTOM BAR");
+    tft.setTextColor(C_LABEL);
+    tft.setCursor(60, 170); tft.print("one-time setup, press firmly");
+    tft.fillRect(0, bandY[i], 480, 40, C_ACCENT);
+    while (!pressed(tsZ())) delay(10);
+    int s[5];
+    for (int k = 0; k < 5; k++) s[k] = tsRawY();
+    got[i] = med5(s);
+    while (pressed(tsZ())) delay(10);
+    delay(200);
+  }
+  yBase = got[0];                          // raw at screen y = 40
+  ySpan = got[1] - got[0];                 // raw delta over 240 px
+  if (ySpan == 0) ySpan = 1;
+  Serial.printf("VERTICAL CAL: yBase=%ld ySpan=%ld  (bake these in as defaults)\n",
+                yBase, ySpan);
   calSave();
 }
 
@@ -728,9 +763,10 @@ void setup() {
     Z_TOUCH = Z_IDLE - Z_MARGIN;          // a press must fall clearly below it
     Serial.printf("idle z=%d -> pressed when below %d\n", Z_IDLE, Z_TOUCH);
   }
-  // A resistive panel that reports "pressed" with nobody touching it makes
-  // every real tap invisible -- the UI cannot tell the difference. Say so on
-  // the glass rather than appearing dead.
+  // The stored numbers belong to whichever pin the sense line was on when
+  // they were taken, so a rewire invalidates them. Two taps, once, then
+  // never again -- and the printed result becomes the factory default.
+  if (!calDone) runVerticalCal();
 
   if (wifiSsid.length()) {                 // silent auto-join with saved creds
     WiFi.mode(WIFI_STA);
