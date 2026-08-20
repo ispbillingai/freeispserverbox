@@ -144,28 +144,23 @@ int medianOf3(int a, int b, int c) {
   return (a > b) ? a : b;
 }
 
-bool touchPressed() {
-  // ground the Y plate, watch the X plate's analog end: GPIO12 has no LED
-  // hanging off it (GPIO2 does -- the devkit's blue LED loads that node)
-  pinMode(TY_A, OUTPUT); digitalWrite(TY_A, LOW);
-  pinMode(TY_B, OUTPUT); digitalWrite(TY_B, LOW);
-  pinMode(TX_B, INPUT_PULLUP);                      // X sense floats high...
-  pinMode(TX_A, INPUT);
-  delayMicroseconds(300);                           // long dupont run = slow rise
-  bool pressed = (digitalRead(TX_B) == LOW);        // ...unless a finger joins them
-  tft.busPinsToOutput();
-  return pressed;
-}
+// The sense plate appears to be CRACKED into two islands: one island only
+// reaches the LCD_D0 end (GPIO16), the other only the LCD_RS end (GPIO12).
+// Session one listened on 16 -> left side answered; the next build listened
+// on 12 -> right side answered. So: listen on BOTH ends at once, and report
+// them separately so each island can be seen announcing itself.
+bool press16 = false, press12 = false;
 
-bool touchPressedAlt() {   // same test, other direction: ground X, sense Y
-  pinMode(TX_A, OUTPUT); digitalWrite(TX_A, LOW);
-  pinMode(TX_B, OUTPUT); digitalWrite(TX_B, LOW);
-  pinMode(TY_B, INPUT_PULLUP);
-  pinMode(TY_A, INPUT);
-  delayMicroseconds(300);
-  bool pressed = (digitalRead(TY_B) == LOW);
+bool touchPressed() {
+  pinMode(TY_A, OUTPUT); digitalWrite(TY_A, LOW);   // ground the whole Y plate
+  pinMode(TY_B, OUTPUT); digitalWrite(TY_B, LOW);
+  pinMode(TX_A, INPUT_PULLUP);                      // both X ends float high...
+  pinMode(TX_B, INPUT_PULLUP);
+  delayMicroseconds(300);                           // long dupont run = slow rise
+  press16 = (digitalRead(TX_A) == LOW);             // ...unless a finger joins
+  press12 = (digitalRead(TX_B) == LOW);             //    their island to ground
   tft.busPinsToOutput();
-  return pressed;
+  return press16 || press12;
 }
 
 int touchReadX() {   // gradient across the X plate, finger reports via Y plate
@@ -240,13 +235,15 @@ void loop() {
   static uint32_t lastBeat = 0;
   if (millis() - lastBeat > 500) {
     lastBeat = millis();
-    bool pA = touchPressed(), pB = touchPressedAlt();
+    bool p = touchPressed();
     int hx = touchReadX(), hy = touchReadY();
-    Serial.printf("heartbeat: pA=%d pB=%d rawX=%4d rawY=%4d\n", pA, pB, hx, hy);
+    Serial.printf("heartbeat: p16=%d p12=%d rawX=%4d rawY=%4d\n",
+                  press16, press12, hx, hy);
     char line[48];
-    snprintf(line, sizeof(line), "pA=%d pB=%d X=%4d Y=%4d   ", pA, pB, hx, hy);
+    snprintf(line, sizeof(line), "p16=%d p12=%d X=%4d Y=%4d   ",
+             press16, press12, hx, hy);
     tft.setTextSize(2);
-    tft.setTextColor((pA || pB) ? C_OK : C_TEXT, C_BG);
+    tft.setTextColor(p ? C_OK : C_TEXT, C_BG);
     tft.setCursor(8, PAINT_TOP + 2);
     tft.print(line);
   }
