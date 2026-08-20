@@ -181,6 +181,10 @@ int tsRawY() {
   touchDone();
   return v;
 }
+// z1 rises and z2 FALLS under a real press. Reading both tells a genuine
+// press apart from a line that is simply stuck high -- they look identical
+// if you only ever look at z1.
+int tsZ2 = 0;
 int tsZ() {
   tft.deselect();
   pinMode(T_XP, OUTPUT); digitalWrite(T_XP, LOW);
@@ -188,6 +192,7 @@ int tsZ() {
   pinMode(T_XM, INPUT);  pinMode(T_YP, INPUT);
   delayMicroseconds(150);
   int z = analogRead(T_XM);
+  tsZ2 = analogRead(T_YP);
   touchDone();
   return z;
 }
@@ -197,17 +202,26 @@ static int med5(int *s) {
   return s[2];
 }
 
-// calibration, kept in NVS so the 3 taps happen once in the product's life
-bool  swapAxes = false;
-long  xBase, xSpan, yBase, ySpan;
+// Calibration. A unit must NEVER greet its owner with a calibration chore --
+// it boots to the dashboard using these factory defaults, and "Calibrate
+// touch" in Settings is there only if a panel turns out to sit differently.
+#define DEF_SWAP  false
+#define DEF_XBASE  500
+#define DEF_XSPAN  3000      // raw delta from screen x=40 to x=440
+#define DEF_YBASE  500
+#define DEF_YSPAN  2600      // raw delta from screen y=40 to y=280
+
+bool  swapAxes = DEF_SWAP;
+long  xBase = DEF_XBASE, xSpan = DEF_XSPAN;
+long  yBase = DEF_YBASE, ySpan = DEF_YSPAN;
 bool  calDone = false;
 
 void calLoad() {
   store.begin("freeisp", true);
   calDone  = store.getBool("tcal", false);
-  swapAxes = store.getBool("tswap", false);
-  xBase = store.getLong("txb", 0); xSpan = store.getLong("txs", 1);
-  yBase = store.getLong("tyb", 0); ySpan = store.getLong("tys", 1);
+  swapAxes = store.getBool("tswap", DEF_SWAP);
+  xBase = store.getLong("txb", DEF_XBASE); xSpan = store.getLong("txs", DEF_XSPAN);
+  yBase = store.getLong("tyb", DEF_YBASE); ySpan = store.getLong("tys", DEF_YSPAN);
   store.end();
   if (xSpan == 0) xSpan = 1;
   if (ySpan == 0) ySpan = 1;
@@ -221,12 +235,16 @@ void calSave() {
   calDone = true;
 }
 
+int lastRawX = 0, lastRawY = 0, lastZ = 0;   // for the serial trace
+
 bool readTouch(int *sx, int *sy) {
-  if (tsZ() < Z_TOUCH) return false;
+  lastZ = tsZ();
+  if (lastZ < Z_TOUCH) return false;
   int xs[5], ys[5];
   for (int i = 0; i < 5; i++) { xs[i] = tsRawX(); ys[i] = tsRawY(); }
   if (tsZ() < Z_TOUCH) return false;
   int rx = med5(xs), ry = med5(ys);
+  lastRawX = rx; lastRawY = ry;
   long forX = swapAxes ? ry : rx, forY = swapAxes ? rx : ry;
   *sx = constrain(40 + (int)((forX - xBase) * 400 / xSpan), 0, 479);
   *sy = constrain(40 + (int)((forY - yBase) * 240 / ySpan), 0, 319);
@@ -567,7 +585,35 @@ void setup() {
   tft.begin();
   calLoad();
   credsLoad();
-  if (!calDone) runCalibration();
+  Serial.printf("touch pins: XP=%d XM=%d YP=%d YM=%d   cal:%s swap=%d "
+                "x %ld+%ld  y %ld+%ld\n",
+                T_XP, T_XM, T_YP, T_YM, calDone ? "stored" : "factory",
+                swapAxes, xBase, xSpan, yBase, ySpan);
+  // A resistive panel that reports "pressed" with nobody touching it makes
+  // every real tap invisible -- the UI cannot tell the difference. Say so on
+  // the glass rather than appearing dead.
+  int stuck = 0;
+  for (int i = 0; i < 20; i++) { if (tsZ() >= Z_TOUCH) stuck++; delay(25); }
+  if (stuck >= 18) {
+    tft.fillScreen(C_BG);
+    header("Touch stuck", false);
+    textAt(20,  70, 2, C_WARN, "The panel reads PRESSED with");
+    textAt(20,  96, 2, C_WARN, "nothing touching it.");
+    textAt(20, 136, 2, C_VALUE, "Lift the screen so nothing rests");
+    textAt(20, 162, 2, C_VALUE, "on the glass - not the bench, a");
+    textAt(20, 188, 2, C_VALUE, "wire, or the stylus - then reset.");
+    textAt(20, 232, 1, C_LABEL, "If it persists with the glass clear, check that the");
+    textAt(20, 248, 1, C_LABEL, "LCD_D7 and LCD_RS wires are not touching each other.");
+    Serial.println("TOUCH STUCK: panel reports pressed while idle");
+    while (true) {                        // live readout while he fixes it
+      int z = tsZ();
+      char l[40]; snprintf(l, sizeof(l), "z1=%4d  z2=%4d   ", z, tsZ2);
+      textAt(20, 282, 2, z < Z_TOUCH ? C_GOOD : C_BAD, l);
+      if (z < Z_TOUCH) { textAt(240, 282, 2, C_GOOD, "OK - resetting"); delay(800); ESP.restart(); }
+      delay(200);
+    }
+  }
+
   if (wifiSsid.length()) {                 // silent auto-join with saved creds
     WiFi.mode(WIFI_STA);
     if (wifiPass.length()) WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
@@ -583,8 +629,23 @@ int pickedNet = -1;
 
 void loop() {
   int sx, sy;
+
+  // Touch trace: reports what the panel is really doing, pressed or not, so
+  // a "it doesn't tap" report can be diagnosed from the numbers instead of
+  // from theories. z is pressure; it must rise above Z_TOUCH for a tap.
+  static uint32_t lastTrace = 0;
+  if (millis() - lastTrace > 1000) {
+    lastTrace = millis();
+    int z = tsZ();
+    Serial.printf("trace z1=%4d z2=%4d  %s\n", z, tsZ2,
+                  (z >= Z_TOUCH && tsZ2 > 3500) ? "STUCK (z1 high but z2 also high)"
+                  : (z >= Z_TOUCH)              ? "pressed"
+                                                : "idle");
+  }
+
   if (!getTap(&sx, &sy)) { delay(20); return; }
-  Serial.printf("tap %d,%d on screen %d\n", sx, sy, screen);
+  Serial.printf("TAP raw %d,%d z=%d -> screen %d,%d  (on screen %d)\n",
+                lastRawX, lastRawY, lastZ, sx, sy, screen);
 
   switch (screen) {
     case SCR_HOME:
