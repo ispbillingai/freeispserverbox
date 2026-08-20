@@ -20,11 +20,15 @@
  *    J4 GND            -> GND
  *    J5 SDA  = 16 -> LCD_D0      J5 RST  = 17 -> LCD_D1
  *    J4 SCL  = 18 -> LCD_D2      J5 MISO = 19 -> LCD_D3
- *    U4 SDA  = 21 -> LCD_D4      U4 SCL  = 22 -> LCD_D5
+ *    J4 DC   =  2 -> LCD_D4      U4 SCL  = 22 -> LCD_D5
  *    J4 SDA  = 23 -> LCD_D6      J4 CS   =  5 -> LCD_D7
- *    J4 DC   =  2 -> LCD_RD      J14 D14 = 14 -> LCD_WR
+ *    U4 SDA  = 21 -> LCD_RD      J14 D14 = 14 -> LCD_WR
  *    J14 D12 = 12 -> LCD_RS      J4 BLK  = 33 -> LCD_CS
  *    J4 RST  =  4 -> LCD_RST
+ *
+ *    (RD and D4 swapped after the first probe run: the touch plates turned
+ *     out to sit on LCD_D0+LCD_RS and LCD_D3+LCD_D4, so LCD_D4 needed an
+ *     analog-capable pin. GPIO2 can analogRead; RD never needs to.)
  *
  *    (J14's holes are silkscreen-labeled -- use the ones printed D14 and
  *     D12, side by side in the 4th row.)
@@ -41,15 +45,15 @@
  *  The backlight is hardwired on the shield; there is no BL wire.
  */
 
-const uint8_t PIN_D[8] = {16, 17, 18, 19, 21, 22, 23, 5};  // LCD_D0..D7
-#define PIN_RD  2    // strobes during the ID read -- onboard blue LED flickers
+const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};  // LCD_D0..D7
+#define PIN_RD  21
 #define PIN_WR  14
 #define PIN_RS  12   // "register select" = data/command, the shield calls it RS
 #define PIN_CS  33
 #define PIN_RST 4
 
 // Every signal line, for the touch probe (touch plates hide among these).
-const uint8_t ALL_PINS[13] = {16, 17, 18, 19, 21, 22, 23, 5, 2, 14, 33, 4, 12};
+const uint8_t ALL_PINS[13] = {16, 17, 18, 19, 2, 22, 23, 5, 21, 14, 33, 4, 12};
 
 // Classic-ESP32 pins that can analogRead. 33 is ADC1 (works even with WiFi
 // on later); 2/4/12/14 are ADC2 (bench only, WiFi off -- which it is). The
