@@ -49,11 +49,13 @@ static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};  // LCD_D0..D7
 // ---- orientation + calibration -- tune from the serial numbers ----
 #define MADCTL_VAL 0x28   // landscape 480x320. try 0xE8 if upside down
 #define USE_INVERT 0
-#define SWAP_AXES  0      // 1 if the dot moves up/down when your finger goes left/right
-#define FLIP_X     0
-#define FLIP_Y     0
-int RAW_X_MIN = 300, RAW_X_MAX = 3700;   // stretched to fit as you calibrate
-int RAW_Y_MIN = 300, RAW_Y_MAX = 3700;
+#define FLIP_POS   1      // raw counts DOWN as you move right, so invert it
+
+// Auto-calibration. Start deliberately inverted and let the first swipe
+// discover the real window -- the fixed 300..3700 guess is what squashed
+// the whole travel into half the bar and made the ends read wrong.
+int RAW_MIN = 4095, RAW_MAX = 0;
+#define CAL_SPAN_MIN 250   // below this the window is not trustworthy yet
 
 #define RGB(r,g,b) ((uint16_t)((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|((b)>>3)))
 
@@ -234,7 +236,14 @@ void showStatus(bool pressed, int raw, int pos) {
   tft.setCursor(8, PAINT_TOP + 6);
   tft.print(line);
 
-  const int by = PAINT_TOP + 40, bh = 60;
+  bool calibrated = (RAW_MAX - RAW_MIN) >= CAL_SPAN_MIN;
+  if (calibrated) snprintf(line, sizeof(line), "window %4d..%-4d      ", RAW_MIN, RAW_MAX);
+  else            snprintf(line, sizeof(line), "SWIPE EDGE TO EDGE    ");
+  tft.setTextColor(calibrated ? C_TEXT : C_ACCENT, C_BG);
+  tft.setCursor(8, PAINT_TOP + 24);
+  tft.print(line);
+
+  const int by = PAINT_TOP + 46, bh = 54;
   tft.fillRect(0, by, 480, bh, C_BG);
   tft.drawRect(0, by, 480, bh, C_EDGE);
   for (int i = 1; i < 3; i++) tft.drawFastVLine(i * 160, by, bh, C_EDGE);
@@ -268,17 +277,20 @@ void loop() {
 
   int raw = touchAxis();
   if (!touchPressed()) return;              // squeeze out release glitches
+  if (raw < 40 || raw > 4050) return;       // rail readings are not positions
 
-  // stretch the calibration window live as bigger/smaller raws appear
-  if (raw < RAW_Y_MIN && raw > 60)   RAW_Y_MIN = raw;
-  if (raw > RAW_Y_MAX && raw < 4040) RAW_Y_MAX = raw;
+  if (raw < RAW_MIN) RAW_MIN = raw;         // the swipe teaches us the window
+  if (raw > RAW_MAX) RAW_MAX = raw;
 
-  int pos = constrain(map(raw, RAW_Y_MIN, RAW_Y_MAX, 0, 479), 0, 479);
-#if FLIP_Y
-  pos = 479 - pos;
+  int pos = -1;
+  if (RAW_MAX - RAW_MIN >= CAL_SPAN_MIN) {
+    pos = constrain(map(raw, RAW_MIN, RAW_MAX, 0, 479), 0, 479);
+#if FLIP_POS
+    pos = 479 - pos;
 #endif
+  }
   Serial.printf("raw %4d -> pos %3d  (window %d..%d)\n",
-                raw, pos, RAW_Y_MIN, RAW_Y_MAX);
+                raw, pos, RAW_MIN, RAW_MAX);
   showStatus(true, raw, pos);
   delay(25);
 }
