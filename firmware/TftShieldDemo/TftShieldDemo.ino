@@ -199,6 +199,46 @@ uint32_t decayMicros(uint8_t chargePin, uint8_t groundPin) {
   return dt;
 }
 
+// Francis's no-wires-touched proof: the ILI9486's data pins D3/D4 ARE the
+// film's Y-plate lines. If the chip's ID still reads back clean through
+// them, GPIO -> jumper -> shield pin is PROVEN healthy for every line, and
+// the break must be past the shield pins (film tail/busbar) -- established
+// in software alone.
+uint8_t rdByte() {
+  digitalWrite(PIN_RD, LOW);  delayMicroseconds(2);
+  uint8_t v = 0;
+  for (uint8_t i = 0; i < 8; i++) if (digitalRead(PIN_D[i])) v |= 1 << i;
+  digitalWrite(PIN_RD, HIGH); delayMicroseconds(2);
+  return v;
+}
+uint16_t readChipId() {          // expect 0x9486
+  writeCmd(0xD3);
+  for (uint8_t i = 0; i < 8; i++) pinMode(PIN_D[i], INPUT);
+  rdByte(); rdByte();            // dummy + 0x00
+  uint16_t id = (uint16_t)rdByte() << 8;
+  id |= rdByte();
+  tft.busPinsToOutput();
+  return id;
+}
+
+// Which Y end still reaches the sheet? Ground the whole healthy X plate,
+// charge ONE Y end, and let a firm stylus press drain it through the
+// contact point. Fast while pressed = that end reaches the film.
+uint32_t decayViaPress(uint8_t yEnd) {
+  pinMode(TX_A, OUTPUT); digitalWrite(TX_A, LOW);
+  pinMode(TX_B, OUTPUT); digitalWrite(TX_B, LOW);
+  uint8_t other = (yEnd == TY_A) ? TY_B : TY_A;
+  pinMode(other, INPUT);
+  pinMode(yEnd, OUTPUT); digitalWrite(yEnd, HIGH);
+  delayMicroseconds(50);
+  pinMode(yEnd, INPUT);
+  uint32_t t0 = micros();
+  while (digitalRead(yEnd) && (micros() - t0) < 5000) {}
+  uint32_t dt = micros() - t0;
+  tft.busPinsToOutput();
+  return dt;
+}
+
 // ---------------------------------------------------------------- demo UI --
 #define C_BG     RGB(13, 17, 23)
 #define C_BAR    RGB(22, 27, 34)
@@ -272,6 +312,14 @@ void loop() {
              tX, tXr, tY, tYr);
     tft.setTextColor(C_TEXT, C_BG);
     tft.setCursor(8, PAINT_TOP + 20);
+    tft.print(line);
+    // line 3: the chip's testimony + which Y end a press can still reach
+    uint16_t id = readChipId();
+    uint32_t k19 = decayViaPress(TY_A), k2 = decayViaPress(TY_B);
+    Serial.printf("           id=%04X k19=%u k2=%u\n", id, k19, k2);
+    snprintf(line, sizeof(line), "ID=%04X k19=%4u k2=%4u   ", id, k19, k2);
+    tft.setTextColor(id == 0x9486 ? C_OK : C_ACCENT, C_BG);
+    tft.setCursor(8, PAINT_TOP + 38);
     tft.print(line);
   }
 
