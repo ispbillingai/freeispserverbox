@@ -577,6 +577,50 @@ void drawInfo() {
   }
 }
 
+// Idle reading of both sense pins, in the exact pin state tsZ() uses.
+// Untouched, XM should sit LOW (it is tied to XP=LOW through the plate).
+void adcProbe(const char* when) {
+  tft.deselect();
+  pinMode(T_XP, OUTPUT); digitalWrite(T_XP, LOW);
+  pinMode(T_YM, OUTPUT); digitalWrite(T_YM, HIGH);
+  pinMode(T_XM, INPUT);  pinMode(T_YP, INPUT);
+  delayMicroseconds(200);
+  int a = analogRead(T_XM), b = analogRead(T_YP);
+  tft.busPinsToOutput(); tft.select();
+  Serial.printf("ADC probe %-9s XM(GPIO%d)=%4d  YP(GPIO%d)=%4d\n",
+                when, T_XM, a, T_YP, b);
+}
+
+// Are these two pins joined by a few hundred ohms (a plate) or open?
+// Pull one up, drive the other low: joined -> the pulled-up pin reads LOW.
+bool joined(uint8_t a, uint8_t b) {
+  tft.deselect();
+  pinMode(b, OUTPUT); digitalWrite(b, LOW);
+  pinMode(a, INPUT_PULLUP);
+  delayMicroseconds(400);
+  bool j = (digitalRead(a) == LOW);
+  pinMode(a, INPUT); pinMode(b, INPUT);
+  tft.busPinsToOutput(); tft.select();
+  return j;
+}
+
+// The decisive test. X and Y plates must each read JOINED (that is the film
+// itself). The two plates must read APART when nobody is touching, and
+// JOINED only under a press. Anything else names the fault outright.
+void plateCheck() {
+  for (int i = 0; i < 5; i++) {
+    bool xp = joined(T_XM, T_XP);     // is the X plate there at all?
+    bool yp = joined(T_YP, T_YM);     // is the Y plate there at all?
+    bool cross = joined(T_XM, T_YP);  // are the plates touching each other?
+    Serial.printf("plates: Xplate=%-5s Yplate=%-5s cross=%-5s   %s\n",
+                  xp ? "OK" : "OPEN", yp ? "OK" : "OPEN", cross ? "TOUCH" : "apart",
+                  (!xp || !yp) ? "<-- a plate wire is not connected"
+                  : cross      ? "<-- something is pressing the glass"
+                               : "<-- healthy and idle");
+    delay(600);
+  }
+}
+
 // ------------------------------------------------------------------ sketch --
 void setup() {
   Serial.begin(115200);
@@ -589,28 +633,41 @@ void setup() {
                 "x %ld+%ld  y %ld+%ld\n",
                 T_XP, T_XM, T_YP, T_YM, calDone ? "stored" : "factory",
                 swapAxes, xBase, xSpan, yBase, ySpan);
+
+  // Both touch sense pins are ADC2, and ADC2 is shared with the radio.
+  // Measure the same idle reading three times -- cold, with the radio up,
+  // and after it is shut down -- so the effect is proven, not assumed.
+  adcProbe("cold");
+  WiFi.mode(WIFI_STA); delay(400);
+  adcProbe("radio ON");
+  WiFi.mode(WIFI_OFF); delay(400);
+  adcProbe("radio OFF");
+  plateCheck();
   // A resistive panel that reports "pressed" with nobody touching it makes
   // every real tap invisible -- the UI cannot tell the difference. Say so on
   // the glass rather than appearing dead.
-  int stuck = 0;
-  for (int i = 0; i < 20; i++) { if (tsZ() >= Z_TOUCH) stuck++; delay(25); }
-  if (stuck >= 18) {
+  // The film's four wires land on the same header pins the LCD uses, so the
+  // display can be perfect while the touch panel is electrically absent.
+  // Check the plates themselves and, if they are open, say so on the glass
+  // with a LIVE readout so the tail can be re-seated and watched.
+  if (!joined(T_XM, T_XP) || !joined(T_YP, T_YM)) {
+    Serial.println("TOUCH PANEL NOT CONNECTED: one or both plates open");
     tft.fillScreen(C_BG);
-    header("Touch stuck", false);
-    textAt(20,  70, 2, C_WARN, "The panel reads PRESSED with");
-    textAt(20,  96, 2, C_WARN, "nothing touching it.");
-    textAt(20, 136, 2, C_VALUE, "Lift the screen so nothing rests");
-    textAt(20, 162, 2, C_VALUE, "on the glass - not the bench, a");
-    textAt(20, 188, 2, C_VALUE, "wire, or the stylus - then reset.");
-    textAt(20, 232, 1, C_LABEL, "If it persists with the glass clear, check that the");
-    textAt(20, 248, 1, C_LABEL, "LCD_D7 and LCD_RS wires are not touching each other.");
-    Serial.println("TOUCH STUCK: panel reports pressed while idle");
-    while (true) {                        // live readout while he fixes it
-      int z = tsZ();
-      char l[40]; snprintf(l, sizeof(l), "z1=%4d  z2=%4d   ", z, tsZ2);
-      textAt(20, 282, 2, z < Z_TOUCH ? C_GOOD : C_BAD, l);
-      if (z < Z_TOUCH) { textAt(240, 282, 2, C_GOOD, "OK - resetting"); delay(800); ESP.restart(); }
-      delay(200);
+    header("Touch not connected", false);
+    textAt(20,  62, 2, C_WARN, "The display is fine. The touch");
+    textAt(20,  88, 2, C_WARN, "film is not reaching the board.");
+    textAt(20, 128, 2, C_VALUE, "Look at the FRONT of the glass:");
+    textAt(20, 154, 2, C_VALUE, "the thin 4-wire ribbon at its edge");
+    textAt(20, 180, 2, C_VALUE, "has come loose. Press it gently");
+    textAt(20, 206, 2, C_VALUE, "back into its slot and watch below.");
+    while (true) {                        // live, so the fix is visible
+      bool xp = joined(T_XM, T_XP), yp = joined(T_YP, T_YM);
+      char l[44];
+      snprintf(l, sizeof(l), "X plate %-4s   Y plate %-4s ",
+               xp ? "OK" : "OPEN", yp ? "OK" : "OPEN");
+      textAt(20, 250, 2, (xp && yp) ? C_GOOD : C_BAD, l);
+      if (xp && yp) { textAt(20, 282, 2, C_GOOD, "CONNECTED - restarting"); delay(1000); ESP.restart(); }
+      delay(250);
     }
   }
 
