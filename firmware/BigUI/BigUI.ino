@@ -86,7 +86,15 @@ static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};  // LCD_D0..D7
 #define T_XM PIN_RS  // LCD_RS  -> analog read for the Y (vertical) axis
 #define T_YP PIN_WR  // LCD_WR  -> analog read for the X (horizontal) axis
 #define T_YM 5       // LCD_D7
-#define Z_TOUCH 150
+// This panel's pressure reading runs BACKWARDS from the textbook: measured
+// on the bench it rails at 4095 untouched and FALLS to about 620 under the
+// stylus. So a press is a reading well BELOW the resting level, not above
+// it -- which is why a "greater than" test called it permanently pressed.
+// The resting level is measured at boot rather than assumed.
+int Z_IDLE  = 4095;
+int Z_TOUCH = 3200;           // pressed when the reading is BELOW this
+#define Z_MARGIN 800
+static inline bool pressed(int z) { return z < Z_TOUCH; }
 
 #define MADCTL_VAL 0x28
 #define RGB(r,g,b) ((uint16_t)((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|((b)>>3)))
@@ -276,20 +284,20 @@ int lastRawX = 0, lastRawY = 0, lastZ = 0;   // for the serial trace
 
 bool readTouch(int *sx, int *sy) {
   lastZ = tsZ();
-  if (lastZ < Z_TOUCH) return false;
+  if (!pressed(lastZ)) return false;
   int xs[5], ys[5];
 #if TOUCH_VERTICAL_ONLY
   // one good axis: every control is a full-width row, so a vertical
   // coordinate alone drives the whole interface
   for (int i = 0; i < 5; i++) ys[i] = tsRawY();
-  if (tsZ() < Z_TOUCH) return false;
+  if (!pressed(tsZ())) return false;
   lastRawY = med5(ys); lastRawX = 0;
   *sx = 240;
   *sy = constrain(40 + (int)((lastRawY - yBase) * 240 / ySpan), 0, 319);
   return true;
 #else
   for (int i = 0; i < 5; i++) { xs[i] = tsRawX(); ys[i] = tsRawY(); }
-  if (tsZ() < Z_TOUCH) return false;
+  if (!pressed(tsZ())) return false;
   int rx = med5(xs), ry = med5(ys);
   lastRawX = rx; lastRawY = ry;
   long forX = swapAxes ? ry : rx, forY = swapAxes ? rx : ry;
@@ -302,7 +310,7 @@ bool readTouch(int *sx, int *sy) {
 bool getTap(int *sx, int *sy) {
   if (!readTouch(sx, sy)) return false;
   uint32_t t0 = millis();
-  while (tsZ() >= Z_TOUCH && millis() - t0 < 2000) delay(10);
+  while (pressed(tsZ()) && millis() - t0 < 2000) delay(10);
   delay(60);
   return true;
 }
@@ -322,11 +330,11 @@ void runCalibration() {
     tft.drawFastHLine(CX[i]-14, CY[i], 29, C_ACCENT);
     tft.drawFastVLine(CX[i], CY[i]-14, 29, C_ACCENT);
     tft.drawCircle(CX[i], CY[i], 9, C_ACCENT);
-    while (tsZ() < Z_TOUCH) delay(10);
+    while (!pressed(tsZ())) delay(10);
     int xs[5], ys[5];
     for (int k = 0; k < 5; k++) { xs[k] = tsRawX(); ys[k] = tsRawY(); }
     rx[i] = med5(xs); ry[i] = med5(ys);
-    while (tsZ() >= Z_TOUCH) delay(10);
+    while (pressed(tsZ())) delay(10);
     delay(150);
   }
   long dX_rx = rx[1]-rx[0], dX_ry = ry[1]-ry[0];
@@ -709,19 +717,16 @@ void setup() {
                 id == 0x9486 ? "(bus + LCD_RS wire GOOD)"
                              : "(bus BAD - check the moved LCD_RS wire)");
   adcProbe("boot");
-  // Exhaustive pair scan. Rather than trust one assumption about where the
-  // plates sit, ask every bus pin about every other one and print what is
-  // actually joined. Two pairs should appear: the two plates.
-  { const uint8_t P[13] = {16,17,18,19,2,22,23,5, PIN_RD, PIN_WR, PIN_RS, PIN_CS, PIN_RST};
-    Serial.println("pair scan (joined pins):");
-    int found = 0;
-    for (int i = 0; i < 13; i++)
-      for (int j = i + 1; j < 13; j++)
-        if (joined(P[i], P[j]) && joined(P[j], P[i])) {
-          Serial.printf("   GPIO%-2d <-> GPIO%-2d\n", P[i], P[j]);
-          found++;
-        }
-    if (!found) Serial.println("   NONE - no resistive path between any two bus pins");
+  // Learn the panel's resting pressure level, then demand a clear rise
+  // above it. Sampled with the lowest readings kept, so a finger resting on
+  // the glass at power-up cannot poison the baseline.
+  { int s[24];
+    for (int i = 0; i < 24; i++) { s[i] = tsZ(); delay(8); }
+    for (int i = 1; i < 24; i++)
+      for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
+    Z_IDLE  = s[17];                      // high quantile = the resting level
+    Z_TOUCH = Z_IDLE - Z_MARGIN;          // a press must fall clearly below it
+    Serial.printf("idle z=%d -> pressed when below %d\n", Z_IDLE, Z_TOUCH);
   }
   // A resistive panel that reports "pressed" with nobody touching it makes
   // every real tap invisible -- the UI cannot tell the difference. Say so on
@@ -745,14 +750,13 @@ void loop() {
 
   // Touch trace: reports what the panel is really doing, pressed or not, so
   // a "it doesn't tap" report can be diagnosed from the numbers instead of
-  // from theories. z is pressure; it must rise above Z_TOUCH for a tap.
+  // from theories. z is pressure; on this panel it FALLS under a press.
   static uint32_t lastTrace = 0;
   if (millis() - lastTrace > 1000) {
     lastTrace = millis();
     int z = tsZ();
     Serial.printf("trace z1=%4d z2=%4d  %s\n", z, tsZ2,
-                  (z >= Z_TOUCH && tsZ2 > 3500) ? "STUCK (z1 high but z2 also high)"
-                  : (z >= Z_TOUCH)              ? "pressed"
+                  pressed(z) ? "pressed"
                                                 : "idle");
   }
 
