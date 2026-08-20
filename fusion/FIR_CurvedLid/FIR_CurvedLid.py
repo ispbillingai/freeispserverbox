@@ -54,12 +54,11 @@ COVER_Y_TO_SHELL_Z = 43.0
 # No alarm-horn vents here either: see HORN_VENTS in the shared contract.
 LEN, HEIGHT, DEPTH = 280.0, 80.0, 65.0
 WALL = 2.5
-# Pop-out skin over each cable notch.  Was 0.55 (~3 layers) and the owner
-# found them hard to cut out (20 Aug): now ONE layer.  Printed standing on an
-# end wall this is thinner than a nozzle line, so the slicer will either lay
-# a single fragile line or leave the notch open - both are fine: punch out
-# only the notches you need, tape over the rest if wanted.
-SKIN = 0.2
+# Pop-out skin over each cable notch: 0.1mm, the lightest (owner, 20 Aug).
+# That is below any layer height or nozzle width, so in practice the slicer
+# leaves these notches OPEN or bridges them with a wisp that falls to a
+# touch - which is the point: they were hard to cut out at 0.55.
+SKIN = 0.1
 HOLE_D = 7.0
 PWR_D = 7.0
 NOTCH_H = 7.0
@@ -132,7 +131,7 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v7: cable-notch skins cut to ONE layer (0.2mm - they punch out easily now); SEAMLESS - the shoulder lands FLUSH with the roof outer '
+VERSION = ('v8: cable-notch skins at 0.1mm, the lightest - effectively pre-opened; SEAMLESS - the shoulder lands FLUSH with the roof outer '
            'surface (Z120), tip butting the roof edge with one 0.3mm shadow '
            'line, so you cannot tell cover from cap. ASSEMBLY ORDER CHANGED: '
            'slide the cover on LAST, after the cap is closed - its hard end '
