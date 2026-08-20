@@ -41,8 +41,9 @@
 #include <Preferences.h>
 #include "soc/gpio_struct.h"
 
-// ---- set to 1 AFTER doing the bench half-fix described above ----
-#define TOUCH_Y_ON_ADC1 0
+// ---- 1 = the bench half-fix is wired: LCD_RS on J4 "BLK" (GPIO33, ADC1)
+//          and LCD_CS on J14 "D12" (GPIO12). Done 20 Aug 2026. ----
+#define TOUCH_Y_ON_ADC1 1
 
 // ---- WHY THIS SKETCH NEEDED A FIX THAT TftShieldDemo DID NOT -----------
 // TftShieldDemo reads this same panel perfectly. The only structural
@@ -63,14 +64,20 @@
 
 // ---- display bus pins ----
 static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};  // LCD_D0..D7
-#define PIN_RD  21
 #define PIN_WR  14
 #if TOUCH_Y_ON_ADC1
+  // GPIO33 is ADC1, so the touch sense line survives WiFi. GPIO12 is the
+  // MTDI strapping pin: whatever sits there must be LOW when the chip
+  // resets, or it selects the wrong flash voltage and refuses to program.
+  // LCD_CS and LCD_RS both idle HIGH, so neither may live there -- LCD_RD
+  // does, since nothing pulls it up and GPIO12 falls to its own pulldown.
   #define PIN_RS  33
-  #define PIN_CS  12
+  #define PIN_CS  21
+  #define PIN_RD  12
 #else
   #define PIN_RS  12
   #define PIN_CS  33
+  #define PIN_RD  21
 #endif
 #define PIN_RST 4
 
@@ -106,7 +113,19 @@ Preferences store;
 
 // ------------------------------------------------- fast 8-bit parallel bus --
 static uint32_t lutSet[256], lutClr[256];
-static uint32_t WR_MASK, RS_MASK;
+static uint32_t WR_MASK;
+
+// GPIO0..31 and GPIO32+ live in DIFFERENT hardware registers. RS moves to
+// GPIO33 once the ADC1 fix is wired, so it must use the high-bank register
+// -- a 1UL<<33 into the low bank silently does nothing and the panel stays
+// dark. Every other bus line is below 32.
+#if PIN_RS >= 32
+  #define RS_LOW()   GPIO.out1_w1tc.val = (1UL << (PIN_RS - 32))
+  #define RS_HIGH()  GPIO.out1_w1ts.val = (1UL << (PIN_RS - 32))
+#else
+  #define RS_LOW()   GPIO.out_w1tc = (1UL << PIN_RS)
+  #define RS_HIGH()  GPIO.out_w1ts = (1UL << PIN_RS)
+#endif
 
 static inline void wrByte(uint8_t v) {
   GPIO.out_w1ts = lutSet[v];
@@ -115,7 +134,7 @@ static inline void wrByte(uint8_t v) {
   __asm__ __volatile__("nop; nop");
   GPIO.out_w1ts = WR_MASK;
 }
-static inline void writeCmd(uint8_t c)  { GPIO.out_w1tc = RS_MASK; wrByte(c); GPIO.out_w1ts = RS_MASK; }
+static inline void writeCmd(uint8_t c)  { RS_LOW(); wrByte(c); RS_HIGH(); }
 static inline void writeData(uint8_t d) { wrByte(d); }
 
 class Ili9486Par8 : public Adafruit_GFX {
@@ -123,7 +142,7 @@ public:
   Ili9486Par8() : Adafruit_GFX(480, 320) {}
 
   void begin() {
-    WR_MASK = 1UL << PIN_WR;  RS_MASK = 1UL << PIN_RS;
+    WR_MASK = 1UL << PIN_WR;
     for (int v = 0; v < 256; v++) {
       lutSet[v] = lutClr[v] = 0;
       for (int i = 0; i < 8; i++)
@@ -606,6 +625,28 @@ void drawInfo() {
   }
 }
 
+// Ask the controller its ID over the parallel bus. This travels through
+// LCD_RS, so a clean 0x9486 proves the RS wire (and the whole bus) is good
+// -- which separates "the moved wire is loose" from "the film's X plate is
+// open". The chip is a better witness than any assumption.
+uint8_t rdBusByte() {
+  digitalWrite(PIN_RD, LOW);  delayMicroseconds(2);
+  uint8_t v = 0;
+  for (uint8_t i = 0; i < 8; i++) if (digitalRead(PIN_D[i])) v |= 1 << i;
+  digitalWrite(PIN_RD, HIGH); delayMicroseconds(2);
+  return v;
+}
+uint16_t readChipId() {
+  tft.select();
+  writeCmd(0xD3);
+  for (uint8_t i = 0; i < 8; i++) pinMode(PIN_D[i], INPUT);
+  rdBusByte(); rdBusByte();                 // dummy + 0x00
+  uint16_t id = (uint16_t)rdBusByte() << 8;
+  id |= rdBusByte();
+  tft.busPinsToOutput();
+  return id;
+}
+
 // Idle reading of both sense pins, in the exact pin state tsZ() uses.
 // Untouched, XM should sit LOW (it is tied to XP=LOW through the plate).
 void adcProbe(const char* when) {
@@ -663,7 +704,25 @@ void setup() {
                 T_XP, T_XM, T_YP, T_YM, calDone ? "stored" : "factory",
                 swapAxes, xBase, xSpan, yBase, ySpan);
 
+  uint16_t id = readChipId();
+  Serial.printf("chip ID = %04X  %s\n", id,
+                id == 0x9486 ? "(bus + LCD_RS wire GOOD)"
+                             : "(bus BAD - check the moved LCD_RS wire)");
   adcProbe("boot");
+  // Exhaustive pair scan. Rather than trust one assumption about where the
+  // plates sit, ask every bus pin about every other one and print what is
+  // actually joined. Two pairs should appear: the two plates.
+  { const uint8_t P[13] = {16,17,18,19,2,22,23,5, PIN_RD, PIN_WR, PIN_RS, PIN_CS, PIN_RST};
+    Serial.println("pair scan (joined pins):");
+    int found = 0;
+    for (int i = 0; i < 13; i++)
+      for (int j = i + 1; j < 13; j++)
+        if (joined(P[i], P[j]) && joined(P[j], P[i])) {
+          Serial.printf("   GPIO%-2d <-> GPIO%-2d\n", P[i], P[j]);
+          found++;
+        }
+    if (!found) Serial.println("   NONE - no resistive path between any two bus pins");
+  }
   // A resistive panel that reports "pressed" with nobody touching it makes
   // every real tap invisible -- the UI cannot tell the difference. Say so on
   // the glass rather than appearing dead.
