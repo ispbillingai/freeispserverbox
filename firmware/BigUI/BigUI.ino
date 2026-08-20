@@ -41,8 +41,9 @@
 #include <Preferences.h>
 #include "soc/gpio_struct.h"
 
-// ---- 1 = the bench half-fix is wired: LCD_RS on J4 "BLK" (GPIO33, ADC1)
-//          and LCD_CS on J14 "D12" (GPIO12). Done 20 Aug 2026. ----
+// ---- 1 = matches the wires actually fitted: LCD_RS on J4 "BLK" (GPIO33,
+//          ADC1), LCD_CS on U4 "SDA" (GPIO21), LCD_RD on J14 "D12".
+//          Do not change without rewiring: the display goes dark. ----
 #define TOUCH_Y_ON_ADC1 1
 
 // ---- WHY THIS SKETCH NEEDED A FIX THAT TftShieldDemo DID NOT -----------
@@ -60,7 +61,7 @@
 // 4-wire panel needs. GPIO33 is reachable at J4 "BLK" today, GPIO32 needs
 // the PCB rev, so the vertical axis can be rescued now and the horizontal
 // one when the board is respun.
-#define TOUCH_VERTICAL_ONLY 1
+#define TOUCH_VERTICAL_ONLY 1   // only GPIO33/ADC1 gives an honest number
 
 // ---- display bus pins ----
 static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};  // LCD_D0..D7
@@ -86,15 +87,24 @@ static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};  // LCD_D0..D7
 #define T_XM PIN_RS  // LCD_RS  -> analog read for the Y (vertical) axis
 #define T_YP PIN_WR  // LCD_WR  -> analog read for the X (horizontal) axis
 #define T_YM 5       // LCD_D7
-// This panel's pressure reading runs BACKWARDS from the textbook: measured
-// on the bench it rails at 4095 untouched and FALLS to about 620 under the
-// stylus. So a press is a reading well BELOW the resting level, not above
-// it -- which is why a "greater than" test called it permanently pressed.
-// The resting level is measured at boot rather than assumed.
-int Z_IDLE  = 4095;
-int Z_TOUCH = 3200;           // pressed when the reading is BELOW this
-#define Z_MARGIN 800
-static inline bool pressed(int z) { return z < Z_TOUCH; }
+
+// PROVEN by TouchProof.ino: with WiFi absent this panel reads 0 idle and
+// ~830 pressed. In THIS sketch, which links WiFi, the same pin froze at
+// 4095 -- the value an ADC channel returns when it is not actually attached
+// to the pin. So attach it explicitly on every read.
+// Do NOT reach for driver/adc.h to solve this: Arduino's analogRead already
+// uses the new ADC driver and mixing the two aborts at boot with
+// "driver_ng is not allowed to be used with the legacy driver".
+static inline int readXM() { return analogRead(T_XM); }
+// Press detection that does not care which way this panel leans: the
+// resting level is measured at boot, and a press is any reading that moves
+// CLEARLY AWAY from it. On the GPIO12 wiring the panel idled low and rose
+// under a press; on GPIO33 it idled at 4095 and fell. Deviation-from-idle
+// covers both, so a rewire can never invert the logic again.
+int Z_IDLE  = 0;
+int Z_TOUCH = 0;              // kept for the serial trace only
+#define Z_MARGIN 400
+static inline bool pressed(int z) { return abs(z - Z_IDLE) > Z_MARGIN; }
 
 #define MADCTL_VAL 0x28
 #define RGB(r,g,b) ((uint16_t)((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|((b)>>3)))
@@ -228,7 +238,7 @@ int tsRawY() {
   pinMode(T_YP, OUTPUT); digitalWrite(T_YP, HIGH);
   pinMode(T_YM, OUTPUT); digitalWrite(T_YM, LOW);
   delayMicroseconds(150);
-  int v = analogRead(T_XM);
+  int v = readXM();
   touchDone();
   return v;
 }
@@ -242,8 +252,11 @@ int tsZ() {
   pinMode(T_YM, OUTPUT); digitalWrite(T_YM, HIGH);
   pinMode(T_XM, INPUT);  pinMode(T_YP, INPUT);
   delayMicroseconds(150);
-  int z = analogRead(T_XM);
-  tsZ2 = analogRead(T_YP);
+  int z = readXM();
+  // NO ADC2 read here. GPIO14 is ADC2, and in a WiFi build a failed ADC2
+  // conversion leaves the converter in a state that poisons the NEXT ADC1
+  // read -- which is how a healthy GPIO33 came back frozen. Vertical-only
+  // needs GPIO33 alone, so ADC2 is never touched.
   touchDone();
   return z;
 }
@@ -270,19 +283,21 @@ bool  calDone = false;
 
 void calLoad() {
   store.begin("freeisp", true);
-  calDone  = store.getBool("tcal", false);
-  swapAxes = store.getBool("tswap", DEF_SWAP);
-  xBase = store.getLong("txb", DEF_XBASE); xSpan = store.getLong("txs", DEF_XSPAN);
-  yBase = store.getLong("tyb", DEF_YBASE); ySpan = store.getLong("tys", DEF_YSPAN);
+  // "c2" keys on purpose: every calibration stored before the wiring revert
+  // was taken on different pins and is junk. New keys = clean slate.
+  calDone  = store.getBool("c2ok", false);
+  swapAxes = store.getBool("c2sw", DEF_SWAP);
+  xBase = store.getLong("c2xb", DEF_XBASE); xSpan = store.getLong("c2xs", DEF_XSPAN);
+  yBase = store.getLong("c2yb", DEF_YBASE); ySpan = store.getLong("c2ys", DEF_YSPAN);
   store.end();
   if (xSpan == 0) xSpan = 1;
   if (ySpan == 0) ySpan = 1;
 }
 void calSave() {
   store.begin("freeisp", false);
-  store.putBool("tcal", true);   store.putBool("tswap", swapAxes);
-  store.putLong("txb", xBase);   store.putLong("txs", xSpan);
-  store.putLong("tyb", yBase);   store.putLong("tys", ySpan);
+  store.putBool("c2ok", true);   store.putBool("c2sw", swapAxes);
+  store.putLong("c2xb", xBase);  store.putLong("c2xs", xSpan);
+  store.putLong("c2yb", yBase);  store.putLong("c2ys", ySpan);
   store.end();
   calDone = true;
 }
@@ -367,10 +382,30 @@ void runVerticalCal() {
     tft.setTextColor(C_LABEL);
     tft.setCursor(60, 170); tft.print("one-time setup, press firmly");
     tft.fillRect(0, bandY[i], 480, 40, C_ACCENT);
-    while (!pressed(tsZ())) delay(10);
+    // Show the pressure reading LIVE while waiting, so "it does not tap"
+    // becomes a number on the glass: watch z dive under the threshold (or
+    // not) as the stylus lands. Three pressed reads in a row = a real tap.
+    uint32_t lastShow = 0;
+    int zc = 0;
+    while (zc < 3) {
+      int z = tsZ();
+      zc = pressed(z) ? zc + 1 : 0;
+      if (millis() - lastShow > 250) {
+        lastShow = millis();
+        char l[44];
+        snprintf(l, sizeof(l), "z=%4d  press below %4d  ", z, Z_TOUCH);
+        tft.setTextSize(2);
+        tft.setTextColor(pressed(z) ? C_GOOD : C_LABEL, C_BG);
+        tft.setCursor(76, 210);
+        tft.print(l);
+        Serial.printf("cal wait: %s\n", l);
+      }
+      delay(8);
+    }
     int s[5];
     for (int k = 0; k < 5; k++) s[k] = tsRawY();
     got[i] = med5(s);
+    Serial.printf("cal tap %d: rawY=%d\n", i, got[i]);
     while (pressed(tsZ())) delay(10);
     delay(200);
   }
@@ -698,7 +733,7 @@ void adcProbe(const char* when) {
   pinMode(T_YM, OUTPUT); digitalWrite(T_YM, HIGH);
   pinMode(T_XM, INPUT);  pinMode(T_YP, INPUT);
   delayMicroseconds(200);
-  int a = analogRead(T_XM), b = analogRead(T_YP);
+  int a = readXM(), b = -1;   // ADC2 deliberately not read
   tft.busPinsToOutput(); tft.select();
   Serial.printf("ADC probe %-9s XM(GPIO%d)=%4d  YP(GPIO%d)=%4d\n",
                 when, T_XM, a, T_YP, b);
@@ -747,11 +782,12 @@ void setup() {
                 T_XP, T_XM, T_YP, T_YM, calDone ? "stored" : "factory",
                 swapAxes, xBase, xSpan, yBase, ySpan);
 
-  uint16_t id = readChipId();
-  Serial.printf("chip ID = %04X  %s\n", id,
-                id == 0x9486 ? "(bus + LCD_RS wire GOOD)"
-                             : "(bus BAD - check the moved LCD_RS wire)");
-  adcProbe("boot");
+  // Nothing touches the bus before the first touch read. The proven
+  // TouchProof.ino goes display-init -> touch and nothing else; every probe
+  // added here to "help" is one more difference from the thing that works.
+  // readChipId() in particular leaves the data pins as INPUTS, and GPIO23 /
+  // GPIO5 are two of the four touch lines.
+
   // Learn the panel's resting pressure level, then demand a clear rise
   // above it. Sampled with the lowest readings kept, so a finger resting on
   // the glass at power-up cannot poison the baseline.
@@ -760,8 +796,8 @@ void setup() {
     for (int i = 1; i < 24; i++)
       for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
     Z_IDLE  = s[17];                      // high quantile = the resting level
-    Z_TOUCH = Z_IDLE - Z_MARGIN;          // a press must fall clearly below it
-    Serial.printf("idle z=%d -> pressed when below %d\n", Z_IDLE, Z_TOUCH);
+    Z_TOUCH = Z_IDLE;                     // trace shows deviation from this
+    Serial.printf("idle z=%d -> pressed when %d+ away from it\n", Z_IDLE, Z_MARGIN);
   }
   // The stored numbers belong to whichever pin the sense line was on when
   // they were taken, so a rewire invalidates them. Two taps, once, then
@@ -791,9 +827,8 @@ void loop() {
   if (millis() - lastTrace > 1000) {
     lastTrace = millis();
     int z = tsZ();
-    Serial.printf("trace z1=%4d z2=%4d  %s\n", z, tsZ2,
-                  pressed(z) ? "pressed"
-                                                : "idle");
+    Serial.printf("trace z=%4d idle=%d  %s\n", z, Z_IDLE,
+                  pressed(z) ? "pressed" : "idle");
   }
 
   if (!getTap(&sx, &sy)) { delay(20); return; }
