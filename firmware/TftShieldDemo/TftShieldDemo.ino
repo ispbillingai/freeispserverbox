@@ -163,80 +163,26 @@ bool touchPressed() {
   return press16 || press12;
 }
 
-int touchReadX() {   // gradient across the X plate, finger reports via Y plate
-  pinMode(TX_A, OUTPUT); digitalWrite(TX_A, HIGH);
-  pinMode(TX_B, OUTPUT); digitalWrite(TX_B, LOW);
-  pinMode(TY_A, INPUT);  pinMode(TY_B, INPUT);
-  delayMicroseconds(40);
-  int v = medianOf3(analogRead(TY_B), analogRead(TY_B), analogRead(TY_B));
-  tft.busPinsToOutput();
-  return v;
-}
-
-int touchReadY() {   // gradient across the Y plate, sensed on the X plate
-  pinMode(TY_A, OUTPUT); digitalWrite(TY_A, HIGH);
+// GPIO12 (LCD_RS) is the ONLY clean analog end this wiring gives us:
+//   - GPIO19 (LCD_D3) has no ADC at all.
+//   - GPIO2  (LCD_D4) carries the devkit's own blue LED. The LED clamps
+//     that node above the logic-low threshold, so it can neither be
+//     analogRead honestly nor ever "decay" -- that clamp, not a broken
+//     joint, is what produced the phantom tY=5000 "open circuit" and the
+//     dead rawX. Driving GPIO2 as an OUTPUT is perfectly fine; only
+//     floating or reading it lies to us.
+// So: drive the Y plate, always sense on GPIO12. That is exactly the
+// combination that tracked a finger on the very first bench run (raw
+// 459..715), and it needs no rewiring.
+int touchAxis() {
+  pinMode(TY_A, OUTPUT); digitalWrite(TY_A, HIGH);   // gradient across Y...
   pinMode(TY_B, OUTPUT); digitalWrite(TY_B, LOW);
   pinMode(TX_A, INPUT);  pinMode(TX_B, INPUT);
-  delayMicroseconds(40);
-  int v = medianOf3(analogRead(TX_B), analogRead(TX_B), analogRead(TX_B));
+  delayMicroseconds(60);
+  int v = medianOf3(analogRead(TX_B),                // ...read where it is clean
+                    analogRead(TX_B), analogRead(TX_B));
   tft.busPinsToOutput();
   return v;
-}
-
-// Software ohm-meter: charge one end of a plate, release it, time the drain
-// through the plate to the grounded other end. Solid path = a few us. A bad
-// dupont/solder joint = hundreds. 5000 = open. Catches the "gripping the
-// plastic, barely touching metal" fault that a simple connected-test passes.
-uint32_t decayMicros(uint8_t chargePin, uint8_t groundPin) {
-  pinMode(groundPin, OUTPUT); digitalWrite(groundPin, LOW);
-  pinMode(chargePin, OUTPUT); digitalWrite(chargePin, HIGH);
-  delayMicroseconds(50);
-  pinMode(chargePin, INPUT);
-  uint32_t t0 = micros();
-  while (digitalRead(chargePin) && (micros() - t0) < 5000) {}
-  uint32_t dt = micros() - t0;
-  tft.busPinsToOutput();
-  return dt;
-}
-
-// Francis's no-wires-touched proof: the ILI9486's data pins D3/D4 ARE the
-// film's Y-plate lines. If the chip's ID still reads back clean through
-// them, GPIO -> jumper -> shield pin is PROVEN healthy for every line, and
-// the break must be past the shield pins (film tail/busbar) -- established
-// in software alone.
-uint8_t rdByte() {
-  digitalWrite(PIN_RD, LOW);  delayMicroseconds(2);
-  uint8_t v = 0;
-  for (uint8_t i = 0; i < 8; i++) if (digitalRead(PIN_D[i])) v |= 1 << i;
-  digitalWrite(PIN_RD, HIGH); delayMicroseconds(2);
-  return v;
-}
-uint16_t readChipId() {          // expect 0x9486
-  writeCmd(0xD3);
-  for (uint8_t i = 0; i < 8; i++) pinMode(PIN_D[i], INPUT);
-  rdByte(); rdByte();            // dummy + 0x00
-  uint16_t id = (uint16_t)rdByte() << 8;
-  id |= rdByte();
-  tft.busPinsToOutput();
-  return id;
-}
-
-// Which Y end still reaches the sheet? Ground the whole healthy X plate,
-// charge ONE Y end, and let a firm stylus press drain it through the
-// contact point. Fast while pressed = that end reaches the film.
-uint32_t decayViaPress(uint8_t yEnd) {
-  pinMode(TX_A, OUTPUT); digitalWrite(TX_A, LOW);
-  pinMode(TX_B, OUTPUT); digitalWrite(TX_B, LOW);
-  uint8_t other = (yEnd == TY_A) ? TY_B : TY_A;
-  pinMode(other, INPUT);
-  pinMode(yEnd, OUTPUT); digitalWrite(yEnd, HIGH);
-  delayMicroseconds(50);
-  pinMode(yEnd, INPUT);
-  uint32_t t0 = micros();
-  while (digitalRead(yEnd) && (micros() - t0) < 5000) {}
-  uint32_t dt = micros() - t0;
-  tft.busPinsToOutput();
-  return dt;
 }
 
 // ---------------------------------------------------------------- demo UI --
@@ -276,91 +222,63 @@ void drawChrome() {
   lastBtn = -1;
 }
 
+// One status paint: the press flags, the raw number, and a marker bar that
+// slides with the stylus. Everything lives on the glass so the bench never
+// has to race a serial monitor.
+void showStatus(bool pressed, int raw, int pos) {
+  char line[48];
+  snprintf(line, sizeof(line), "p16=%d p12=%d  raw=%4d    ",
+           press16, press12, raw);
+  tft.setTextSize(2);
+  tft.setTextColor(pressed ? C_OK : C_TEXT, C_BG);
+  tft.setCursor(8, PAINT_TOP + 6);
+  tft.print(line);
+
+  const int by = PAINT_TOP + 40, bh = 60;
+  tft.fillRect(0, by, 480, bh, C_BG);
+  tft.drawRect(0, by, 480, bh, C_EDGE);
+  for (int i = 1; i < 3; i++) tft.drawFastVLine(i * 160, by, bh, C_EDGE);
+  if (pressed && pos >= 0)
+    tft.fillRect(constrain(pos - 7, 0, 466), by + 3, 14, bh - 6, C_OK);
+
+  int zone = (pressed && pos >= 0) ? pos / 160 : -1;
+  if (zone != lastBtn) {
+    for (int i = 0; i < 3; i++) drawButton(i, i == zone);
+    lastBtn = zone;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n>>> TftShieldDemo: ILI9486 + measured touch plates");
-  Serial.println(">>> press around; raw numbers below feed the calibration");
+  Serial.println("\n>>> TftShieldDemo: ILI9486, single-axis touch (sense on GPIO12)");
   tft.begin();
   drawChrome();
+  showStatus(false, 0, -1);
 }
 
 void loop() {
-  // heartbeat: report the touch machinery's state twice a second -- on the
-  // GLASS as well as serial, so the bench needs no timing games with the PC
-  static uint32_t lastBeat = 0;
-  if (millis() - lastBeat > 500) {
-    lastBeat = millis();
-    bool p = touchPressed();
-    int hx = touchReadX(), hy = touchReadY();
-    // path health, all four combinations so a one-ended fault shows itself:
-    uint32_t tX  = decayMicros(16, 12);   // X plate, charge D0 end
-    uint32_t tXr = decayMicros(12, 16);   // X plate, charge RS end
-    uint32_t tY  = decayMicros(2, 19);    // Y plate, charge D4 end  <- suspect
-    uint32_t tYr = decayMicros(19, 2);    // Y plate, charge D3 end
-    Serial.printf("heartbeat: p16=%d p12=%d rawX=%4d rawY=%4d  "
-                  "tX=%u/%u tY=%u/%u\n",
-                  press16, press12, hx, hy, tX, tXr, tY, tYr);
-    char line[48];
-    snprintf(line, sizeof(line), "p16=%d p12=%d X=%4d Y=%4d   ",
-             press16, press12, hx, hy);
-    tft.setTextSize(2);
-    tft.setTextColor(p ? C_OK : C_TEXT, C_BG);
-    tft.setCursor(8, PAINT_TOP + 2);
-    tft.print(line);
-    snprintf(line, sizeof(line), "tX=%4u/%-4u tY=%4u/%-4u   ",
-             tX, tXr, tY, tYr);
-    tft.setTextColor(C_TEXT, C_BG);
-    tft.setCursor(8, PAINT_TOP + 20);
-    tft.print(line);
-    // line 3: the chip's testimony + which Y end a press can still reach
-    uint16_t id = readChipId();
-    uint32_t k19 = decayViaPress(TY_A), k2 = decayViaPress(TY_B);
-    Serial.printf("           id=%04X k19=%u k2=%u\n", id, k19, k2);
-    snprintf(line, sizeof(line), "ID=%04X k19=%4u k2=%4u   ", id, k19, k2);
-    tft.setTextColor(id == 0x9486 ? C_OK : C_ACCENT, C_BG);
-    tft.setCursor(8, PAINT_TOP + 38);
-    tft.print(line);
+  static uint32_t lastIdle = 0;
+
+  if (!touchPressed()) {                    // idle: refresh twice a second
+    if (millis() - lastIdle > 500) { lastIdle = millis(); showStatus(false, 0, -1); }
+    delay(10);
+    return;
   }
 
-  if (!touchPressed()) { delay(15); return; }
-  int rx = touchReadX(), ry = touchReadY();
+  int raw = touchAxis();
   if (!touchPressed()) return;              // squeeze out release glitches
 
   // stretch the calibration window live as bigger/smaller raws appear
-  if (rx < RAW_X_MIN && rx > 50)   RAW_X_MIN = rx;
-  if (rx > RAW_X_MAX && rx < 4050) RAW_X_MAX = rx;
-  if (ry < RAW_Y_MIN && ry > 50)   RAW_Y_MIN = ry;
-  if (ry > RAW_Y_MAX && ry < 4050) RAW_Y_MAX = ry;
+  if (raw < RAW_Y_MIN && raw > 60)   RAW_Y_MIN = raw;
+  if (raw > RAW_Y_MAX && raw < 4040) RAW_Y_MAX = raw;
 
-  int px = map(rx, RAW_X_MIN, RAW_X_MAX, 0, 479);
-  int py = map(ry, RAW_Y_MIN, RAW_Y_MAX, 0, 319);
-#if SWAP_AXES
-  int t = px; px = map(py, 0, 319, 0, 479); py = map(t, 0, 479, 0, 319);
-#endif
-#if FLIP_X
-  px = 479 - px;
-#endif
+  int pos = constrain(map(raw, RAW_Y_MIN, RAW_Y_MAX, 0, 479), 0, 479);
 #if FLIP_Y
-  py = 319 - py;
+  pos = 479 - pos;
 #endif
-  px = constrain(px, 0, 479); py = constrain(py, 0, 319);
-
-  Serial.printf("raw %4d %4d  ->  screen %3d %3d\n", rx, ry, px, py);
-
-  if (py >= BTN_TOP) {                       // bottom row: the three buttons
-    int b = px / 160;
-    if (b != lastBtn) {
-      if (lastBtn >= 0) drawButton(lastBtn, false);
-      drawButton(b, true);
-      lastBtn = b;
-      Serial.printf("BUTTON: %s\n", b == 0 ? "LEFT" : b == 1 ? "MID" : "RIGHT");
-    }
-  } else if (py < 42 && px >= 432) {         // CLR zone
-    tft.fillRect(0, PAINT_TOP, 480, PAINT_BOT - PAINT_TOP, C_BG);
-    Serial.println("cleared");
-  } else if (py >= PAINT_TOP && py < PAINT_BOT) {
-    tft.fillRect(px - 3, py - 3, 7, 7, C_OK); // paint
-  }
-  delay(20);
+  Serial.printf("raw %4d -> pos %3d  (window %d..%d)\n",
+                raw, pos, RAW_Y_MIN, RAW_Y_MAX);
+  showStatus(true, raw, pos);
+  delay(25);
 }
