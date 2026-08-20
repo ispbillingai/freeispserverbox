@@ -183,6 +183,22 @@ int touchReadY() {   // gradient across the Y plate, sensed on the X plate
   return v;
 }
 
+// Software ohm-meter: charge one end of a plate, release it, time the drain
+// through the plate to the grounded other end. Solid path = a few us. A bad
+// dupont/solder joint = hundreds. 5000 = open. Catches the "gripping the
+// plastic, barely touching metal" fault that a simple connected-test passes.
+uint32_t decayMicros(uint8_t chargePin, uint8_t groundPin) {
+  pinMode(groundPin, OUTPUT); digitalWrite(groundPin, LOW);
+  pinMode(chargePin, OUTPUT); digitalWrite(chargePin, HIGH);
+  delayMicroseconds(50);
+  pinMode(chargePin, INPUT);
+  uint32_t t0 = micros();
+  while (digitalRead(chargePin) && (micros() - t0) < 5000) {}
+  uint32_t dt = micros() - t0;
+  tft.busPinsToOutput();
+  return dt;
+}
+
 // ---------------------------------------------------------------- demo UI --
 #define C_BG     RGB(13, 17, 23)
 #define C_BAR    RGB(22, 27, 34)
@@ -237,14 +253,25 @@ void loop() {
     lastBeat = millis();
     bool p = touchPressed();
     int hx = touchReadX(), hy = touchReadY();
-    Serial.printf("heartbeat: p16=%d p12=%d rawX=%4d rawY=%4d\n",
-                  press16, press12, hx, hy);
+    // path health, all four combinations so a one-ended fault shows itself:
+    uint32_t tX  = decayMicros(16, 12);   // X plate, charge D0 end
+    uint32_t tXr = decayMicros(12, 16);   // X plate, charge RS end
+    uint32_t tY  = decayMicros(2, 19);    // Y plate, charge D4 end  <- suspect
+    uint32_t tYr = decayMicros(19, 2);    // Y plate, charge D3 end
+    Serial.printf("heartbeat: p16=%d p12=%d rawX=%4d rawY=%4d  "
+                  "tX=%u/%u tY=%u/%u\n",
+                  press16, press12, hx, hy, tX, tXr, tY, tYr);
     char line[48];
     snprintf(line, sizeof(line), "p16=%d p12=%d X=%4d Y=%4d   ",
              press16, press12, hx, hy);
     tft.setTextSize(2);
     tft.setTextColor(p ? C_OK : C_TEXT, C_BG);
     tft.setCursor(8, PAINT_TOP + 2);
+    tft.print(line);
+    snprintf(line, sizeof(line), "tX=%4u/%-4u tY=%4u/%-4u   ",
+             tX, tXr, tY, tYr);
+    tft.setTextColor(C_TEXT, C_BG);
+    tft.setCursor(8, PAINT_TOP + 20);
     tft.print(line);
   }
 
