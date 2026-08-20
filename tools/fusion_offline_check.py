@@ -1044,6 +1044,9 @@ def check_tree(root, label):
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
+    c.check('CurvedLid: cable-notch skins are one layer ({:.1f}mm) - easy to '
+            'punch out'.format(cov_mod.SKIN), cov_mod.SKIN <= 0.25)
+
     # ---- the curved shoulder: one surface from panel to roof --------------
     shoulders = cover.solids('join', 'poly', 'yZ')
     c.check('CurvedLid: curved shoulder built (shell + 2 end caps)',
