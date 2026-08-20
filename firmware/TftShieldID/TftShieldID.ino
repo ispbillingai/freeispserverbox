@@ -11,40 +11,52 @@
  *       it is two resistive plates wired onto four of the same LCD lines.
  *       We find which four, then stream raw press readings.
  *
- *  WIRING -- shield label -> ESP32 GPIO. DevKit sits on the EXPANSION BOARD
- *  (or the rev-H brain board with EVERYTHING else unplugged -- screen, RFID,
- *  LEDs, buzzer, relay, reed all off their headers; same GPIOs, read the
- *  socket labels). Female-female dupont wires, 15 total:
+ *  WIRING -- rev-E/H brain board sockets -> shield pins. Screen, RFID and
+ *  MPU come OUT of their sockets first; we borrow J4 + J5 + U4 + J14 only
+ *  (Francis can't reach the bottom-row headers with the board mounted).
+ *  15 wires; socket label -> GPIO -> shield pin:
  *
- *    5V      -> 5V / VIN     (the AMS1117 on the shield makes its own 3.3V)
- *    GND     -> GND
- *    LCD_D0  -> 16      LCD_D1  -> 17      LCD_D2  -> 18      LCD_D3 -> 19
- *    LCD_D4  -> 21      LCD_D5  -> 22      LCD_D6  -> 23      LCD_D7 -> 25
- *    LCD_RD  -> 26      LCD_WR  -> 27      LCD_RS  -> 32      LCD_CS -> 33
- *    LCD_RST -> 4
+ *    J4 VDD  (5V rail) -> 5V     (the AMS1117 on the shield makes its 3.3V)
+ *    J4 GND            -> GND
+ *    J5 SDA  = 16 -> LCD_D0      J5 RST  = 17 -> LCD_D1
+ *    J4 SCL  = 18 -> LCD_D2      J5 MISO = 19 -> LCD_D3
+ *    U4 SDA  = 21 -> LCD_D4      U4 SCL  = 22 -> LCD_D5
+ *    J4 SDA  = 23 -> LCD_D6      J4 CS   =  5 -> LCD_D7
+ *    J4 DC   =  2 -> LCD_RD      J14 p7  = 14 -> LCD_WR
+ *    J4 BLK  = 33 -> LCD_RS      J4 RST  =  4 -> LCD_CS
+ *    J14 p8  = 12 -> LCD_RST
  *
- *    NOT CONNECTED: 3V3, SD_SCK, SD_DO, SD_DI, SD_SS (the SD slot -- only
- *    matters if we ever use the microSD card), and any unlabeled pins.
+ *    (J14 is the 2x5 header: odd pins left column, even pins right --
+ *     pin 7 = left column 4th down, pin 8 = right column 4th down.)
+ *
+ *    NOT CONNECTED: shield 3V3, SD_SCK, SD_DO, SD_DI, SD_SS (the SD slot --
+ *    only matters if we ever use the microSD card), and unlabeled pins.
+ *
+ *  GPIO 2, 5, 12 are boot-strap pins, but the LCD's inputs are high-
+ *  impedance so they boot normally. If an upload ever refuses with these
+ *  wires on, pull the J14 pin-8 wire (GPIO12), flash, put it back.
  *
  *  Board = "ESP32 Dev Module", COM6, hold BOOT while uploading.
  *  ESP32's 3.3V logic drives the shield fine -- no level shifter.
  *  The backlight is hardwired on the shield; there is no BL wire.
  */
 
-const uint8_t PIN_D[8] = {16, 17, 18, 19, 21, 22, 23, 25};  // LCD_D0..D7
-#define PIN_RD  26
-#define PIN_WR  27
-#define PIN_RS  32   // "register select" = data/command, the shield calls it RS
-#define PIN_CS  33
-#define PIN_RST 4
+const uint8_t PIN_D[8] = {16, 17, 18, 19, 21, 22, 23, 5};  // LCD_D0..D7
+#define PIN_RD  2    // strobes during the ID read -- onboard blue LED flickers
+#define PIN_WR  14
+#define PIN_RS  33   // "register select" = data/command, the shield calls it RS
+#define PIN_CS  4
+#define PIN_RST 12
 
 // Every signal line, for the touch probe (touch plates hide among these).
-const uint8_t ALL_PINS[13] = {16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 4};
+const uint8_t ALL_PINS[13] = {16, 17, 18, 19, 21, 22, 23, 5, 2, 14, 33, 4, 12};
 
-// Classic-ESP32 pins that can analogRead. 32/33 are ADC1 (work even with
-// WiFi on later); 25/26/27/4 are ADC2 (bench only, WiFi off -- which it is).
+// Classic-ESP32 pins that can analogRead. 33 is ADC1 (works even with WiFi
+// on later); 2/4/12/14 are ADC2 (bench only, WiFi off -- which it is). The
+// touch plates pair each analog-side line (WR/RS/CS) with a digital one, so
+// every plate has at least one readable end.
 bool adcCapable(uint8_t p) {
-  return p == 32 || p == 33 || p == 25 || p == 26 || p == 27 || p == 4;
+  return p == 33 || p == 2 || p == 4 || p == 12 || p == 14;
 }
 
 // ---------------------------------------------------------------- 8080 bus --
