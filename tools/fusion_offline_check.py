@@ -1044,8 +1044,21 @@ def check_tree(root, label):
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
 
-    c.check('CurvedLid: cable-notch skins are one layer ({:.1f}mm) - easy to '
-            'punch out'.format(cov_mod.SKIN), cov_mod.SKIN <= 0.25)
+    side_slots = [x for x in cover.solids('cut', 'rect', 'xY')
+                  if near(2 * x.shape[2], cov_mod.KNOCK_SLOT)
+                  and x.a1 > cov_mod.WALL]
+    top_slots = [x for x in cover.solids('cut', 'rect', 'xY')
+                 if near(2 * x.shape[3], cov_mod.KNOCK_SLOT)
+                 and x.a1 > cov_mod.WALL]
+    hinges = [x for x in cover.solids('cut', 'rect', 'xY')
+              if near(2 * x.shape[2], cov_mod.KNOCK_SLOT)
+              and near(x.a1, cov_mod.WALL - cov_mod.KNOCK_TAB_SKIN)]
+    n = len(cov_mod.RJ45_X) + 1
+    c.check('CurvedLid: {} KNOCKOUT notches - outline slotted through, blank '
+            'on two {:.2f}mm hinges (push to open, no cutting)'
+            .format(n, cov_mod.KNOCK_TAB_SKIN),
+            len(side_slots) == 2 * n and len(top_slots) == n
+            and len(hinges) == 2 * n and cov_mod.KNOCK_TAB_SKIN <= 0.4)
 
     # ---- the curved shoulder: one surface from panel to roof --------------
     shoulders = cover.solids('join', 'poly', 'yZ')

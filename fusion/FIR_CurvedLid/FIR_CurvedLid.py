@@ -54,11 +54,16 @@ COVER_Y_TO_SHELL_Z = 43.0
 # No alarm-horn vents here either: see HORN_VENTS in the shared contract.
 LEN, HEIGHT, DEPTH = 280.0, 80.0, 65.0
 WALL = 2.5
-# Pop-out skin over each cable notch: 0.1mm, the lightest (owner, 20 Aug).
-# That is below any layer height or nozzle width, so in practice the slicer
-# leaves these notches OPEN or bridges them with a wisp that falls to a
-# touch - which is the point: they were hard to cut out at 0.55.
-SKIN = 0.1
+# KNOCKOUT notches (owner, 20 Aug: "foil style... not a real layer, for easy
+# removing to add a cable").  Like the punch-outs on an electrical box: the
+# outline of each notch is slotted RIGHT THROUGH the wall, and the blank in
+# the middle stays full thickness, held only by two hair-thin hinge tabs.
+# Push with a fingertip: the hinges snap, the blank pops out clean.  Unused
+# notches stay closed and solid.
+KNOCK_SLOT = 0.7                  # the through perforation around the blank
+KNOCK_H = 10.0                    # blank height from the face's lower edge
+KNOCK_TAB_H = 1.6                 # hinge tab length, one per side, at the top
+KNOCK_TAB_SKIN = 0.35             # hinge thickness - snaps at a push
 HOLE_D = 7.0
 PWR_D = 7.0
 NOTCH_H = 7.0
@@ -131,7 +136,7 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v8: cable-notch skins at 0.1mm, the lightest - effectively pre-opened; SEAMLESS - the shoulder lands FLUSH with the roof outer '
+VERSION = ('v9: KNOCKOUT cable notches - outline perforated right through, blank held by two 0.35mm hinges, push to pop out clean (no cutting); SEAMLESS - the shoulder lands FLUSH with the roof outer '
            'surface (Z120), tip butting the roof edge with one 0.3mm shadow '
            'line, so you cannot tell cover from cap. ASSEMBLY ORDER CHANGED: '
            'slide the cover on LAST, after the cap is closed - its hard end '
@@ -236,15 +241,26 @@ def build(comp):
     # Front face lies on Z=0 so the port notches cut reliably through it.
     front = box(comp, 0, 0, 0, LEN, HEIGHT, WALL, NEW).bodies.item(0)
     front.name = 'FIR Lid Cover (4 sides)'
-    depth = (WALL - SKIN) + 1.0
     bottom = -HEIGHT / 2.0
-    top_y = bottom + NOTCH_H
 
     def notch(cx, width):
-        # An arch notch opens at the face's lower edge and retains a pop-out skin.
-        box(comp, cx, (bottom - 2.0 + top_y) / 2.0, -1.0, width,
-            top_y - (bottom - 2.0), depth, CUT, [front])
-        cyl(comp, cx, top_y, -1.0, width, depth, CUT, [front])
+        # KNOCKOUT: perforate the outline right through; the blank stays
+        # full-thickness on two thin hinge tabs at its top corners.
+        top = bottom + KNOCK_H
+        side = width / 2.0 + KNOCK_SLOT / 2.0
+        slot_h = KNOCK_H - KNOCK_TAB_H + 2.0          # from below the edge
+        for sxn in (-1.0, 1.0):
+            # side slots, stopping short of the hinge zone
+            box(comp, cx + sxn * side, bottom - 2.0 + slot_h / 2.0, -1.0,
+                KNOCK_SLOT, slot_h, WALL + 2.0, CUT, [front])
+            # hinge relief: same line, but leaves KNOCK_TAB_SKIN at the
+            # inner face - this is the "foil" that snaps
+            box(comp, cx + sxn * side, top - KNOCK_TAB_H / 2.0, -1.0,
+                KNOCK_SLOT, KNOCK_TAB_H, WALL + 1.0 - KNOCK_TAB_SKIN,
+                CUT, [front])
+        # top slot, right through, connecting the two side slots' hinge ends
+        box(comp, cx, top + KNOCK_SLOT / 2.0, -1.0,
+            width + 2.0 * KNOCK_SLOT, KNOCK_SLOT, WALL + 2.0, CUT, [front])
 
     for rx in RJ45_X:
         notch(rx, HOLE_D)
