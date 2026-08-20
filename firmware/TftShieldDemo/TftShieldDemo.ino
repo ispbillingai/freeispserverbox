@@ -145,12 +145,25 @@ int medianOf3(int a, int b, int c) {
 }
 
 bool touchPressed() {
-  pinMode(TX_A, OUTPUT); digitalWrite(TX_A, LOW);   // ground the X plate
+  // ground the Y plate, watch the X plate's analog end: GPIO12 has no LED
+  // hanging off it (GPIO2 does -- the devkit's blue LED loads that node)
+  pinMode(TY_A, OUTPUT); digitalWrite(TY_A, LOW);
+  pinMode(TY_B, OUTPUT); digitalWrite(TY_B, LOW);
+  pinMode(TX_B, INPUT_PULLUP);                      // X sense floats high...
+  pinMode(TX_A, INPUT);
+  delayMicroseconds(300);                           // long dupont run = slow rise
+  bool pressed = (digitalRead(TX_B) == LOW);        // ...unless a finger joins them
+  tft.busPinsToOutput();
+  return pressed;
+}
+
+bool touchPressedAlt() {   // same test, other direction: ground X, sense Y
+  pinMode(TX_A, OUTPUT); digitalWrite(TX_A, LOW);
   pinMode(TX_B, OUTPUT); digitalWrite(TX_B, LOW);
-  pinMode(TY_B, INPUT_PULLUP);                      // Y sense floats high...
+  pinMode(TY_B, INPUT_PULLUP);
   pinMode(TY_A, INPUT);
-  delayMicroseconds(80);
-  bool pressed = (digitalRead(TY_B) == LOW);        // ...unless a finger joins them
+  delayMicroseconds(300);
+  bool pressed = (digitalRead(TY_B) == LOW);
   tft.busPinsToOutput();
   return pressed;
 }
@@ -222,6 +235,22 @@ void setup() {
 }
 
 void loop() {
+  // heartbeat: report the touch machinery's state twice a second -- on the
+  // GLASS as well as serial, so the bench needs no timing games with the PC
+  static uint32_t lastBeat = 0;
+  if (millis() - lastBeat > 500) {
+    lastBeat = millis();
+    bool pA = touchPressed(), pB = touchPressedAlt();
+    int hx = touchReadX(), hy = touchReadY();
+    Serial.printf("heartbeat: pA=%d pB=%d rawX=%4d rawY=%4d\n", pA, pB, hx, hy);
+    char line[48];
+    snprintf(line, sizeof(line), "pA=%d pB=%d X=%4d Y=%4d   ", pA, pB, hx, hy);
+    tft.setTextSize(2);
+    tft.setTextColor((pA || pB) ? C_OK : C_TEXT, C_BG);
+    tft.setCursor(8, PAINT_TOP + 2);
+    tft.print(line);
+  }
+
   if (!touchPressed()) { delay(15); return; }
   int rx = touchReadX(), ry = touchReadY();
   if (!touchPressed()) return;              // squeeze out release glitches
