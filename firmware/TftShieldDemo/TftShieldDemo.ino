@@ -49,13 +49,13 @@ static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};  // LCD_D0..D7
 // ---- orientation + calibration -- tune from the serial numbers ----
 #define MADCTL_VAL 0x28   // landscape 480x320. try 0xE8 if upside down
 #define USE_INVERT 0
-#define FLIP_POS   1      // raw counts DOWN as you move right, so invert it
 
-// Auto-calibration. Start deliberately inverted and let the first swipe
-// discover the real window -- the fixed 300..3700 guess is what squashed
-// the whole travel into half the bar and made the ends read wrong.
-int RAW_MIN = 4095, RAW_MAX = 0;
-#define CAL_SPAN_MIN 250   // below this the window is not trustworthy yet
+// Guided calibration: the film's raw curve turned out non-linear (it goes
+// flat left of mid-glass), so no assumed window can map it. Instead the
+// sketch asks for one held tap on each button, learns the film's real
+// signature at those three spots, and classifies presses by nearest match.
+int calR = -1, calM = -1, calL = -1;
+int calState = 0;         // 0=learning RIGHT  1=MID  2=LEFT  3=running
 
 #define RGB(r,g,b) ((uint16_t)((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|((b)>>3)))
 
@@ -227,7 +227,11 @@ void drawChrome() {
 // One status paint: the press flags, the raw number, and a marker bar that
 // slides with the stylus. Everything lives on the glass so the bench never
 // has to race a serial monitor.
-void showStatus(bool pressed, int raw, int pos) {
+const char *CAL_PROMPTS[3] = {"HOLD stylus on RIGHT btn",
+                              "HOLD stylus on MID btn  ",
+                              "HOLD stylus on LEFT btn "};
+
+void showStatus(bool pressed, int raw, int pos, int zone) {
   char line[48];
   snprintf(line, sizeof(line), "p16=%d p12=%d  raw=%4d    ",
            press16, press12, raw);
@@ -236,10 +240,12 @@ void showStatus(bool pressed, int raw, int pos) {
   tft.setCursor(8, PAINT_TOP + 6);
   tft.print(line);
 
-  bool calibrated = (RAW_MAX - RAW_MIN) >= CAL_SPAN_MIN;
-  if (calibrated) snprintf(line, sizeof(line), "window %4d..%-4d      ", RAW_MIN, RAW_MAX);
-  else            snprintf(line, sizeof(line), "SWIPE EDGE TO EDGE    ");
-  tft.setTextColor(calibrated ? C_TEXT : C_ACCENT, C_BG);
+  if (calState < 3)
+    snprintf(line, sizeof(line), "%s", CAL_PROMPTS[calState]);
+  else
+    snprintf(line, sizeof(line), "L=%4d M=%4d R=%4d %s", calL, calM, calR,
+             (abs(calL - calM) < 150 || abs(calM - calR) < 150) ? "OVLP!" : "     ");
+  tft.setTextColor(calState < 3 ? C_ACCENT : C_TEXT, C_BG);
   tft.setCursor(8, PAINT_TOP + 24);
   tft.print(line);
 
@@ -250,7 +256,6 @@ void showStatus(bool pressed, int raw, int pos) {
   if (pressed && pos >= 0)
     tft.fillRect(constrain(pos - 7, 0, 466), by + 3, 14, bh - 6, C_OK);
 
-  int zone = (pressed && pos >= 0) ? pos / 160 : -1;
   if (zone != lastBtn) {
     for (int i = 0; i < 3; i++) drawButton(i, i == zone);
     lastBtn = zone;
@@ -260,37 +265,56 @@ void showStatus(bool pressed, int raw, int pos) {
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n>>> TftShieldDemo: ILI9486, single-axis touch (sense on GPIO12)");
+  Serial.println("\n>>> TftShieldDemo: ILI9486, guided touch calibration");
   tft.begin();
   drawChrome();
-  showStatus(false, 0, -1);
+  showStatus(false, 0, -1, -1);
 }
 
 void loop() {
   static uint32_t lastIdle = 0;
+  static bool needRelease = false;
+  static int nSamp = 0;
+  static int samp[12];
 
   if (!touchPressed()) {                    // idle: refresh twice a second
-    if (millis() - lastIdle > 500) { lastIdle = millis(); showStatus(false, 0, -1); }
+    needRelease = false;
+    nSamp = 0;
+    if (millis() - lastIdle > 500) { lastIdle = millis(); showStatus(false, 0, -1, -1); }
     delay(10);
     return;
   }
+  if (needRelease) { delay(10); return; }   // wait for a fresh press
 
   int raw = touchAxis();
   if (!touchPressed()) return;              // squeeze out release glitches
   if (raw < 40 || raw > 4050) return;       // rail readings are not positions
 
-  if (raw < RAW_MIN) RAW_MIN = raw;         // the swipe teaches us the window
-  if (raw > RAW_MAX) RAW_MAX = raw;
-
-  int pos = -1;
-  if (RAW_MAX - RAW_MIN >= CAL_SPAN_MIN) {
-    pos = constrain(map(raw, RAW_MIN, RAW_MAX, 0, 479), 0, 479);
-#if FLIP_POS
-    pos = 479 - pos;
-#endif
+  if (calState < 3) {                       // learning this button's signature
+    samp[nSamp++] = raw;
+    if (nSamp >= 12) {
+      for (int i = 1; i < 12; i++)          // sort, take the median
+        for (int j = i; j > 0 && samp[j] < samp[j - 1]; j--) {
+          int t = samp[j]; samp[j] = samp[j - 1]; samp[j - 1] = t;
+        }
+      int med = samp[6];
+      if      (calState == 0) calR = med;
+      else if (calState == 1) calM = med;
+      else                    calL = med;
+      Serial.printf("calibrated %s = %d\n",
+                    calState == 0 ? "RIGHT" : calState == 1 ? "MID" : "LEFT", med);
+      calState++; nSamp = 0; needRelease = true;
+      showStatus(false, med, -1, -1);       // shows the next prompt
+    }
+    delay(20);
+    return;
   }
-  Serial.printf("raw %4d -> pos %3d  (window %d..%d)\n",
-                raw, pos, RAW_MIN, RAW_MAX);
-  showStatus(true, raw, pos);
+
+  // classify by nearest learned signature -- immune to the film's flat zone
+  int dl = abs(raw - calL), dm = abs(raw - calM), dr = abs(raw - calR);
+  int zone = (dl <= dm && dl <= dr) ? 0 : (dm <= dr) ? 1 : 2;
+  int pos = constrain(map(raw, calL, calR, 80, 400), 0, 479);
+  Serial.printf("raw %4d -> zone %d pos %3d\n", raw, zone, pos);
+  showStatus(true, raw, pos, zone);
   delay(25);
 }
