@@ -22,12 +22,12 @@
  *    J4 SCL  = 18 -> LCD_D2      J5 MISO = 19 -> LCD_D3
  *    U4 SDA  = 21 -> LCD_D4      U4 SCL  = 22 -> LCD_D5
  *    J4 SDA  = 23 -> LCD_D6      J4 CS   =  5 -> LCD_D7
- *    J4 DC   =  2 -> LCD_RD      J14 p7  = 14 -> LCD_WR
- *    J4 BLK  = 33 -> LCD_RS      J4 RST  =  4 -> LCD_CS
- *    J14 p8  = 12 -> LCD_RST
+ *    J4 DC   =  2 -> LCD_RD      J14 D14 = 14 -> LCD_WR
+ *    J14 D12 = 12 -> LCD_RS      J4 BLK  = 33 -> LCD_CS
+ *    J4 RST  =  4 -> LCD_RST
  *
- *    (J14 is the 2x5 header: odd pins left column, even pins right --
- *     pin 7 = left column 4th down, pin 8 = right column 4th down.)
+ *    (J14's holes are silkscreen-labeled -- use the ones printed D14 and
+ *     D12, side by side in the 4th row.)
  *
  *    NOT CONNECTED: shield 3V3, SD_SCK, SD_DO, SD_DI, SD_SS (the SD slot --
  *    only matters if we ever use the microSD card), and unlabeled pins.
@@ -44,9 +44,9 @@
 const uint8_t PIN_D[8] = {16, 17, 18, 19, 21, 22, 23, 5};  // LCD_D0..D7
 #define PIN_RD  2    // strobes during the ID read -- onboard blue LED flickers
 #define PIN_WR  14
-#define PIN_RS  33   // "register select" = data/command, the shield calls it RS
-#define PIN_CS  4
-#define PIN_RST 12
+#define PIN_RS  12   // "register select" = data/command, the shield calls it RS
+#define PIN_CS  33
+#define PIN_RST 4
 
 // Every signal line, for the touch probe (touch plates hide among these).
 const uint8_t ALL_PINS[13] = {16, 17, 18, 19, 21, 22, 23, 5, 2, 14, 33, 4, 12};
