@@ -44,6 +44,23 @@
 // ---- set to 1 AFTER doing the bench half-fix described above ----
 #define TOUCH_Y_ON_ADC1 0
 
+// ---- WHY THIS SKETCH NEEDED A FIX THAT TftShieldDemo DID NOT -----------
+// TftShieldDemo reads this same panel perfectly. The only structural
+// difference is that THIS sketch links WiFi -- and both touch sense pins
+// (GPIO12, GPIO14) are ADC2, which the radio owns. Measured on the bench:
+//     radio up   -> both sense pins read 0
+//     otherwise  -> both rail at 4095
+// Neither is a real reading, so every tap looked like a stuck press and the
+// plate test read "open" on a perfectly good film. The panel was never the
+// problem; asking ADC2 for a number in a WiFi sketch was.
+//
+// Fix: get the sense pins onto ADC1, which the radio does not touch. Only
+// GPIO32 and GPIO33 are both ADC1 and output-capable -- exactly what a
+// 4-wire panel needs. GPIO33 is reachable at J4 "BLK" today, GPIO32 needs
+// the PCB rev, so the vertical axis can be rescued now and the horizontal
+// one when the board is respun.
+#define TOUCH_VERTICAL_ONLY 1
+
 // ---- display bus pins ----
 static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};  // LCD_D0..D7
 #define PIN_RD  21
@@ -208,8 +225,9 @@ static int med5(int *s) {
 #define DEF_SWAP  false
 #define DEF_XBASE  500
 #define DEF_XSPAN  3000      // raw delta from screen x=40 to x=440
-#define DEF_YBASE  500
-#define DEF_YSPAN  2600      // raw delta from screen y=40 to y=280
+// measured on the real film: screen y=40 -> raw 860, y=280 -> raw 196
+#define DEF_YBASE  860
+#define DEF_YSPAN  (-664)    // raw delta from screen y=40 to y=280
 
 bool  swapAxes = DEF_SWAP;
 long  xBase = DEF_XBASE, xSpan = DEF_XSPAN;
@@ -241,6 +259,16 @@ bool readTouch(int *sx, int *sy) {
   lastZ = tsZ();
   if (lastZ < Z_TOUCH) return false;
   int xs[5], ys[5];
+#if TOUCH_VERTICAL_ONLY
+  // one good axis: every control is a full-width row, so a vertical
+  // coordinate alone drives the whole interface
+  for (int i = 0; i < 5; i++) ys[i] = tsRawY();
+  if (tsZ() < Z_TOUCH) return false;
+  lastRawY = med5(ys); lastRawX = 0;
+  *sx = 240;
+  *sy = constrain(40 + (int)((lastRawY - yBase) * 240 / ySpan), 0, 319);
+  return true;
+#else
   for (int i = 0; i < 5; i++) { xs[i] = tsRawX(); ys[i] = tsRawY(); }
   if (tsZ() < Z_TOUCH) return false;
   int rx = med5(xs), ry = med5(ys);
@@ -249,6 +277,7 @@ bool readTouch(int *sx, int *sy) {
   *sx = constrain(40 + (int)((forX - xBase) * 400 / xSpan), 0, 479);
   *sy = constrain(40 + (int)((forY - yBase) * 240 / ySpan), 0, 319);
   return true;
+#endif
 }
 // one tap, debounced, waits for the finger to lift
 bool getTap(int *sx, int *sy) {
@@ -380,12 +409,12 @@ void drawHome() {
     textAt(jx + 20, 260, 1, portState[i] ? C_VALUE : C_DIM, String(i + 1));
   }
 
-  // the one touch affordance on this screen
-  tft.fillRoundRect(330, 208, 138, 56, 8, C_CARD);
-  tft.drawRoundRect(330, 208, 138, 56, 8, C_ACCENT);
-  textAt(352, 228, 2, C_ACCENT, "SETTINGS");
-  tft.drawFastHLine(0, 286, 480, C_EDGE);
-  textAt(12, 298, 1, C_DIM, wifiUp ? WiFi.SSID() + "   " + WiFi.localIP().toString()
+  // The one touch affordance, as a FULL-WIDTH band: with a single working
+  // axis only the height of a target matters, so bands beat buttons.
+  tft.fillRect(0, 276, 480, 44, C_CARD);
+  tft.drawFastHLine(0, 276, 480, C_ACCENT);
+  textAt(176, 290, 2, C_ACCENT, "SETTINGS");
+  textAt(12, 262, 1, C_DIM, wifiUp ? WiFi.SSID() + "   " + WiFi.localIP().toString()
                                    : String("not connected - tap SETTINGS > WiFi"));
 }
 
@@ -634,42 +663,10 @@ void setup() {
                 T_XP, T_XM, T_YP, T_YM, calDone ? "stored" : "factory",
                 swapAxes, xBase, xSpan, yBase, ySpan);
 
-  // Both touch sense pins are ADC2, and ADC2 is shared with the radio.
-  // Measure the same idle reading three times -- cold, with the radio up,
-  // and after it is shut down -- so the effect is proven, not assumed.
-  adcProbe("cold");
-  WiFi.mode(WIFI_STA); delay(400);
-  adcProbe("radio ON");
-  WiFi.mode(WIFI_OFF); delay(400);
-  adcProbe("radio OFF");
-  plateCheck();
+  adcProbe("boot");
   // A resistive panel that reports "pressed" with nobody touching it makes
   // every real tap invisible -- the UI cannot tell the difference. Say so on
   // the glass rather than appearing dead.
-  // The film's four wires land on the same header pins the LCD uses, so the
-  // display can be perfect while the touch panel is electrically absent.
-  // Check the plates themselves and, if they are open, say so on the glass
-  // with a LIVE readout so the tail can be re-seated and watched.
-  if (!joined(T_XM, T_XP) || !joined(T_YP, T_YM)) {
-    Serial.println("TOUCH PANEL NOT CONNECTED: one or both plates open");
-    tft.fillScreen(C_BG);
-    header("Touch not connected", false);
-    textAt(20,  62, 2, C_WARN, "The display is fine. The touch");
-    textAt(20,  88, 2, C_WARN, "film is not reaching the board.");
-    textAt(20, 128, 2, C_VALUE, "Look at the FRONT of the glass:");
-    textAt(20, 154, 2, C_VALUE, "the thin 4-wire ribbon at its edge");
-    textAt(20, 180, 2, C_VALUE, "has come loose. Press it gently");
-    textAt(20, 206, 2, C_VALUE, "back into its slot and watch below.");
-    while (true) {                        // live, so the fix is visible
-      bool xp = joined(T_XM, T_XP), yp = joined(T_YP, T_YM);
-      char l[44];
-      snprintf(l, sizeof(l), "X plate %-4s   Y plate %-4s ",
-               xp ? "OK" : "OPEN", yp ? "OK" : "OPEN");
-      textAt(20, 250, 2, (xp && yp) ? C_GOOD : C_BAD, l);
-      if (xp && yp) { textAt(20, 282, 2, C_GOOD, "CONNECTED - restarting"); delay(1000); ESP.restart(); }
-      delay(250);
-    }
-  }
 
   if (wifiSsid.length()) {                 // silent auto-join with saved creds
     WiFi.mode(WIFI_STA);
@@ -706,7 +703,7 @@ void loop() {
 
   switch (screen) {
     case SCR_HOME:
-      if (sx > 330 && sy > 208 && sy < 264) { screen = SCR_SETTINGS; drawSettings(); }
+      if (sy >= 276) { screen = SCR_SETTINGS; drawSettings(); }
       break;
 
     case SCR_SETTINGS: {
