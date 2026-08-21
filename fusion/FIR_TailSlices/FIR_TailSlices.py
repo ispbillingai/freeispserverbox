@@ -29,7 +29,14 @@ import sys
 
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
-TAIL_KEEP_Y = 70.0                # keep shell Y >= this; everything else goes
+TAIL_KEEP_Y = 70.0                # keep shell Y >= this (the bottom end)
+TAIL_KEEP_X = 60.0                # ...and only the |X| >= this corner: the
+                                  # slices are small CORNER BLOCKS now
+                                  # (~80 x 70mm each), one body per print.
+                                  # The tub keeps its +X corner; the cap
+                                  # keeps its local -X corner, which the
+                                  # assembly flip lands on that SAME corner,
+                                  # so the two blocks mate exactly.
 
 CM = 0.1
 
@@ -67,13 +74,11 @@ def _load_active_builder(script_name):
     raise ImportError('{} builder not found beside FIR_TailSlices'.format(script_name))
 
 
-def tail_cut(comp, body):
-    """Cut away everything below the keep-line, in the part's own frame."""
+def _cut_rect(comp, body, x0, x1, y0, y1):
     sk = comp.sketches.add(comp.xYConstructionPlane)
-    # a huge rectangle over everything with y < TAIL_KEEP_Y
     sk.sketchCurves.sketchLines.addCenterPointRectangle(
-        adsk.core.Point3D.create(0, mm((TAIL_KEEP_Y - 400.0) / 2.0), 0),
-        adsk.core.Point3D.create(mm(250.0), mm(TAIL_KEEP_Y), 0))
+        adsk.core.Point3D.create(mm((x0 + x1) / 2.0), mm((y0 + y1) / 2.0), 0),
+        adsk.core.Point3D.create(mm(x1), mm(y1), 0))
     f = comp.features.extrudeFeatures
     ei = f.createInput(sk.profiles.item(0), CUT)
     ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
@@ -81,6 +86,17 @@ def tail_cut(comp, body):
     ei.setDistanceExtent(False, adsk.core.ValueInput.createByReal(mm(200.0)))
     ei.participantBodies = [body]
     f.add(ei)
+
+
+def tail_cut(comp, body, keep_x_sign):
+    """Keep only the bottom-end CORNER, in the part's own frame."""
+    # everything below the keep line goes
+    _cut_rect(comp, body, -250.0, 250.0, -400.0, TAIL_KEEP_Y)
+    # ...and everything on the far side of the keep-X line goes too
+    if keep_x_sign > 0:
+        _cut_rect(comp, body, -400.0, TAIL_KEEP_X, -400.0, 400.0)
+    else:
+        _cut_rect(comp, body, -TAIL_KEEP_X, 400.0, -400.0, 400.0)
 
 
 def translate_body(comp, body, dx, dy, dz):
@@ -121,34 +137,37 @@ def run(context):
         shell_source = _load_active_builder('FIR_Shell')
         del shell_source.SKIPPED[:]
         tub = shell_source.build(comp)
-        tail_cut(comp, tub)
-        tub.name = ('TAIL 1: TUB bottom end (real FIR_Shell, kept Y>={:.0f}) '
-                    '- all 6 BottomLid bosses + both Y85 cap bosses'
-                    .format(TAIL_KEEP_Y))
+        tail_cut(comp, tub, +1)
+        tub.name = ('TAIL 1: TUB corner (real FIR_Shell, X>={:.0f} Y>={:.0f}) '
+                    '- 2 BottomLid bosses + the Y85 cap boss + rail'
+                    .format(TAIL_KEEP_X, TAIL_KEEP_Y))
 
         # 2. the REAL top lid, then the same cut (its print frame keeps the
         #    front at +Y, so the same line slices the same assembled region)
         toplid_source = _load_active_builder('FIR_TopLid')
         del toplid_source.SKIPPED[:]
         cap = toplid_source.build_top_lid(comp, 0.0)
-        tail_cut(comp, cap)
-        cap.name = ('TAIL 2: TOP LID bottom end (real FIR_TopLid, kept '
-                    'Y>={:.0f}) - seat pads, screen window, front wall'
-                    .format(TAIL_KEEP_Y))
+        # the cap keeps its local -X corner: the assembly flip lands it on
+        # the same corner the tub block keeps, so the two blocks mate
+        tail_cut(comp, cap, -1)
+        cap.name = ('TAIL 2: TOP LID corner (real FIR_TopLid, local X<=-{:.0f} '
+                    'Y>={:.0f}) - seat pad, front wall, chamfer, roof edge'
+                    .format(TAIL_KEEP_X, TAIL_KEEP_Y))
         translate_body(comp, cap, 330.0, 0.0, 0.0)
 
         app.activeViewport.fit()
         ui.messageBox(
-            'FIR_TailSlices built 2 REAL tail slices (cut at shell Y{:.0f}).\n\n'
-            'Print these two plus the REAL FIR_BottomLid and REAL FIR_CurvedLid, '
-            'then close the whole bottom end:\n'
-            ' 1. screw the BottomLid onto TAIL 1 - all six screws;\n'
-            ' 2. slide the CurvedLid home - click, flush stop, lock screws;\n'
-            ' 3. drop TAIL 2 over the wall - slide fit + two Y85 screws at Z72;\n'
-            ' 4. the cover shoulder must land on TAIL 2\'s roof edge with the '
+            'FIR_TailSlices built 2 small CORNER BLOCKS cut from the REAL '
+            'parts (~80x70mm each). Export and print them SEPARATELY: '
+            'right-click a body > Save As Mesh.\n\n'
+            'The corner test:\n'
+            ' 1. screw the real BottomLid end onto TAIL 1 (2 screws);\n'
+            ' 2. slide the real CurvedLid end onto its rail;\n'
+            ' 3. drop TAIL 2 over TAIL 1 wall - slide fit, chamfer, and the '
+            'Y85 screw must line up at Z72 through the pad;\n'
+            ' 4. the cover shoulder must land on TAIL 2 roof edge with the '
             '0.3mm hairline.\n\n'
-            'Anything that fights = one contract number + a reprint of a slice, '
-            'never a full 280mm part.')
+            'Anything that fights = one contract number + a corner reprint.')
     except:  # noqa
         if ui:
             ui.messageBox('FIR_TailSlices failed:\n{}'.format(traceback.format_exc()))

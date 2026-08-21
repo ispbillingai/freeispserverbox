@@ -1208,25 +1208,28 @@ def check_tree(root, label):
         keep = ts_mod.TAIL_KEEP_Y
         # material probes: solid in the kept strip, EMPTY below the line
         # (the stub's aabb only sums joins, so probe the actual CSG)
-        ok_cut = (tub_t.material_at((138.5, 100.0, 40.0))      # side wall kept
-                  and not tub_t.material_at((0.0, -138.5, 40.0))   # back wall gone
-                  and not tub_t.material_at((0.0, 0.0, 1.5))       # mid floor gone
+        ok_cut = (tub_t.material_at((138.5, 100.0, 40.0))      # +X wall kept
+                  and not tub_t.material_at((0.0, -138.5, 40.0))   # back gone
+                  and not tub_t.material_at((0.0, 130.0, 1.5))     # mid-front gone
+                  and not tub_t.material_at((-138.5, 100.0, 40.0))  # -X wall gone
                   and not tub_t.material_at((138.5, keep - 5.0, 40.0))
-                  and cap_t.material_at((330.0 + 141.7, 100.0, 30.0))
-                  and not cap_t.material_at((330.0 + 141.7, -100.0, 30.0))
-                  and not cap_t.material_at((330.0, 0.0, 1.5)))
+                  and cap_t.material_at((330.0 - 141.7, 100.0, 30.0))
+                  and not cap_t.material_at((330.0 + 141.7, 100.0, 30.0))
+                  and not cap_t.material_at((330.0 - 141.7, -100.0, 30.0)))
         c.check('TailSlices: everything below shell Y{:.0f} is cut away - the '
                 'slices are the genuine last stretch of each part'
                 .format(keep), ok_cut)
-        tub_tail = tails[0]
-        c.check('TailSlices: all 6 BottomLid pilots and both Y85 cap pilots '
-                'survive in the tub tail',
-                len([x for x in tub_tail.solids('cut', 'circle', 'xZ')
-                     if near(x.shape[2],
-                             interface.BOTTOM_LID_BOSS_PILOT_D / 2.0)]) == 6
-                and len([x for x in tub_tail.solids('cut', 'circle', 'yZ')
-                         if near(x.shape[2],
-                                 interface.CAP_BOSS_PILOT_D / 2.0)]) == 4)
+        lid_pilots = [x for x in tub_t.solids('cut', 'circle', 'xZ')
+                      if near(x.shape[2],
+                              interface.BOTTOM_LID_BOSS_PILOT_D / 2.0)
+                      and x.world_centre()[0] > ts_mod.TAIL_KEEP_X]
+        cap_pilots = [x for x in tub_t.solids('cut', 'circle', 'yZ')
+                      if near(x.shape[2], interface.CAP_BOSS_PILOT_D / 2.0)
+                      and x.world_centre()[1] > keep
+                      and (x.a0 + x.a1) / 2.0 > ts_mod.TAIL_KEEP_X]
+        c.check('TailSlices: the corner keeps 2 BottomLid pilots + the Y85 '
+                'cap pilot on its wall',
+                len(lid_pilots) == 2 and len(cap_pilots) == 1)
 
     # ---------------- FIR_ShellCheck, both modes -------------------------
     for shells_only in (True, False):
