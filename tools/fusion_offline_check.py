@@ -1180,9 +1180,21 @@ def check_tree(root, label):
     c.check('FIR_FitCoupons run() completed',
             msgs and 'failed' not in msgs[-1])
     coupon_names = [b.name for b in fc_design.rootComponent.bodies_list]
-    c.check('FitCoupons: all 6 coupon bodies built',
-            sum(1 for n in coupon_names if n.startswith('COUPON')) == 6,
+    c.check('FitCoupons: all 8 coupon bodies built (incl. the front-corner '
+            'set of tub + top lid)',
+            sum(1 for n in coupon_names if n.startswith('COUPON')) == 8,
             '; '.join(sorted(coupon_names)))
+    corner = [b for b in fc_design.rootComponent.bodies_list
+              if b.name.startswith('COUPON 4')]
+    c.check('FitCoupons: corner slices carry the real interfaces - tub boss '
+            'pilots, cap seat pad, roof edge for the shoulder',
+            len(corner) == 2
+            and any(near(x.shape[2], interface.CAP_BOSS_PILOT_D / 2.0)
+                    for x in corner[0].solids('cut', 'circle', 'yZ')
+                    + corner[1].solids('cut', 'circle', 'yZ'))
+            and any(near(x.shape[2], interface.M3_SEAT_PAD_D / 2.0)
+                    for x in corner[0].solids('join', 'circle', 'yZ')
+                    + corner[1].solids('join', 'circle', 'yZ')))
 
     # ---------------- FIR_ShellCheck, both modes -------------------------
     for shells_only in (True, False):

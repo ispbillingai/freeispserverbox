@@ -25,6 +25,7 @@
 # v3; if those parts change shape, re-check this file.
 
 import importlib.util
+import math
 import os
 import sys
 
@@ -118,6 +119,44 @@ def cyl_y(comp, cx, cz, ycenter, d, span, op, parts=None):
     if abs(ycenter) > 1e-9:
         ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
             adsk.core.ValueInput.createByReal(mm(ycenter)))
+    ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
+    if parts:
+        ei.participantBodies = parts
+    return f.add(ei)
+
+
+def cyl_x(comp, cy, cz, xcenter, d, span, op, parts=None):
+    # cylinder along X (circle on the yZ plane).  MEASURED yZ convention
+    # (FIR_PlaneProbe v3): sketch-U is world -Z, sketch-V is world +Y.
+    sk = comp.sketches.add(comp.yZConstructionPlane)
+    sk.sketchCurves.sketchCircles.addByCenterRadius(
+        adsk.core.Point3D.create(mm(-cz), mm(cy), 0), mm(d / 2.0))
+    f = comp.features.extrudeFeatures
+    ei = f.createInput(sk.profiles.item(0), op)
+    if abs(xcenter) > 1e-9:
+        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
+            adsk.core.ValueInput.createByReal(mm(xcenter)))
+    ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
+    if parts:
+        ei.participantBodies = parts
+    return f.add(ei)
+
+
+def poly_x(comp, pts_yz, xcenter, span, op, parts=None):
+    # closed polygon on the yZ plane, swept along X (measured convention).
+    sk = comp.sketches.add(comp.yZConstructionPlane)
+    lines = sk.sketchCurves.sketchLines
+    n = len(pts_yz)
+    for i in range(n):
+        y0, z0 = pts_yz[i]
+        y1, z1 = pts_yz[(i + 1) % n]
+        lines.addByTwoPoints(adsk.core.Point3D.create(mm(-z0), mm(y0), 0),
+                             adsk.core.Point3D.create(mm(-z1), mm(y1), 0))
+    f = comp.features.extrudeFeatures
+    ei = f.createInput(sk.profiles.item(0), op)
+    if abs(xcenter) > 1e-9:
+        ei.startExtent = adsk.fusion.OffsetStartDefinition.create(
+            adsk.core.ValueInput.createByReal(mm(xcenter)))
     ei.setSymmetricExtent(adsk.core.ValueInput.createByReal(mm(span)), True)
     if parts:
         ei.participantBodies = parts
@@ -276,12 +315,90 @@ def build_rail_lock_sections(comp):
     cyl(comp, cx(lock_x), cy(-31.0), -1.0, INTERFACE.COVER_SEAT_D,
         INTERFACE.COVER_SEAT_DEPTH + 1.0, CUT, [cov])
     cyl(comp, cx(lock_x), cy(-31.0), -1.0, 3.4, WALL + 2.0, CUT, [cov])
+    # the curved shoulder segment, so pair 4b's roof edge can prove the
+    # 0.3mm seamless landing (quarter ellipse, contract numbers)
+    outer, inner_pts = [], []
+    steps = INTERFACE.COVER_SHOULDER_STEPS
+    for i in range(steps + 1):
+        t = (math.pi / 2.0) * i / steps
+        yy = HEIGHT / 2.0 + INTERFACE.COVER_SHOULDER_RISE * math.sin(t)
+        zz = INTERFACE.COVER_SHOULDER_REACH * (1.0 - math.cos(t))
+        dy = INTERFACE.COVER_SHOULDER_RISE * math.cos(t)
+        dz = INTERFACE.COVER_SHOULDER_REACH * math.sin(t)
+        ln = math.hypot(dy, dz) or 1.0
+        outer.append((oy2 + yy, zz))
+        inner_pts.append((oy2 + yy + WALL * (-dz / ln), zz + WALL * (dy / ln)))
+    poly_x(comp, outer + list(reversed(inner_pts)), 0.0, 62.0, JOIN, [cov])
+    cap_face = [(oy2 + HEIGHT / 2.0, 0.0)] + outer +                [(oy2 + HEIGHT / 2.0, INTERFACE.COVER_SHOULDER_REACH)]
+    poly_x(comp, cap_face, (62.0 - WALL) / 2.0, WALL, JOIN, [cov])
     return lid, cov
 
 
-VERSION = ('v1: three fit-coupon pairs (cap ring / cap wall section / rail lock '
-           'section) - print + pass these BEFORE any full 280mm part '
-           '/ interface {}'.format(INTERFACE.INTERFACE_VERSION))
+def build_front_corner_pair(comp):
+    """Pair 4 (owner, 21 Aug): tail-end slices of the TUB and the TOP LID.
+
+    "A lot is going on at the bottom side" - the front closure.  These two
+    corners plus pair 3 (BottomLid + CurvedLid end slices) let the whole
+    front stack be assembled in miniature: screw the lid slice to the tub
+    slice, slide the cover slice home, drop the cap slice over the wall -
+    and check that everything fits and CLOSES before any 280mm print.
+
+    Both slices live in real shell coordinates, x +75..+140(+145 cap), the
+    +X front corner.
+    """
+    oy = 560.0
+    # ---- 4a: tub front corner --------------------------------------------
+    def ty(v):                       # shell Y -> coupon Y
+        return oy + (v - 107.5)
+    tub = box(comp, 107.5, oy, 0, 65.0, 65.0, 3.0, NEW).bodies.item(0)
+    tub.name = 'COUPON 4a TUB front corner (lid seat + cap screw + rail)'
+    # side wall segment, ending at the real wall end face Y137
+    box(comp, 138.5, ty(106.0), 3.0, 3.0, 62.0, 77.0, JOIN, [tub])
+    # top rail behind the lid plane (Y134..137, Z72..80)
+    box(comp, 106.0, ty(135.5), 72.0, 62.0, 3.0, 8.0, JOIN, [tub])
+    # two lid-seat bosses + through pilots, real pattern positions
+    for (bx, bz) in ((120.0, 72.0), (132.0, 44.0)):
+        bw = 10.0 if bx == 132.0 else 9.0
+        box(comp, bx, ty(132.5), bz - 4.0, bw, 9.0, 8.0, JOIN, [tub])
+        cyl_y(comp, bx, bz, ty(132.5), INTERFACE.BOTTOM_LID_BOSS_PILOT_D,
+              16.0, CUT, [tub])
+    # cap-screw boss on the wall inner + horizontal pilot (row Y+85, Z72)
+    box(comp, 131.0, ty(85.0), 66.0, 12.0, 12.0, 12.0, JOIN, [tub])
+    cyl_x(comp, ty(85.0), 72.0, 138.5, INTERFACE.CAP_BOSS_PILOT_D,
+          30.0, CUT, [tub])
+
+    # ---- 4b: top-lid front corner ----------------------------------------
+    oy2 = oy + 110.0
+    def cy2(v):                      # cap print Y -> coupon Y
+        return oy2 + (v - 107.5)
+    LW_HALF, inner_half = 143.0, 140.5
+    cap = box(comp, 110.0, cy2(107.5), 0, 70.0, 70.0, 3.0, NEW).bodies.item(0)
+    cap.name = 'COUPON 4b TOP LID front corner (skirt + seat pad + chamfer)'
+    # side skirt segment (print z3..55) with the seat pad + counterbore +
+    # hole at row Y85, print z48 - drops over 4a's wall with the real 0.5
+    box(comp, (inner_half + LW_HALF) / 2.0, cy2(105.0), 3.0,
+        LW_HALF - inner_half, 65.0, 52.0, JOIN, [cap])
+    pad_h = INTERFACE.CAP_SEAT_PAD_H
+    cyl_x(comp, cy2(85.0), 48.0, LW_HALF + (pad_h - 1) / 2.0,
+          INTERFACE.M3_SEAT_PAD_D, pad_h + 1, JOIN, [cap])
+    cyl_x(comp, cy2(85.0), 48.0, inner_half + 1.5, 3.4, 6.0, CUT, [cap])
+    cyl_x(comp, cy2(85.0), 48.0, LW_HALF + pad_h,
+          INTERFACE.M3_SEAT_CBORE_D, 2 * pad_h, CUT, [cap])
+    # shortened FRONT wall segment (print z3..36.5) + the roof edge the
+    # cover's shoulder must meet with its 0.3mm shadow line
+    box(comp, 110.0, cy2(141.75), 3.0, 70.0, 2.5, 33.5, JOIN, [cap])
+    # lead-in chamfer on the side skirt's top inner edge (stepped, as pair 2)
+    ch = INTERFACE.CAP_LEADIN_CH
+    box(comp, inner_half + ch / 2.0, cy2(105.0), 55.0 - ch,
+        ch, 65.0, ch + 0.01, CUT, [cap])
+    return tub, cap
+
+
+VERSION = ('v2: FOUR coupon pairs - cap ring, cap wall section, rail-lock '
+           'slices (now WITH the curved shoulder), and the NEW front-corner '
+           'set of the tub + top lid, so the whole busy bottom-end stack '
+           'can be test-assembled before any 280mm print / interface {}'
+           .format(INTERFACE.INTERFACE_VERSION))
 
 
 def clear_old(root):
@@ -313,13 +430,18 @@ def run(context):
         build_cap_fit_rings(design.rootComponent)
         build_cap_wall_section(design.rootComponent)
         build_rail_lock_sections(design.rootComponent)
+        build_front_corner_pair(design.rootComponent)
         app.activeViewport.fit()
         ui.messageBox(
             'FIR_FitCoupons {} built.\nCleared {} old body(ies).\n\n'
             'PASS CRITERIA: 1) cap ring slides fully onto tub ring by hand and '
             'comes off; 2) wall section clicks and takes an M3 that reopens 5x; '
             '3) cover slice slides to a FLUSH stop, clicks the nub, screws; '
-            'flipped left-for-right it must STAND PROUD on the key block.{}'
+            'flipped left-for-right it must STAND PROUD on the key block; '
+            '4) FRONT CORNER SET: screw 3a onto 4a (two M3s into the real '
+            'bosses), slide 3b home on 3a, drop 4b over 4a\'s wall - the cap '
+            'screw must line up at Z72 and the cover shoulder must land on '
+            '4b\'s roof edge with a hairline, nothing forcing, nothing loose.{}'
             .format(VERSION, removed,
                     ('\nSkipped:\n - ' + '\n - '.join(SKIPPED)) if SKIPPED else ''))
     except:  # noqa
