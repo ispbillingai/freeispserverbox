@@ -1196,6 +1196,38 @@ def check_tree(root, label):
                     for x in corner[0].solids('join', 'circle', 'yZ')
                     + corner[1].solids('join', 'circle', 'yZ')))
 
+    # ---------------- FIR_TailSlices --------------------------------------
+    ts_mod, ts_design, msgs = run_script(world, p('FIR_TailSlices'), 'tails')
+    c.check('FIR_TailSlices run() completed',
+            msgs and 'failed' not in msgs[-1])
+    tails = [b for b in ts_design.rootComponent.bodies_list
+             if b.name.startswith('TAIL')]
+    c.check('TailSlices: 2 REAL tail slices (tub + top lid)', len(tails) == 2)
+    if len(tails) == 2:
+        tub_t, cap_t = tails[0], tails[1]
+        keep = ts_mod.TAIL_KEEP_Y
+        # material probes: solid in the kept strip, EMPTY below the line
+        # (the stub's aabb only sums joins, so probe the actual CSG)
+        ok_cut = (tub_t.material_at((138.5, 100.0, 40.0))      # side wall kept
+                  and not tub_t.material_at((0.0, -138.5, 40.0))   # back wall gone
+                  and not tub_t.material_at((0.0, 0.0, 1.5))       # mid floor gone
+                  and not tub_t.material_at((138.5, keep - 5.0, 40.0))
+                  and cap_t.material_at((330.0 + 141.7, 100.0, 30.0))
+                  and not cap_t.material_at((330.0 + 141.7, -100.0, 30.0))
+                  and not cap_t.material_at((330.0, 0.0, 1.5)))
+        c.check('TailSlices: everything below shell Y{:.0f} is cut away - the '
+                'slices are the genuine last stretch of each part'
+                .format(keep), ok_cut)
+        tub_tail = tails[0]
+        c.check('TailSlices: all 6 BottomLid pilots and both Y85 cap pilots '
+                'survive in the tub tail',
+                len([x for x in tub_tail.solids('cut', 'circle', 'xZ')
+                     if near(x.shape[2],
+                             interface.BOTTOM_LID_BOSS_PILOT_D / 2.0)]) == 6
+                and len([x for x in tub_tail.solids('cut', 'circle', 'yZ')
+                         if near(x.shape[2],
+                                 interface.CAP_BOSS_PILOT_D / 2.0)]) == 4)
+
     # ---------------- FIR_ShellCheck, both modes -------------------------
     for shells_only in (True, False):
         def tweak(mod, so=shells_only):

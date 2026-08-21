@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "FREEISPRADIUS",
+    "description": {
+        "": "Tail-end test slices cut from the REAL tub and REAL top lid (kept shell Y>=70): print these plus the real BottomLid and CurvedLid to assemble and close the whole bottom-end stack before committing any full 280mm print."
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
