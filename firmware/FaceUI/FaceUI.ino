@@ -161,8 +161,6 @@ int yRead() {                       // drive the Y plate, read the X plate
 
 // ------------------------------------------------------------- touch state --
 int  Z_IDLE = 0;
-#define Z_MARGIN 400
-static inline bool isDown(int z) { return abs(z - Z_IDLE) > Z_MARGIN; }
 
 // THE one way to poll for a press. zRead alone in a tight loop leaves the
 // sense node charged from the previous done(), and the reading rails at
@@ -172,6 +170,26 @@ static inline bool isDown(int z) { return abs(z - Z_IDLE) > Z_MARGIN; }
 // conversion. Every repeated poll in this file goes through here, and every
 // call site keeps a real delay() between rounds.
 static inline int pollZ() { int z = zRead(); yRead(); return z; }
+
+// Press tracking with hysteresis and 2-round confirmation, replacing the
+// old single fixed 400 margin. Bench, Francis pressing everywhere: top and
+// middle registered, the BOTTOM of the glass never did, and the bottom
+// calibration target kept failing its hold (rounds=0/2 in the log). On
+// this wiring position leaks into the pressure read -- a bottom press
+// moves z barely past noise -- so one fat margin wrote the bottom of the
+// glass off the map entirely. Now: DOWN after 2 consecutive rounds more
+// than Z_ENTER from idle, UP after 2 consecutive rounds inside Z_EXIT.
+// Single-round noise spikes do neither; weak-but-real holds stay held.
+#define Z_ENTER 140
+#define Z_EXIT   90
+bool tDown = false; int tStreak = 0, tLastZ = 0;
+bool touchDown() {                    // one poll round + state update
+  tLastZ = pollZ();
+  bool over = abs(tLastZ - Z_IDLE) > (tDown ? Z_EXIT : Z_ENTER);
+  if (over == tDown) { tStreak = 0; return tDown; }
+  if (++tStreak >= 2) { tDown = over; tStreak = 0; }
+  return tDown;
+}
 
 // Three anchors, Francis's way: crosshair targets pressed top / middle /
 // bottom, like a proper touchscreen setup. The middle anchor makes the map
@@ -213,6 +231,26 @@ int screenY(int raw) {
   return constrain((int)y, 0, 319);
 }
 
+// Position of the CURRENT press: median of rounds spanning the WHOLE
+// contact, starting at first touch. Two bench lessons written in blood:
+// (1) one immediate burst reads the unseated film -- high raw, taps land
+// above the finger (the "SETTINGS refused" build); (2) waiting 50ms and
+// sampling only the firm phase reads pressure, not position -- all three
+// cal targets came back nearly the same number (848/775/540). The spread
+// that worked (1392/766/432) came from rounds across ALL phases of the
+// press with the median picking the honest middle. So: start immediately,
+// keep sampling while the finger is down, median the lot.
+// Returns -1 for a graze too short for 3 rounds or a railed result.
+int readTapRaw() {
+  int cap[7], m = 0;
+  while (touchDown() && m < 7) { cap[m++] = readRawY(); delay(15); }
+  if (m < 3) return -1;
+  for (int a = 1; a < m; a++)
+    for (int j = a; j > 0 && cap[j] < cap[j-1]; j--) { int t=cap[j]; cap[j]=cap[j-1]; cap[j-1]=t; }
+  int raw = cap[m / 2];
+  return (raw > 4000) ? -1 : raw;
+}
+
 void textAt(int x,int y,uint8_t sz,uint16_t c,const String&s){
   tft.setTextSize(sz); tft.setTextColor(c); tft.setCursor(x,y); tft.print(s);
 }
@@ -224,26 +262,21 @@ bool waitTap(int *sy) {
   // re-fired its band every ~2.6s (Alarm toggling itself under one finger).
   static bool stuckDown = false;
   if (stuckDown) {
-    if (isDown(pollZ())) { delay(15); return false; }
+    if (touchDown()) { delay(15); return false; }
     stuckDown = false;
     delay(60);
     return false;
   }
-  if (!isDown(pollZ())) return false;
-  int raw = readRawY();
-  // Seen on the bench minutes after first calibration: a tap whose position
-  // read railed at 4095 mapped to y=0 -- which on the MENU screen is BACK.
-  // 4095 is the charged-node artifact, never a real position on any wiring
-  // we have measured (legit raws live in the hundreds), so discard it.
-  if (raw > 4000) {
-    Serial.printf("TAP discarded: railed raw=%d\n", raw);
-    while (isDown(pollZ())) delay(10);
+  if (!touchDown()) return false;
+  int raw = readTapRaw();               // seat, then median across the press
+  if (raw < 0) {                        // graze, dab, or railed read
+    Serial.println("TAP discarded: unseated/railed");
+    while (touchDown()) delay(10);
     delay(60);
     return false;
   }
-  if (!isDown(pollZ())) return false;
   uint32_t t0 = millis();
-  while (isDown(pollZ()) && millis() - t0 < 2500) delay(10);
+  while (touchDown() && millis() - t0 < 2500) delay(10);
   stuckDown = (millis() - t0 >= 2500);   // escaped with the finger still on
   delay(60);
   *sy = screenY(raw);
@@ -330,20 +363,22 @@ retry:
     textAt(90, TY[i], 2, C_TXT, "PRESS AND HOLD THE TARGET " + String(i + 1) + "/3");
     textAt(90, TY[i] + 28, 2, C_LABEL, "z=");
     textAt(300, TY[i] + 28, 2, C_LABEL, "idle=" + String(Z_IDLE));
-    int z, n = 0;
-    while (!isDown(z = pollZ())) {    // wait-for-press with a live readout;
+    int n = 0;
+    while (!touchDown()) {            // wait-for-press with a live readout;
       if (++n % 8 == 0) {             // the repaint doubles as real drawing
         tft.fillRect(114, TY[i] + 26, 90, 18, C_BG);  // between poll rounds
-        textAt(116, TY[i] + 28, 2, C_OK, String(z));
+        textAt(116, TY[i] + 28, 2, C_OK, String(tLastZ));
       }
       delay(12);
     }
-    // Sample for as long as the hold lasts, up to 7 median rounds; the
-    // median of the rounds is the anchor. A dab instead of a hold, or a
-    // railed result, asks for the same target again.
+    // Sample for as long as the hold lasts, up to 7 median rounds from the
+    // FIRST instant of contact -- no seat delay. The 50ms-delay experiment
+    // proved the firm phase reads pressure, not position: all three targets
+    // converged to the same number. First-contact-onward rounds with a
+    // median across them is what produced the spread that mapped true.
     int cap[7], m = 0;
-    while (isDown(pollZ()) && m < 7) { cap[m++] = readRawY(); delay(30); }
-    while (isDown(pollZ())) delay(10);
+    while (touchDown() && m < 7) { cap[m++] = readRawY(); delay(30); }
+    while (touchDown()) delay(10);
     for (int a = 1; a < m; a++)
       for (int j = a; j > 0 && cap[j] < cap[j-1]; j--) { int t=cap[j]; cap[j]=cap[j-1]; cap[j-1]=t; }
     if (m < 3 || cap[m / 2] > 4000) {
@@ -375,10 +410,10 @@ retry:
   textAt(144, 140, 2, C_TXT, "NOW TAP SETTINGS");
   drawSettingsBand(false);
   for (int tries = 0; tries < 100; tries++) {   // ~20s of patience, then redo
-    if (!isDown(pollZ())) { delay(180); continue; }
-    int raw = readRawY();
-    while (isDown(pollZ())) delay(10);
-    if (raw > 4000) continue;                   // charged-node artifact
+    if (!touchDown()) { delay(40); continue; }
+    int raw = readTapRaw();             // MUST read like real use does, or
+    while (touchDown()) delay(10);  // verify proves the wrong thing
+    if (raw < 0) continue;
     int sy = screenY(raw);
     Serial.printf("cal verify raw=%d -> y=%d\n", raw, sy);
     if (sy >= 240) {                            // the same gate loop() uses
@@ -390,6 +425,56 @@ retry:
   }
   Serial.println("CAL verify failed - starting over");
   goto retry;
+}
+
+// ---- DIAGNOSTIC: which SCREEN axis does the readable raw actually track?
+// Approach change (Francis: "try another approach"). Every calibration so
+// far staggered its targets across BOTH width and height, so a clean
+// gradient never proved the axis -- and every SETTINGS verify tap at the
+// bottom-CENTRE mapped to mid-scale and missed. If the GPIO33 read runs
+// along the native LONG side of this portrait-born panel, then in our
+// landscape rotation it is HORIZONTAL, and the whole vertical-only belief
+// inherited from the BigUI era is backwards. Four corners answer it:
+// same-height pairs vs same-side pairs.
+long probeOne(int cx, int cy, const char *label) {
+  for (;;) {
+    tft.fillScreen(C_BG);
+    calTarget(cx, cy);
+    textAt(130, cy < 160 ? 200 : 90, 2, C_TXT, "HOLD: " + String(label));
+    while (!touchDown()) delay(12);
+    int cap[7], m = 0;
+    while (touchDown() && m < 7) { cap[m++] = readRawY(); delay(30); }
+    while (touchDown()) delay(10);
+    for (int a = 1; a < m; a++)
+      for (int j = a; j > 0 && cap[j] < cap[j-1]; j--) { int t=cap[j]; cap[j]=cap[j-1]; cap[j-1]=t; }
+    if (m >= 3 && cap[m / 2] <= 4000) {
+      Serial.printf("probe %-12s raw=%d (%d rounds)\n", label, cap[m / 2], m);
+      delay(250);
+      return cap[m / 2];
+    }
+    Serial.printf("probe %s retry (rounds=%d)\n", label, m);
+    delay(500);
+  }
+}
+void axisProbe() {
+  long tl = probeOne(40, 40,   "TOP LEFT");
+  long tr = probeOne(440, 40,  "TOP RIGHT");
+  long bl = probeOne(40, 280,  "BOTTOM LEFT");
+  long br = probeOne(440, 280, "BOTTOM RIGHT");
+  long dx = labs(tr - tl) + labs(br - bl);      // change across the WIDTH
+  long dy = labs(bl - tl) + labs(br - tr);      // change across the HEIGHT
+  const char *v = dx > dy * 2 ? "HORIZONTAL" : dy > dx * 2 ? "VERTICAL" : "UNCLEAR";
+  Serial.printf("AXIS PROBE tl=%ld tr=%ld bl=%ld br=%ld  width-delta=%ld height-delta=%ld -> %s\n",
+                tl, tr, bl, br, dx, dy, v);
+  tft.fillScreen(C_BG);
+  textAt(60, 80, 2, C_TXT, "the axis runs:");
+  textAt(60, 116, 4, C_ACC, v);
+  textAt(60, 170, 1, C_LABEL, "tl=" + String(tl) + "  tr=" + String(tr) +
+                              "  bl=" + String(bl) + "  br=" + String(br));
+  textAt(60, 190, 1, C_LABEL, "width d=" + String(dx) + "  height d=" + String(dy));
+  textAt(60, 220, 2, C_LABEL, "hold anywhere to continue");
+  while (!touchDown()) delay(15);
+  while (touchDown()) delay(10);
 }
 
 // ------------------------------------------------------------------ screens --
@@ -541,7 +626,7 @@ void setup() {
   for (int i = 1; i < 24; i++)
     for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
   Z_IDLE = s[12];
-  Serial.printf("idle z=%d, press = %d+ away\n", Z_IDLE, Z_MARGIN);
+  Serial.printf("idle z=%d, press = %d+ away (2 rounds)\n", Z_IDLE, Z_ENTER);
   if (Z_IDLE > 3500) {                  // still railed: keep waiting, say so
     Serial.println("WARN: resting level still railed - warming up longer");
     for (int i = 0; i < 30; i++) { pollZ(); delay(60); }
@@ -553,6 +638,8 @@ void setup() {
   }
 
   loadSettings();
+  axisProbe();                          // DIAGNOSTIC BUILD: four corners,
+                                        // then the truth about the axis
   if (!loadCal()) calibrate();          // stored cal survives reboots now;
   drawHome();                           // calibrate() re-saves itself
 }
