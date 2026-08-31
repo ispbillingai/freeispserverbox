@@ -173,12 +173,18 @@ static inline bool isDown(int z) { return abs(z - Z_IDLE) > Z_MARGIN; }
 // call site keeps a real delay() between rounds.
 static inline int pollZ() { int z = zRead(); yRead(); return z; }
 
-long yBase = 0, ySpan = 1;          // raw at screen y=40, delta over 240px
+// Three anchors, Francis's way: crosshair targets pressed top / middle /
+// bottom, like a proper touchscreen setup. The middle anchor makes the map
+// PIECEWISE -- two segments instead of one straight line -- because the
+// 2-bar version calibrated "fine" and SETTINGS still wasn't hittable: one
+// line through two soft presses squeezed the whole bottom of the glass.
+long rawA = 1000, rawB = 500, rawC = 0;   // raw at screen y=40 / 160 / 280
 bool calibrated = false;
 int  lastTapRaw = -1, lastTapY = -1;  // shown on the INFO screen
 
 Preferences prefs;
-#define CAL_VER 1                   // bump to orphan stored cal after a rewire
+#define CAL_VER 2                   // v2 = 3-point piecewise. Bumping this
+                                    // orphans every stored cal on purpose
 
 int med5(int *s) {
   for (int i = 1; i < 5; i++)
@@ -196,7 +202,15 @@ int readRawY() {
 }
 
 int screenY(int raw) {
-  return constrain(40 + (int)((long)(raw - yBase) * 240 / ySpan), 0, 319);
+  // Two segments hinged at the middle anchor, signed math throughout: this
+  // panel's raws RUN BACKWARDS (bigger raw = higher on the glass) and both
+  // directions must keep working after any recalibration.
+  long y;
+  if ((long)(raw - rawB) * (rawA - rawB) >= 0)        // rawB..rawA: top half
+    y = 160 + (long)(raw - rawB) * (40 - 160) / (rawA - rawB);
+  else                                                // rawB..rawC: bottom
+    y = 160 + (long)(raw - rawB) * (280 - 160) / (rawC - rawB);
+  return constrain((int)y, 0, 319);
 }
 
 void textAt(int x,int y,uint8_t sz,uint16_t c,const String&s){
@@ -217,6 +231,16 @@ bool waitTap(int *sy) {
   }
   if (!isDown(pollZ())) return false;
   int raw = readRawY();
+  // Seen on the bench minutes after first calibration: a tap whose position
+  // read railed at 4095 mapped to y=0 -- which on the MENU screen is BACK.
+  // 4095 is the charged-node artifact, never a real position on any wiring
+  // we have measured (legit raws live in the hundreds), so discard it.
+  if (raw > 4000) {
+    Serial.printf("TAP discarded: railed raw=%d\n", raw);
+    while (isDown(pollZ())) delay(10);
+    delay(60);
+    return false;
+  }
   if (!isDown(pollZ())) return false;
   uint32_t t0 = millis();
   while (isDown(pollZ()) && millis() - t0 < 2500) delay(10);
@@ -233,26 +257,33 @@ bool waitTap(int *sy) {
 // wirings and must never be read again. Z_IDLE is deliberately NOT stored --
 // the resting level moved between wirings, so it stays the fresh per-boot
 // median measurement.
-bool calValid(long b, long s) {
-  return b >= 0 && b <= 4095 && labs(s) >= 300 && labs(s) <= 4000;
+bool calValid(long a, long b, long c) {
+  long s1 = b - a, s2 = c - b;                  // top / bottom segment spans
+  if (a < 0 || a > 4095 || b < 0 || b > 4095 || c < 0 || c > 4095) return false;
+  if (labs(s1) < 120 || labs(s2) < 120) return false;   // squeezed segment
+  if ((s1 > 0) != (s2 > 0)) return false;               // direction flip
+  if (labs(s1) > 3 * labs(s2) || labs(s2) > 3 * labs(s1)) return false;
+  return true;                                  // 3x skew = something railed
 }
 bool loadCal() {                    // boot path: true = stored cal is usable
   prefs.begin("freeisp", true);
   bool verOk = prefs.getUChar("vcal_ver", 0) == CAL_VER;
-  long b = prefs.getLong("vcal_base", -1), s = prefs.getLong("vcal_span", 0);
+  long a = prefs.getLong("vcal_a", -1), b = prefs.getLong("vcal_b", -1),
+       c = prefs.getLong("vcal_c", -1);
   prefs.end();
-  if (!verOk || !calValid(b, s)) return false;
-  yBase = b; ySpan = s; calibrated = true;
-  Serial.printf("CAL loaded yBase=%ld ySpan=%ld\n", b, s);
+  if (!verOk || !calValid(a, b, c)) return false;
+  rawA = a; rawB = b; rawC = c; calibrated = true;
+  Serial.printf("CAL loaded a=%ld b=%ld c=%ld\n", a, b, c);
   return true;
 }
 void saveCal() {                    // only ever called from calibrate()
   prefs.begin("freeisp", false);
   prefs.putUChar("vcal_ver", CAL_VER);
-  prefs.putLong("vcal_base", yBase);
-  prefs.putLong("vcal_span", ySpan);
+  prefs.putLong("vcal_a", rawA);
+  prefs.putLong("vcal_b", rawB);
+  prefs.putLong("vcal_c", rawC);
   prefs.end();
-  Serial.printf("CAL SAVED yBase=%ld ySpan=%ld  (factory-default candidates)\n", yBase, ySpan);
+  Serial.printf("CAL SAVED a=%ld b=%ld c=%ld  (factory-default candidates)\n", rawA, rawB, rawC);
 }
 void saveU8(const char *key, uint8_t v) {
   prefs.begin("freeisp", false);
@@ -273,48 +304,92 @@ void loadSettings() {               // fresh key names, same rule as the cal
 }
 
 // ------------------------------------------------------------ calibration --
+// Francis's spec: real targets you press -- top, middle, bottom, staggered
+// across the glass like a proper corner calibration -- not bars. Touch is
+// vertical-only, so only the target's HEIGHT feeds the math; the stagger is
+// honest looks. Each point is press-and-HOLD: median reads are collected
+// across the whole hold and the median of those is the anchor, so one soft
+// contact cannot skew the map the way it did the 2-bar version. Then nothing
+// is saved until a REAL tap proves the map: the last step is hitting
+// SETTINGS itself. Calibrated-but-not-tappable can no longer be stored.
+static void calTarget(int cx, int cy) {
+  tft.drawCircle(cx, cy, 14, C_ACC);
+  tft.drawCircle(cx, cy, 6,  C_ACC);
+  tft.drawFastHLine(cx - 20, cy, 40, C_ACC);
+  tft.drawFastVLine(cx, cy - 20, 40, C_ACC);
+}
 void calibrate() {
+  const int CY[3] = {40, 160, 280};   // anchor rows on the glass
+  const int CX[3] = {60, 240, 420};   // stagger: top-left, centre, bottom-right
+  const int TY[3] = {196, 220, 84};   // instruction block, clear of the target
+  long got[3];
 retry:
-  int got[2];
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 3; i++) {
     tft.fillScreen(C_BG);
-    // Bars are 60px tall and full width -- generous, because this is the
-    // one screen the user must hit BEFORE any calibration exists. The
-    // centres stay at screen y=40 and y=280, so screenY()'s 40/240 mapping
-    // is untouched.
-    tft.fillRect(0, i ? 250 : 10, 480, 60, C_ACC);
-    textAt(70, 120, 2, C_TXT, i == 0 ? "TAP THE TOP BAR (1/2)"
-                                     : "TAP THE BOTTOM BAR (2/2)");
-    textAt(70, 148, 2, C_LABEL, "z=");
-    textAt(300, 148, 2, C_LABEL, "idle=" + String(Z_IDLE));
+    calTarget(CX[i], CY[i]);
+    textAt(90, TY[i], 2, C_TXT, "PRESS AND HOLD THE TARGET " + String(i + 1) + "/3");
+    textAt(90, TY[i] + 28, 2, C_LABEL, "z=");
+    textAt(300, TY[i] + 28, 2, C_LABEL, "idle=" + String(Z_IDLE));
     int z, n = 0;
-    while (!isDown(z = pollZ())) {  // wait-for-press with a live readout;
-      if (++n % 8 == 0) {           // the repaint doubles as real drawing
-        tft.fillRect(200, 146, 90, 18, C_BG);   // between poll rounds
-        textAt(200, 148, 2, C_OK, String(z));
+    while (!isDown(z = pollZ())) {    // wait-for-press with a live readout;
+      if (++n % 8 == 0) {             // the repaint doubles as real drawing
+        tft.fillRect(114, TY[i] + 26, 90, 18, C_BG);  // between poll rounds
+        textAt(116, TY[i] + 28, 2, C_OK, String(z));
       }
       delay(12);
     }
-    got[i] = readRawY();            // capture DURING the press...
-    while (isDown(pollZ())) delay(10);   // ...accept on RELEASE
-    delay(250);                     // debounce before the next screen
-    Serial.printf("cal %d raw=%d\n", i, got[i]);
+    // Sample for as long as the hold lasts, up to 7 median rounds; the
+    // median of the rounds is the anchor. A dab instead of a hold, or a
+    // railed result, asks for the same target again.
+    int cap[7], m = 0;
+    while (isDown(pollZ()) && m < 7) { cap[m++] = readRawY(); delay(30); }
+    while (isDown(pollZ())) delay(10);
+    for (int a = 1; a < m; a++)
+      for (int j = a; j > 0 && cap[j] < cap[j-1]; j--) { int t=cap[j]; cap[j]=cap[j-1]; cap[j-1]=t; }
+    if (m < 3 || cap[m / 2] > 4000) {
+      Serial.printf("cal %d retry: rounds=%d\n", i, m);
+      textAt(90, TY[i] + 56, 2, C_WARN, m < 3 ? "HOLD IT LONGER" : "BAD READ - AGAIN");
+      delay(900);
+      i--;
+      continue;
+    }
+    got[i] = cap[m / 2];
+    Serial.printf("cal %d raw=%ld (%d rounds)\n", i, got[i], m);
+    delay(250);
   }
-  // Accept with the SAME validator the boot path uses -- if they differ, a
-  // railed tap (span > 4000, the charged-node signature) gets saved, mis-maps
-  // every tap this session, then loadCal() silently rejects it next boot.
-  if (!calValid(got[0], (long)got[1] - got[0])) {
-    Serial.printf("CAL rejected: implausible pair (%d, %d)\n", got[0], got[1]);
+  // Accept with the SAME validator the boot path uses, or a map that loads
+  // tomorrow differs from the map that saved today.
+  if (!calValid(got[0], got[1], got[2])) {
+    Serial.printf("CAL rejected: %ld %ld %ld\n", got[0], got[1], got[2]);
     tft.fillScreen(C_BG);
-    textAt(90, 150, 2, C_WARN, "BAD TAPS - TRY AGAIN");
+    textAt(66, 150, 2, C_WARN, "POINTS DON'T LINE UP - AGAIN");
     delay(900);
     goto retry;
   }
-  yBase = got[0];
-  ySpan = got[1] - got[0];
+  rawA = got[0]; rawB = got[1]; rawC = got[2];
   calibrated = true;
-  Serial.printf("CAL yBase=%ld ySpan=%ld\n", yBase, ySpan);
-  saveCal();
+  Serial.printf("CAL candidate a=%ld b=%ld c=%ld\n", rawA, rawB, rawC);
+
+  // PROVE it before saving it.
+  tft.fillScreen(C_BG);
+  textAt(144, 140, 2, C_TXT, "NOW TAP SETTINGS");
+  drawSettingsBand(false);
+  for (int tries = 0; tries < 100; tries++) {   // ~20s of patience, then redo
+    if (!isDown(pollZ())) { delay(180); continue; }
+    int raw = readRawY();
+    while (isDown(pollZ())) delay(10);
+    if (raw > 4000) continue;                   // charged-node artifact
+    int sy = screenY(raw);
+    Serial.printf("cal verify raw=%d -> y=%d\n", raw, sy);
+    if (sy >= 240) {                            // the same gate loop() uses
+      drawSettingsBand(true);
+      saveCal();
+      return;
+    }
+    textAt(96, 170, 2, C_WARN, "missed - try once more");
+  }
+  Serial.println("CAL verify failed - starting over");
+  goto retry;
 }
 
 // ------------------------------------------------------------------ screens --
@@ -425,8 +500,8 @@ void drawInfo() {
   textAt(24, 148, 1, C_LABEL, "touch: GPIO33/ADC1, vertical only");
 
   textAt(24, 176, 1, C_LABEL, "Z_IDLE");   textAt(140, 176, 1, C_ACC, String(Z_IDLE));
-  textAt(24, 192, 1, C_LABEL, "yBase");    textAt(140, 192, 1, C_ACC, String(yBase));
-  textAt(24, 208, 1, C_LABEL, "ySpan");    textAt(140, 208, 1, C_ACC, String(ySpan));
+  textAt(24, 192, 1, C_LABEL, "cal A/B/C");
+  textAt(140, 192, 1, C_ACC, String(rawA) + " / " + String(rawB) + " / " + String(rawC));
   textAt(24, 224, 1, C_LABEL, "last tap");
   textAt(140, 224, 1, C_ACC, String(lastTapRaw) + " -> " + String(lastTapY));
 
@@ -491,7 +566,10 @@ void loop() {
     // drawn rect exactly). Everything above it -- 0-267 -- is content with
     // no action, so a tap there flashes the SETTINGS band as a HINT: it
     // teaches where to tap and kills the orphan dead zone.
-    if (sy >= 268) {
+    // Gate at 240, not the band's drawn 268: with ~1.5 raw counts per pixel
+    // on this panel, ADC noise is worth ±10px, and a SETTINGS tap that
+    // misses by a hair should open the menu, not wink at the user.
+    if (sy >= 240) {
       drawSettingsBand(true);           // flash...
       screen = SCR_MENU;
       drawMenu();                       // ...then act
