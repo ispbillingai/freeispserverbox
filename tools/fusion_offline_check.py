@@ -1278,15 +1278,16 @@ def check_tree(root, label):
             len(tails) == 2)
     if len(tails) == 2:
         cap_t, tub_t = tails[0], tails[1]
-        ok_cut = (cap_t.material_at((0.0, 140.0, 1.5))            # roof edge kept
-                  and cap_t.material_at((0.0, 142.0, 20.0))       # front wall kept
-                  and not cap_t.material_at((0.0, 110.0, 1.5))    # 20mm line holds
-                  and not cap_t.material_at((-141.7, 0.0, 30.0))  # side wall gone
-                  and tub_t.material_at((0.0, -200.0 + 130.0, 1.5))     # floor edge kept
-                  and tub_t.material_at((138.5, -200.0 + 125.0, 40.0))  # wall stub kept
-                  and tub_t.material_at((0.0, -200.0 + 135.5, 76.0))    # top rail kept
-                  and not tub_t.material_at((0.0, -200.0 + 50.0, 1.5))  # mid floor gone
-                  and not tub_t.material_at((138.5, -200.0 + 0.0, 40.0)))  # mid wall gone
+        ok_cut = (cap_t.material_at((0.0, -173.0 + 140.0, 1.5))            # roof edge kept
+                  and cap_t.material_at((0.0, -173.0 + 142.0, 20.0))       # front wall kept
+                  and not cap_t.material_at((0.0, -173.0 + 110.0, 1.5))    # 20mm line holds
+                  and not cap_t.material_at((-141.7, -173.0, 30.0))  # side wall gone
+                  and tub_t.material_at((0.0, -124.5 + 130.0, 1.5))     # floor edge kept
+                  and tub_t.material_at((138.5, -124.5 + 125.0, 40.0))  # wall stub kept
+                  and tub_t.material_at((0.0, -124.5 + 135.5, 76.0))    # top rail kept
+                  and tub_t.material_at((137.7, -124.5 + 135.5, 68.0))  # rail runs INTO the wall
+                  and not tub_t.material_at((0.0, -124.5 + 50.0, 1.5))  # mid floor gone
+                  and not tub_t.material_at((138.5, -124.5 + 0.0, 40.0)))  # mid wall gone
         c.check('TailSlices: cut lines hold (cap y>={:.0f}, tub y>={:.0f}), '
                 'both full width'
                 .format(ts_mod.CAP_TAIL_YMIN, ts_mod.TUB_TAIL_YMIN), ok_cut)

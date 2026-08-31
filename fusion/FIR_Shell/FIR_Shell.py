@@ -315,7 +315,7 @@ def build_lid_seat(comp, sh):
     #      plus the same under-gusset onto the wall face.
     # Clearance: the deepest device frames on the lid stop near Z44, so
     # everything here stays above Z56 with 12mm of air.
-    box(comp, 0, FRONT_Y - 1.5, 64, BOX_W - 2 * WALL, 3, 8, JOIN, [sh])   # rail extension Z64-72
+    box(comp, 0, FRONT_Y - 1.5, 64, BOX_W - 2 * WALL + 3, 3, 8, JOIN, [sh])   # rail extension Z64-72, 1.5 into each wall
     for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72), (-132, 44), (132, 44)):
         bw = 10 if abs(bx) == 132 else 9
         box(comp, bx, FRONT_Y - 4.5, bz - 4, bw, 9, 8, JOIN, [sh])      # boss block behind the lid

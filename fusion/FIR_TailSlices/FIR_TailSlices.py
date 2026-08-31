@@ -148,6 +148,8 @@ def run(context):
         cap.name = ('TAIL ROOF: ROOF LID front strip (real FIR_TopLid, local '
                     'y>={:.0f}) - the roof edge + front wall the shoulder '
                     'lands on'.format(CAP_TAIL_YMIN))
+        # park it just behind the tub strip, near the origin, its own body
+        translate_body(comp, cap, 0.0, -173.0, 0.0)
 
         # 2. TAIL TUB: the REAL tub, cut to its front strip - the piece the
         #    printed BottomLid bolts onto (all six seat bosses + pilots)
@@ -158,13 +160,16 @@ def run(context):
         tub.name = ('TAIL TUB: TUB front strip (real FIR_Shell, shell '
                     'y>={:.0f}) - floor edge + wall stubs + top rail + all '
                     '6 BottomLid bosses/pilots'.format(TUB_TAIL_YMIN))
-        translate_body(comp, tub, 0.0, -200.0, 0.0)
+        # centre the strip near the origin so it lands ON the slicer bed
+        translate_body(comp, tub, 0.0, -124.5, 0.0)
 
         app.activeViewport.fit()
         ui.messageBox(
             'FIR_TailSlices built the 2 strips of the BIG BOXES your '
             'printed lids attach to (owner, 31 Aug) - both full 280mm '
-            'wide. Export SEPARATELY: right-click a body > Save As Mesh.\n\n'
+            'wide, laid flat NEAR THE ORIGIN so both land on the slicer bed. '
+            'Export ONE BODY AT A TIME (right-click the BODY in the browser '
+            '> Save As Mesh): two files = two independent pieces to orient freely.\n\n'
             'Print: TAIL TUB floor-down flat; TAIL ROOF roof-down flat. '
             'No supports.\n\n'
             'The fit test, with YOUR printed parts:\n'
