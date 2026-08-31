@@ -301,11 +301,29 @@ def build_lid_seat(comp, sh):
     # walls = dead geometry - removed.)
     # 6 self-tap M3 bolt bosses at the lid's perimeter pattern. The side pair (±132) is widened to
     # X127-137 so it MERGES with the side wall (9mm wide it stopped 0.5mm short and floated).
+    #
+    # REINFORCED (owner, 31 Aug, pointing at every boss on the printed strip:
+    # "we need reinforcement here - I know they will break").  He is right:
+    # the four rail bosses hung off the 3mm top rail by a 9 x 4mm neck, and
+    # driving a screw pushes the boss straight against it.  Three fixes, all
+    # flowing into TAIL TUB automatically because it slices this builder:
+    #   1. the top rail grows DOWNWARD to Z64-80 (16 tall, was 8) - each
+    #      boss now welds to it over its full 8mm height, tripling the neck;
+    #   2. a stepped gusset under each rail boss (Y131-137, Z56-68) carries
+    #      the screwing push down into the taller rail like a bracket;
+    #   3. the wall pair keeps its 72mm2 face weld (already the strong one)
+    #      plus the same under-gusset onto the wall face.
+    # Clearance: the deepest device frames on the lid stop near Z44, so
+    # everything here stays above Z56 with 12mm of air.
+    box(comp, 0, FRONT_Y - 1.5, 64, BOX_W - 2 * WALL, 3, 8, JOIN, [sh])   # rail extension Z64-72
     for (bx, bz) in ((-120, 72), (120, 72), (-40, 72), (40, 72), (-132, 44), (132, 44)):
         bw = 10 if abs(bx) == 132 else 9
         box(comp, bx, FRONT_Y - 4.5, bz - 4, bw, 9, 8, JOIN, [sh])      # boss block behind the lid
         cyl_y(comp, bx, bz, FRONT_Y - 4.5,
               INTERFACE.BOTTOM_LID_BOSS_PILOT_D, 16, CUT, [sh])         # pilot (self-tap or insert bore)
+        # stepped under-gusset: two shrinking bands below the boss
+        box(comp, bx, FRONT_Y - 3.0, bz - 8, bw, 6, 4, JOIN, [sh])
+        box(comp, bx, FRONT_Y - 2.0, bz - 12, bw, 4, 4, JOIN, [sh])
     return
 
 
@@ -816,7 +834,8 @@ def horn_clearances():
     return checks
 
 
-VERSION = ('v44: GENTLE cradle fingers - 1.8mm ramped hooks, outer straps, root '
+VERSION = ('v45: REINFORCED lid-seat bosses (16mm rail + stepped gussets - they were '
+           'hanging on a 9x4mm neck); GENTLE cradle fingers - 1.8mm ramped hooks, outer straps, root '
            'feet (the old square 4mm hooks snapped printed posts); TUB ONLY '
            '(the cap is FIR_TopLid now); horn bolts DIRECTLY to '
            'two floor pads - no sled, no cage; tamper reed senses the CURVED '

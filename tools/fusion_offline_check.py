@@ -734,8 +734,8 @@ def check_tree(root, label):
     c.check('FIR_Shell run() completed',
             msgs and 'failed' not in msgs[-1],
             (msgs[-1][:120].replace('\n', ' ') if msgs else 'no message'))
-    c.check('FIR_Shell popup states v44 (gentle fingers)',
-            any('v44' in m for m in msgs))
+    c.check('FIR_Shell popup states v45 (reinforced lid bosses)',
+            any('v45' in m for m in msgs))
     tub = body_named(shell_design, 'FIR SHELL (tub)')
     c.check('FIR_Shell builds ONLY the tub - no cap, no sled (one script per '
             'part, owner 19 Aug)',
