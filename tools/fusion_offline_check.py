@@ -1274,28 +1274,37 @@ def check_tree(root, label):
             msgs and 'failed' not in msgs[-1])
     tails = [b for b in ts_design.rootComponent.bodies_list
              if b.name.startswith('TAIL')]
-    c.check('TailSlices: the SEAM PAIR (top-lid front strip + curved-lid '
-            'shoulder strip)', len(tails) == 2)
-    if len(tails) == 2:
-        cap_t, cov_t = tails[0], tails[1]
-        # material probes: the roof edge and front wall survive on the cap
-        # strip, the roof centre does not; the cover strip keeps its top
-        # wall and loses its face centre / channel zone entirely
+    c.check('TailSlices: the TRIPLE-JOINT strips (roof lid + bottom lid + '
+            'curved shoulder)', len(tails) == 3)
+    if len(tails) == 3:
+        cap_t, lid_t, cov_t = tails[0], tails[1], tails[2]
         ok_cut = (cap_t.material_at((0.0, 140.0, 1.5))            # roof edge kept
                   and cap_t.material_at((0.0, 142.0, 20.0))       # front wall kept
-                  and not cap_t.material_at((0.0, 0.0, 1.5))      # roof centre gone
+                  and not cap_t.material_at((0.0, 110.0, 1.5))    # 20mm line holds
                   and not cap_t.material_at((-141.7, 0.0, 30.0))  # side wall gone
-                  and cov_t.material_at((0.0, -160.0 + 38.75, 30.0))   # top wall kept
-                  and cov_t.material_at((0.0, -160.0 + 25.0, 1.25))    # face band kept
-                  and not cov_t.material_at((0.0, -160.0 + 0.0, 1.25)) # face centre gone
-                  and not cov_t.material_at((-133.0, -160.0 - 37.0, 30.0)))  # channel gone
-        c.check('TailSlices: strips cut at cap y>={:.0f} / cover y>={:.0f}, '
-                'both full 280 width'
-                .format(ts_mod.CAP_TAIL_YMIN, ts_mod.COVER_TAIL_YMIN), ok_cut)
+                  and lid_t.material_at((0.0, -160.0 + 81.5, 1.5))    # build-out kept
+                  and lid_t.material_at((-120.0, -160.0 + 75.0, 1.5)) # screw zone kept
+                  and not lid_t.material_at((0.0, -160.0 + 40.0, 1.5))  # mid-plate gone
+                  and not lid_t.material_at((-133.0, -160.0 + 5.5, 30.0))  # rail gone
+                  and cov_t.material_at((0.0, -320.0 + 38.75, 30.0))   # top wall kept
+                  and cov_t.material_at((0.0, -320.0 + 25.0, 1.25))    # face band kept
+                  and not cov_t.material_at((0.0, -320.0 + 0.0, 1.25)) # face centre gone
+                  and not cov_t.material_at((-133.0, -320.0 - 37.0, 30.0)))  # channel gone
+        c.check('TailSlices: cut lines hold (cap y>={:.0f}, lid y>={:.0f}, '
+                'cover y>={:.0f}), all full 280 width'
+                .format(ts_mod.CAP_TAIL_YMIN, ts_mod.LID_TAIL_YMIN,
+                        ts_mod.COVER_TAIL_YMIN), ok_cut)
+        strip_screws = [x for x in lid_t.solids('cut', 'circle', 'xY')
+                        if near(x.shape[2], 3.5 / 2.0)
+                        and x.shape[1] > ts_mod.LID_TAIL_YMIN]
+        grooves = [g for g in lid_t.solids('cut', 'rect', 'xY')
+                   if g.shape[2] * 2 >= 240.0]
         shoulder_polys = cov_t.solids('join', 'poly', 'yZ')
-        c.check('TailSlices: TAIL DOWN carries the whole curved shoulder '
-                '({} swept sections)'.format(len(shoulder_polys)),
-                len(shoulder_polys) >= 1)
+        c.check('TailSlices: TAIL BOTTOM keeps the 4 face screws + the '
+                'full-width tab groove; TAIL CURVED keeps the shoulder '
+                '({} sections)'.format(len(shoulder_polys)),
+                len(strip_screws) == 4 and len(grooves) >= 1
+                and len(shoulder_polys) >= 1)
 
     # ---------------- FIR_ShellCheck, both modes -------------------------
     for shells_only in (True, False):

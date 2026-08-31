@@ -10,20 +10,30 @@
 # a curve that mates at one end and gapes at the other (FDM bow) is exactly
 # what a narrow coupon would hide.
 #
-#   TAIL UP    TopLid front strip (cap-local y >= 105, ~38mm deep): the roof
-#              edge the shoulder butts against, the short front wall and the
-#              lead-in chamfer.  Prints roof-down, flat, no supports.
-#   TAIL DOWN  CurvedLid top strip (cover-local y >= 20): the upper face
-#              band, the top wall, the locator tabs and the ENTIRE curved
-#              shoulder.  Print STANDING ON AN END WALL exactly like the
-#              full cover - same walls, same curve, quarter of the plastic.
+# Refined by the owner mid-flight: "just like 20mm of the last part, BOTH
+# the bottom and top, so that I can fit together and also try fitting the
+# curved one."  So: three strips, the whole triple joint.
 #
-# The test: stand TAIL DOWN against TAIL UP the way the closed box holds
-# them.  The shoulder tip must land FLUSH with the roof's outer surface and
-# butt its edge with the 0.3mm hairline - along the WHOLE width, both ends
-# and the middle.  A wedge-shaped gap = bow; a step = the flush plane is
-# off; either way it is one contract number and a strip reprint, not a
-# 280mm cover reprint.
+#   TAIL TOP     TopLid front strip (cap-local y >= 123, 20mm of roof): the
+#                roof edge the shoulder butts, the short front wall and the
+#                chamfer.  Prints roof-down, flat.
+#   TAIL BOTTOM  BottomLid top strip (lid-local y >= 63, the last 20mm): the
+#                top build-out with its full-width GROOVE (where the curved
+#                lid's locator tabs land), the clip tabs, and all four top
+#                face screws at y72.  Prints flat on its plate.
+#   TAIL CURVED  CurvedLid top strip (cover-local y >= 20): upper face band,
+#                top wall, the four locator TABS and the ENTIRE curved
+#                shoulder.  Print STANDING ON AN END WALL like the full
+#                cover.
+#
+# The test, exactly as the closed box holds them:
+#   1. stack TAIL BOTTOM and TAIL TOP - the cap front wall rides 0.5mm above
+#      the lid's build-out, one even seam;
+#   2. lay TAIL CURVED over both: its TABS drop into TAIL BOTTOM's groove
+#      while its shoulder tip lands FLUSH on TAIL TOP's roof surface and
+#      butts the edge with the 0.3mm hairline - along the WHOLE 280 width;
+#   3. a wedge-shaped gap = FDM bow; a step you can feel = the flush plane;
+#      either is one contract number and a 20mm strip reprint.
 #
 # (The rail / detent / click tests live in FIR_FitCoupons pair 3.)
 
@@ -33,9 +43,12 @@ import sys
 
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
-CAP_TAIL_YMIN = 105.0             # TopLid: keep cap-local y >= this
-                                  # (roof edge at 143; ~38mm strip - misses
+CAP_TAIL_YMIN = 123.0             # TopLid: keep cap-local y >= this
+                                  # (roof edge at 143 -> a 20mm strip; misses
                                   # the +-85 screws and the screen window)
+LID_TAIL_YMIN = 63.0              # BottomLid: keep lid-local y >= this (the
+                                  # last 20mm: build-out, GROOVE, clip tabs,
+                                  # all four y72 face screws)
 COVER_TAIL_YMIN = 20.0            # CurvedLid: keep cover-local y >= this
                                   # (face band + top wall + tabs + the whole
                                   # shoulder; channels/knockouts/magnet stay
@@ -136,38 +149,50 @@ def run(context):
         del toplid_source.SKIPPED[:]
         cap = toplid_source.build_top_lid(comp, 0.0)
         tail_cut(comp, cap, CAP_TAIL_YMIN)
-        cap.name = ('TAIL UP: TOP LID front strip (real FIR_TopLid, local '
+        cap.name = ('TAIL TOP: ROOF LID front strip (real FIR_TopLid, local '
                     'y>={:.0f}) - the roof edge + front wall the shoulder '
                     'lands on'.format(CAP_TAIL_YMIN))
 
-        # 2. TAIL DOWN: the REAL curved cover, cut to its top strip - the
+        # 2. TAIL BOTTOM: the REAL BottomLid, cut to its top strip - the
+        #    groove the curved lid's tabs land in, plus the 4 top screws
+        lid_source = _load_active_builder('FIR_BottomLid')
+        del lid_source.SKIPPED[:]
+        lid = lid_source.build(comp)
+        tail_cut(comp, lid, LID_TAIL_YMIN)
+        lid.name = ('TAIL BOTTOM: BOTTOM LID top strip (real FIR_BottomLid, '
+                    'local y>={:.0f}) - build-out + GROOVE + clip tabs + 4 '
+                    'face screws'.format(LID_TAIL_YMIN))
+        translate_body(comp, lid, 0.0, -160.0, 0.0)
+
+        # 3. TAIL CURVED: the REAL curved cover, cut to its top strip - the
         #    entire shoulder, full 280 width
         cover_source = _load_active_builder('FIR_CurvedLid')
         del cover_source.SKIPPED[:]
         cover = cover_source.build(comp)
         tail_cut(comp, cover, COVER_TAIL_YMIN)
-        cover.name = ('TAIL DOWN: CURVED LID top strip (real FIR_CurvedLid, '
-                      'local y>={:.0f}) - face band + top wall + the whole '
-                      'curved shoulder'.format(COVER_TAIL_YMIN))
-        translate_body(comp, cover, 0.0, -160.0, 0.0)
+        cover.name = ('TAIL CURVED: CURVED LID top strip (real FIR_CurvedLid, '
+                      'local y>={:.0f}) - face band + top wall + tabs + the '
+                      'whole curved shoulder'.format(COVER_TAIL_YMIN))
+        translate_body(comp, cover, 0.0, -320.0, 0.0)
 
         app.activeViewport.fit()
         ui.messageBox(
-            'FIR_TailSlices built the SEAM PAIR - the up and down of the one '
-            'joint the curved lid makes with the roof, both FULL 280mm wide '
+            'FIR_TailSlices built THREE 280mm-wide strips of the front '
+            'closure - the last ~20mm of BOTH lids plus the curved shoulder '
             '(owner, 31 Aug). Export and print them SEPARATELY: right-click '
             'a body > Save As Mesh.\n\n'
-            'Print: TAIL UP roof-down flat; TAIL DOWN standing on an end '
-            'wall, exactly like the full cover.\n\n'
-            'The seam test:\n'
-            ' 1. hold TAIL DOWN against TAIL UP as the closed box would;\n'
-            ' 2. the shoulder tip must finish FLUSH with the roof outer '
-            'surface (no step you can feel with a nail);\n'
-            ' 3. one even 0.3mm hairline along the WHOLE width - a wedge '
-            'gap means FDM bow, a step means the flush plane is off;\n'
-            ' 4. rail/click testing is COUPON PAIR 3, not this pair.\n\n'
-            'Anything that fights = one contract number + a strip reprint, '
-            'never a full 280mm cover reprint.')
+            'Print: TAIL TOP roof-down flat; TAIL BOTTOM flat on its plate; '
+            'TAIL CURVED standing on an end wall, like the full cover.\n\n'
+            'The triple-joint test:\n'
+            ' 1. stack TAIL BOTTOM + TAIL TOP: the cap front wall rides '
+            '0.5mm above the lid build-out, one even seam;\n'
+            ' 2. lay TAIL CURVED over both: its TABS drop into the groove '
+            'in TAIL BOTTOM while the shoulder tip lands FLUSH on TAIL TOP '
+            'with the 0.3mm hairline, end to end;\n'
+            ' 3. a wedge gap = FDM bow; a feelable step = flush plane off;\n'
+            ' 4. rail/click testing is COUPON PAIR 3, not these strips.\n\n'
+            'Anything that fights = one contract number + a 20mm strip '
+            'reprint, never a full 280mm part.')
     except:  # noqa
         if ui:
             ui.messageBox('FIR_TailSlices failed:\n{}'.format(traceback.format_exc()))
