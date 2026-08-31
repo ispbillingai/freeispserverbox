@@ -171,23 +171,65 @@ int  Z_IDLE = 0;
 // call site keeps a real delay() between rounds.
 static inline int pollZ() { int z = zRead(); yRead(); return z; }
 
-// Press tracking with hysteresis and 2-round confirmation, replacing the
-// old single fixed 400 margin. Bench, Francis pressing everywhere: top and
-// middle registered, the BOTTOM of the glass never did, and the bottom
-// calibration target kept failing its hold (rounds=0/2 in the log). On
-// this wiring position leaks into the pressure read -- a bottom press
-// moves z barely past noise -- so one fat margin wrote the bottom of the
-// glass off the map entirely. Now: DOWN after 2 consecutive rounds more
-// than Z_ENTER from idle, UP after 2 consecutive rounds inside Z_EXIT.
-// Single-round noise spikes do neither; weak-but-real holds stay held.
-#define Z_ENTER 140
-#define Z_EXIT   90
-bool tDown = false; int tStreak = 0, tLastZ = 0;
-bool touchDown() {                    // one poll round + state update
-  tLastZ = pollZ();
-  bool over = abs(tLastZ - Z_IDLE) > (tDown ? Z_EXIT : Z_ENTER);
-  if (over == tDown) { tStreak = 0; return tDown; }
-  if (++tStreak >= 2) { tDown = over; tStreak = 0; }
+// TRUE press detection for the one-ADC-pin wiring -- the night's biggest
+// lesson, learned when the glass went fully dead: "probe wait z=0 idle=0"
+// under a real finger. The old zRead (XP low, YM high, read XM) IS the
+// position gradient once a finger is down, so wherever that gradient
+// itself reads ~idle (the XP corner, the bottom band) a press was
+// INVISIBLE. No deviation threshold can see a press that reads exactly
+// like no press. Fix by physics, not thresholds: sample the same node
+// under BOTH polarities. Finger down, the two reads are complementary --
+// their SUM is ~4095 wherever the finger is. Floating, the node reads its
+// residual charge twice: sum ~0 or ~8190, never the middle. DOWN = sum in
+// the middle window 2 rounds running; UP = out of a wider window 2 rounds.
+// DIGITAL contact test -- the fix for the night's real bug, which Francis
+// diagnosed from the bench: "press the points and z is 0, press anywhere
+// else and it presses well". zRead IS the position gradient, and at one
+// end of the glass that gradient reads 0 -- which is exactly what an
+// untouched panel reads. A press there is not weak, it is INVISIBLE, so no
+// analog threshold on that pin can ever see it. That end is the bottom,
+// which is why SETTINGS -- and only SETTINGS -- refused all night while
+// every other row worked.
+//
+// So detection stops using the position signal at all. Pull the X plate up
+// and drive the Y plate low: a finger anywhere bridges the plates and drags
+// X down. Position-independent, and the standard 4-wire wake-up test.
+// Analog reads stay for POSITION only, where a 0 is just a legitimate
+// coordinate at the end of the scale.
+// This is Adafruit_TouchScreen's actual getPoint() pressure test, which we
+// had never used: XP low, YM high, then read BOTH free corners --
+// z1 = XM (X plate) and z2 = YP (Y plate) -- and take z = 4095 - (z2 - z1).
+// Untouched the two plates sit at opposite rails, so z ~ 0 EVERYWHERE. A
+// touch shorts them at the contact point, they converge, and z rises no
+// matter WHERE the finger is. That is the property one-pin detection can
+// never have, and why the bottom of the glass was invisible all night.
+// z2 lives on GPIO14/ADC2 -- unusable in a WiFi sketch, perfectly fine
+// here, because FaceUI deliberately links no radio.
+// ONLY PROVEN PRIMITIVES. Everything invented tonight -- the inverted-
+// polarity twin, the digital pullup test, the Adafruit two-pin pressure
+// formula, a second-axis xRead -- misbehaved on this wiring: the pressure
+// formula sat at z=2346 with nothing touching the glass (idle z2 reads
+// 1749, not the 4095 rail its maths assumes) so the box "tapped" forever,
+// and every position read came back 0 or railed. Meanwhile TouchProof.ino
+// measured, on THIS panel, on THIS wiring: zRead and yRead BOTH read 0
+// resting and ~830 under a finger.
+//
+// So detection uses exactly those two, and uses them TOGETHER: zRead goes
+// blind at the XP end of the glass (that is the bottom -- the reason
+// SETTINGS never answered), and yRead is the read that stays awake there.
+// A press is either one waking up. Nothing new is configured.
+int tZ1 = 0, tZ2 = 0;
+#define T_ON  260                     // both reads are 0 at rest and ~830
+#define T_OFF 150                     // pressed; 260/150 = hysteresis
+bool tDown = false; int tStreak = 0, tLastZ = 0, tLastB = 0;
+bool touchDown() {                    // one detection round + state update
+  tZ1 = zRead();                      // interleaved by construction: the
+  tZ2 = yRead();                      // two configs alternate every round
+  tLastZ = max(tZ1, tZ2);
+  tLastB = tDown;
+  bool now = tLastZ > (tDown ? T_OFF : T_ON);
+  if (now == tDown) { tStreak = 0; return tDown; }
+  if (++tStreak >= 2) { tDown = now; tStreak = 0; }   // 2 rounds to flip
   return tDown;
 }
 
@@ -367,7 +409,7 @@ retry:
     while (!touchDown()) {            // wait-for-press with a live readout;
       if (++n % 8 == 0) {             // the repaint doubles as real drawing
         tft.fillRect(114, TY[i] + 26, 90, 18, C_BG);  // between poll rounds
-        textAt(116, TY[i] + 28, 2, C_OK, String(tLastZ));
+        textAt(116, TY[i] + 28, 2, C_OK, (tLastB ? "DOWN " : "up ") + String(tLastZ));
       }
       delay(12);
     }
@@ -408,9 +450,17 @@ retry:
   // PROVE it before saving it.
   tft.fillScreen(C_BG);
   textAt(144, 140, 2, C_TXT, "NOW TAP SETTINGS");
+  textAt(180, 176, 2, C_LABEL, "z=");
   drawSettingsBand(false);
-  for (int tries = 0; tries < 100; tries++) {   // ~20s of patience, then redo
-    if (!touchDown()) { delay(40); continue; }
+  for (int tries = 0; tries < 400; tries++) {   // ~16s of patience, then redo
+    if (!touchDown()) {                         // (100x40ms was a 4s window
+      if ((tries & 7) == 0) {                   //  -- a live bug too).
+        tft.fillRect(204, 174, 90, 18, C_BG);   // Repaint between rounds +
+        textAt(206, 176, 2, C_OK, (tLastB ? "DOWN " : "up ") + String(tLastZ));   // live z, per the law:
+      }                                         // this wait was BARE, which
+      delay(40);                                // is plausibly why verify
+      continue;                                 // refused all night.
+    }
     int raw = readTapRaw();             // MUST read like real use does, or
     while (touchDown()) delay(10);  // verify proves the wrong thing
     if (raw < 0) continue;
@@ -440,8 +490,19 @@ long probeOne(int cx, int cy, const char *label) {
   for (;;) {
     tft.fillScreen(C_BG);
     calTarget(cx, cy);
-    textAt(130, cy < 160 ? 200 : 90, 2, C_TXT, "HOLD: " + String(label));
-    while (!touchDown()) delay(12);
+    int ty = cy < 160 ? 200 : 60;
+    textAt(130, ty, 2, C_TXT, "HOLD: " + String(label));
+    textAt(130, ty + 28, 2, C_LABEL, "z=");
+    int n = 0;
+    while (!touchDown()) {            // live readout: the repaint IS the bus
+      if (++n % 8 == 0) {             // traffic the sense line needs between
+        tft.fillRect(154, ty + 26, 90, 18, C_BG);       // rounds. The bare
+        textAt(156, ty + 28, 2, C_OK, (tLastB ? "DOWN " : "up ") + String(tLastZ));  // wait loop shipped
+        if (n % 160 == 0)                               // here first went
+          Serial.printf("probe wait contact=%d pos=%d\n", tLastB, tLastZ);
+      }                                                 // on the bench.
+      delay(12);
+    }
     int cap[7], m = 0;
     while (touchDown() && m < 7) { cap[m++] = readRawY(); delay(30); }
     while (touchDown()) delay(10);
@@ -456,25 +517,77 @@ long probeOne(int cx, int cy, const char *label) {
     delay(500);
   }
 }
-void axisProbe() {
-  long tl = probeOne(40, 40,   "TOP LEFT");
-  long tr = probeOne(440, 40,  "TOP RIGHT");
-  long bl = probeOne(40, 280,  "BOTTOM LEFT");
-  long br = probeOne(440, 280, "BOTTOM RIGHT");
-  long dx = labs(tr - tl) + labs(br - bl);      // change across the WIDTH
-  long dy = labs(bl - tl) + labs(br - tr);      // change across the HEIGHT
-  const char *v = dx > dy * 2 ? "HORIZONTAL" : dy > dx * 2 ? "VERTICAL" : "UNCLEAR";
-  Serial.printf("AXIS PROBE tl=%ld tr=%ld bl=%ld br=%ld  width-delta=%ld height-delta=%ld -> %s\n",
-                tl, tr, bl, br, dx, dy, v);
+// ---- GRID MAP: Francis's calibration, and a better one than targets.
+// Tile the glass in small boxes. Press any box and that spot's raw numbers
+// are printed IN it. No point to hit, so nothing to miss -- the map builds
+// itself from wherever a finger actually lands, and the running min/max of
+// both axes IS the calibration: sweep the glass and the ends of the scale
+// are learned. It is also the honest test of the mapping, because the box
+// that lights up should be the box under the finger.
+#define GC 12                         // columns, 40px ~ 6mm
+#define GR 8                          // rows,    40px ~ 6mm
+#define GW (480 / GC)
+#define GH (320 / GR)
+long loA = 4095, hiA = 0, loB = 4095, hiB = 0;   // learned extents
+
+void gridChrome() {
   tft.fillScreen(C_BG);
-  textAt(60, 80, 2, C_TXT, "the axis runs:");
-  textAt(60, 116, 4, C_ACC, v);
-  textAt(60, 170, 1, C_LABEL, "tl=" + String(tl) + "  tr=" + String(tr) +
-                              "  bl=" + String(bl) + "  br=" + String(br));
-  textAt(60, 190, 1, C_LABEL, "width d=" + String(dx) + "  height d=" + String(dy));
-  textAt(60, 220, 2, C_LABEL, "hold anywhere to continue");
-  while (!touchDown()) delay(15);
-  while (touchDown()) delay(10);
+  for (int c = 1; c < GC; c++) tft.drawFastVLine(c * GW, 0, 320, C_EDGE);
+  for (int r = 1; r < GR; r++) tft.drawFastHLine(0, r * GH, 480, C_EDGE);
+  textAt(6, 4, 1, C_LABEL, "press any box - it prints its own numbers");
+}
+void gridMap() {                      // never returns: this IS the build
+  gridChrome();
+  int taps = 0, beat = 0;
+  for (;;) {
+    if (!touchDown()) {
+      // Trace what the detector SEES, always -- the only way to tell a
+      // finger that is not registering from a finger that never came.
+      if (++beat % 40 == 0) {
+        Serial.printf("watch zRead=%4d yRead=%4d max=%4d (down at >%d)\n",
+                      tZ1, tZ2, tLastZ, T_ON);
+        tft.fillRect(300, 2, 176, 12, C_BG);
+        textAt(302, 4, 1, C_OK, "z1 " + String(tZ1) + "  z2 " + String(tZ2) +
+                                "  z " + String(tLastZ));
+      }
+      delay(12);
+      continue;
+    }
+    int a[7], b[7], m = 0;            // median across the whole contact.
+    while (touchDown() && m < 7) {    // A and B are the two proven reads,
+      a[m] = tZ2; b[m] = tZ1; m++;    // captured by touchDown itself -- no
+      delay(15);                      // extra pin juggling to go wrong
+    }
+    while (touchDown()) delay(10);
+    if (m < 3) continue;
+    for (int i = 1; i < m; i++)
+      for (int j = i; j > 0 && a[j] < a[j-1]; j--) { int t=a[j]; a[j]=a[j-1]; a[j-1]=t; }
+    for (int i = 1; i < m; i++)
+      for (int j = i; j > 0 && b[j] < b[j-1]; j--) { int t=b[j]; b[j]=b[j-1]; b[j-1]=t; }
+    long rawA = a[m/2], rawB = b[m/2];
+    if (rawA > 4090 && rawB > 4090) continue;    // both railed = junk
+
+    if (rawA < loA) loA = rawA;   if (rawA > hiA) hiA = rawA;
+    if (rawB < loB) loB = rawB;   if (rawB > hiB) hiB = rawB;
+
+    // Provisional map from the extents learned SO FAR: rough at first,
+    // the real calibration once the glass has been swept.
+    int col = (hiB - loB > 200) ? constrain((int)((rawB - loB) * GC / (hiB - loB)), 0, GC-1) : 0;
+    int row = (hiA - loA > 200) ? constrain((int)((rawA - loA) * GR / (hiA - loA)), 0, GR-1) : 0;
+    int x = col * GW, y = row * GH;
+    tft.fillRect(x + 1, y + 1, GW - 1, GH - 1, C_ACC);
+    textAt(x + 3, y + 8,  1, C_BG, String(rawA));
+    textAt(x + 3, y + 22, 1, C_BG, String(rawB));
+
+    taps++;
+    Serial.printf("GRID %d: A=%ld B=%ld -> col %d row %d | A %ld..%ld  B %ld..%ld\n",
+                  taps, rawA, rawB, col, row, loA, hiA, loB, hiB);
+    if (taps % 24 == 0) {             // keep the glass readable
+      gridChrome();
+      textAt(6, 310, 1, C_ACC, "A " + String(loA) + ".." + String(hiA) +
+                               "   B " + String(loB) + ".." + String(hiB));
+    }
+  }
 }
 
 // ------------------------------------------------------------------ screens --
@@ -626,7 +739,7 @@ void setup() {
   for (int i = 1; i < 24; i++)
     for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
   Z_IDLE = s[12];
-  Serial.printf("idle z=%d, press = %d+ away (2 rounds)\n", Z_IDLE, Z_ENTER);
+  Serial.printf("idle z=%d (reference only); press = A+B sum ~4095, 2 rounds\n", Z_IDLE);
   if (Z_IDLE > 3500) {                  // still railed: keep waiting, say so
     Serial.println("WARN: resting level still railed - warming up longer");
     for (int i = 0; i < 30; i++) { pollZ(); delay(60); }
@@ -638,14 +751,19 @@ void setup() {
   }
 
   loadSettings();
-  axisProbe();                          // DIAGNOSTIC BUILD: four corners,
-                                        // then the truth about the axis
+  gridMap();                            // DIAGNOSTIC BUILD: never returns --
+                                        // map the glass, learn the extents
   if (!loadCal()) calibrate();          // stored cal survives reboots now;
   drawHome();                           // calibrate() re-saves itself
 }
 
+uint32_t lastPulse = 0;
 void loop() {
   int sy;
+  if (millis() - lastPulse > 900) {   // heartbeat: one real LCD write per
+    lastPulse = millis();             // second, because waiting loops with
+    tft.fillRect(0, 0, 2, 2, C_BAR);  // zero bus traffic go dead on this
+  }                                   // panel (probe screen proved it)
   if (!waitTap(&sy)) { delay(15); return; }
 
   if (screen == SCR_HOME) {
