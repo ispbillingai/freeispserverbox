@@ -1274,42 +1274,27 @@ def check_tree(root, label):
             msgs and 'failed' not in msgs[-1])
     tails = [b for b in ts_design.rootComponent.bodies_list
              if b.name.startswith('TAIL')]
-    c.check('TailSlices: the TRIPLE-JOINT strips (roof lid + bottom lid + '
-            'curved shoulder)', len(tails) == 3)
-    if len(tails) == 3:
-        cap_t, lid_t, cov_t = tails[0], tails[1], tails[2]
+    c.check('TailSlices: the BIG-BOX strips (roof cap + tub front)',
+            len(tails) == 2)
+    if len(tails) == 2:
+        cap_t, tub_t = tails[0], tails[1]
         ok_cut = (cap_t.material_at((0.0, 140.0, 1.5))            # roof edge kept
                   and cap_t.material_at((0.0, 142.0, 20.0))       # front wall kept
                   and not cap_t.material_at((0.0, 110.0, 1.5))    # 20mm line holds
                   and not cap_t.material_at((-141.7, 0.0, 30.0))  # side wall gone
-                  and lid_t.material_at((-133.0, -160.0 + 5.5, 30.0))  # rail kept
-                  and lid_t.material_at((60.0, -160.0 + 1.5, 40.0))    # shelf kept
-                  and lid_t.material_at((-122.0, -160.0 + 9.5, 60.0))  # lock boss kept
-                  and not lid_t.material_at((0.0, -160.0 + 40.0, 1.5))   # mid-plate gone
-                  and not lid_t.material_at((0.0, -160.0 + 81.5, 1.5))   # build-out gone
-                  and cov_t.material_at((0.0, -320.0 + 38.75, 30.0))   # top wall kept
-                  and cov_t.material_at((0.0, -320.0 + 25.0, 1.25))    # face band kept
-                  and not cov_t.material_at((0.0, -320.0 + 0.0, 1.25)) # face centre gone
-                  and not cov_t.material_at((-133.0, -320.0 - 37.0, 30.0)))  # channel gone
-        c.check('TailSlices: cut lines hold (cap y>={:.0f}, lid y<={:.0f}, '
-                'cover y>={:.0f}), all full 280 width'
-                .format(ts_mod.CAP_TAIL_YMIN, ts_mod.LID_TAIL_YMAX,
-                        ts_mod.COVER_TAIL_YMIN), ok_cut)
-        strip_bumps = [b for b in lid_t.solids('join', 'rect', 'xY')
-                       if b.shape[2] * 2 <= 1.0
-                       and abs(abs(b.shape[0]) - (interface.COVER_RAIL_X
-                               + interface.COVER_RAIL_W / 2.0
-                               + b.shape[2])) < 0.05]
-        boss_pilots = [x for x in lid_t.solids('cut', 'circle', 'xY')
+                  and tub_t.material_at((0.0, -200.0 + 130.0, 1.5))     # floor edge kept
+                  and tub_t.material_at((138.5, -200.0 + 125.0, 40.0))  # wall stub kept
+                  and tub_t.material_at((0.0, -200.0 + 135.5, 76.0))    # top rail kept
+                  and not tub_t.material_at((0.0, -200.0 + 50.0, 1.5))  # mid floor gone
+                  and not tub_t.material_at((138.5, -200.0 + 0.0, 40.0)))  # mid wall gone
+        c.check('TailSlices: cut lines hold (cap y>={:.0f}, tub y>={:.0f}), '
+                'both full width'
+                .format(ts_mod.CAP_TAIL_YMIN, ts_mod.TUB_TAIL_YMIN), ok_cut)
+        seat_pilots = [x for x in tub_t.solids('cut', 'circle', 'xZ')
                        if near(x.shape[2],
-                               interface.COVER_LOCK_BOSS_PILOT_D / 2.0)
-                       and near(abs(x.shape[0]), interface.COVER_LOCK_X)]
-        shoulder_polys = cov_t.solids('join', 'poly', 'yZ')
-        c.check('TailSlices: TAIL BOTTOM keeps both rails with all 4 detent '
-                'bump bands + both lock-boss pilots; TAIL CURVED keeps the '
-                'shoulder ({} sections)'.format(len(shoulder_polys)),
-                len(strip_bumps) == 4 and len(boss_pilots) == 2
-                and len(shoulder_polys) >= 1)
+                               interface.BOTTOM_LID_BOSS_PILOT_D / 2.0)]
+        c.check('TailSlices: TAIL TUB carries all 6 BottomLid seat pilots '
+                'for the bolt-up test', len(seat_pilots) == 6)
 
     # ---------------- FIR_ShellCheck, both modes -------------------------
     for shells_only in (True, False):
