@@ -79,7 +79,7 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v6: shelf root gussets at +-111 + SOFTER detents (0.3mm click); SELF-CLICK rail detents - stepped bumps on the rail outboard faces, '
+VERSION = ('v7: 8mm SHELF SPINE (5mm doubler slab, split at the magnet corridor) - the wobbly-rail fix; shelf root gussets at +-111 + SOFTER detents (0.3mm click); SELF-CLICK rail detents - stepped bumps on the rail outboard faces, '
            'the cover clicks home and holds without its screws; '
            'TAMPER REED groove in the shelf (shell X+15, D4 wire hole into '
            'the box) + hard end stop, orientation key block, contract-driven '
@@ -232,6 +232,17 @@ def build(comp):
 
     # ===== STEP 1: 65mm horizontal SHELF sticking OUT from the bottom-OUTSIDE, full length =====
     box(comp, 0, 1.5, PT, PW, 3, 65, JOIN, [plate])           # Y 0-3 (bottom), out 65mm
+    # SHELF DOUBLER (owner photo, 31 Aug: the rail is "weak and wobbly" - its
+    # 3mm foundation flexes, not the rail).  A 5mm spine on the shelf top,
+    # split around the magnet/reed-wire corridor, stopping short of the
+    # channel-rib sweep and of the lock bosses/reed slot.  Welded to the
+    # shelf AND to the plate face, so it is also one long root gusset.
+    dx0, dx1 = INTERFACE.SHELF_DOUBLER_CORRIDOR
+    for x0, x1 in ((-INTERFACE.SHELF_DOUBLER_XMAX, dx0),
+                   (dx1, INTERFACE.SHELF_DOUBLER_XMAX)):
+        box(comp, (x0 + x1) / 2.0, 3.0 + INTERFACE.SHELF_DOUBLER_H / 2.0, PT,
+            x1 - x0, INTERFACE.SHELF_DOUBLER_H,
+            INTERFACE.SHELF_DOUBLER_ZMAX - PT, JOIN, [plate])
     # ===== RAILS the curved cover slides onto + clips down to (run along Z = the slide dir) =====
     # Rail position/size and the one slide clearance are shared contract data
     # now - the cover's channels and the fit coupons derive from the same

@@ -60,6 +60,13 @@ slide, click, screw and reopen per the pass criteria in their popup.
 - CAP: 4 screws (2 per side) in visible counterbored pads + 6 snap detents +
   lead-in chamfer; INDOOR variant carries the centred screen window + 2 LED
   holes (INDOOR_SCREEN=False restores the sealed weatherproof roof).
+- SHELF SPINE (owner PHOTO, 31 Aug: the rail is "weak and wobbly"): the rail
+  was fine - its foundation, a bare 3mm shelf wall, flexed. A 5mm doubler
+  slab on the shelf top makes an 8mm spine over everything the cover never
+  sweeps: edges 0.6 inside the channel-rib sweep (|x|<=128.5), split at the
+  magnet/reed-wire corridor (-25..-5), ending z50 before the lock bosses and
+  reed slot. Welded to shelf AND plate = one long root gusset. Coupon 3a
+  carries its segment, so the slide-over-spine clearance gets print-tested.
 - PRINTED-JOINT STRENGTH PASS (owner, 31 Aug: "the joints keep snapping and
   breaking off"): the cradle snap fingers were square 4mm hooks with no
   lead-in - clicking a device in bent each 2.5mm post ~1.4% at a layer-line

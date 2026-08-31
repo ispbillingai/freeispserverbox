@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-31.2'
+INTERFACE_VERSION = '2026-08-31.3'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -271,6 +271,7 @@ CRADLE_STRAP_H = 9.0
 CRADLE_FOOT_H = 3.0               # under-device root feet (device base is 6.5)
 CRADLE_FOOT_REACH = 2.0
 
+
 # ---------------------------------------------------------------------------
 # Front-closure TAMPER SENSING: reed switch + press-fit magnet (owner, 18 Aug)
 # ---------------------------------------------------------------------------
@@ -298,6 +299,23 @@ REED_SLOT_W = 3.2                 # groove in the shelf top, reed along X
 REED_SLOT_DEPTH = 2.0             # into the 3mm shelf (1mm left under it)
 REED_SLOT_LEN = 18.0
 REED_SLOT_Z0 = 57.0               # BottomLid-local Z (shell Y194..197.2)
+
+# ---------------------------------------------------------------------------
+# BottomLid SHELF DOUBLER (owner photo, 31 Aug: the rail is "weak and wobbly")
+# ---------------------------------------------------------------------------
+# The rails stand on a shelf that is a bare 3mm wall - the rail itself is
+# fine, its FOUNDATION flexes.  A 5mm doubler slab on the shelf top turns the
+# wall into an 8mm spine over the whole region the sliding cover never
+# touches: it stops 0.6mm short of the channel-rib sweep at |x|=129.1, skips
+# the magnet-pad corridor (the pad sweeps 1mm above the shelf at lid-local
+# x -23..-7, and the reed wires run there too), and ends at z50, clear of the
+# lock bosses (z54) and the reed slot (z57).  Welded to the shelf top AND to
+# the plate face at z3, it is also one continuous root gusset.
+SHELF_DOUBLER_H = 5.0
+SHELF_DOUBLER_ZMAX = 50.0
+SHELF_DOUBLER_XMAX = 128.5
+SHELF_DOUBLER_CORRIDOR = (-REED_X - MAGNET_PAD_SQ / 2.0 - 2.0,
+                          -REED_X + MAGNET_PAD_SQ / 2.0 + 2.0)
 REED_WIRE_HOLE_XY = (-15.0, 8.0)  # BottomLid-local; shell (+15, Z8), between
                                   # the router frame wall and the port row
 REED_WIRE_HOLE_D = 4.0
@@ -701,6 +719,15 @@ def validate():
         errors.append('cradle ramp band must curl less than the catch band')
     if CRADLE_FOOT_H > 3.4:
         errors.append('cradle root feet would lift the devices off their standoffs')
+    _rib_sweep = COVER_RAIL_X - COVER_RAIL_W / 2.0 - COVER_RAIL_CLR \
+        - COVER_CHANNEL_RIB_W
+    if SHELF_DOUBLER_XMAX > _rib_sweep - 0.5:
+        errors.append('shelf doubler reaches the cover channel-rib sweep')
+    if SHELF_DOUBLER_ZMAX > REED_SLOT_Z0 - 2.0 or SHELF_DOUBLER_ZMAX > 52.0:
+        errors.append('shelf doubler runs into the reed slot or lock bosses')
+    if SHELF_DOUBLER_CORRIDOR[0] > -REED_X - MAGNET_PAD_SQ / 2.0 or \
+            SHELF_DOUBLER_CORRIDOR[1] < -REED_X + MAGNET_PAD_SQ / 2.0:
+        errors.append('shelf doubler corridor does not clear the magnet sweep')
     if COVER_SEAT_DEPTH > 1.2:
         errors.append('cover seat recess cuts too deep into the 2.5mm face')
     if not 3.8 <= M3_INSERT_BORE_D <= 4.8:

@@ -917,7 +917,7 @@ def check_tree(root, label):
         world, p('FIR_BottomLid'), 'bottomlid')
     c.check('FIR_BottomLid run() completed',
             msgs and 'failed' not in msgs[-1])
-    c.check('FIR_BottomLid popup states v6', any('v6' in m for m in msgs))
+    c.check('FIR_BottomLid popup states v7', any('v7' in m for m in msgs))
     lid = body_named(lid_design, 'FIR Bottom Lid')
     lpads = [s for s in lid.solids('join', 'circle', 'xY')
              if near(s.shape[2], interface.M3_SEAT_PAD_D / 2.0)
@@ -1043,6 +1043,25 @@ def check_tree(root, label):
             len(relief) == 1
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
+
+    # ---- SHELF DOUBLER (owner photo, 31 Aug: wobbly rail).  Two slabs on
+    # the shelf top; they must stay clear of the channel-rib sweep and of the
+    # magnet corridor, or the cover jams on its first slide.
+    slabs = [b for b in lid.solids('join', 'rect', 'xY')
+             if near(b.shape[1], 3.0 + interface.SHELF_DOUBLER_H / 2.0)
+             and near(b.a1, interface.SHELF_DOUBLER_ZMAX)
+             and (b.shape[2] * 2) > 40.0]
+    rib_sweep = (interface.COVER_RAIL_X - interface.COVER_RAIL_W / 2.0
+                 - interface.COVER_RAIL_CLR - interface.COVER_CHANNEL_RIB_W)
+    c.check('BottomLid: 2 shelf-spine slabs, edges {:.1f} inside the rib '
+            'sweep at {:.1f}, magnet corridor open'
+            .format(rib_sweep - interface.SHELF_DOUBLER_XMAX + 0.0, rib_sweep),
+            len(slabs) == 2
+            and all(abs(b.shape[0]) + b.shape[2] <= rib_sweep - 0.4
+                    for b in slabs)
+            and all(b.shape[0] + b.shape[2] <= interface.SHELF_DOUBLER_CORRIDOR[0] + 0.01
+                    or b.shape[0] - b.shape[2] >= interface.SHELF_DOUBLER_CORRIDOR[1] - 0.01
+                    for b in slabs))
 
     # ---- SELF-CLICK rail detent (owner, 31 Aug: the printed cover "just
     # falls off - the rails are only a guide").  Bumps live on the LID's rail

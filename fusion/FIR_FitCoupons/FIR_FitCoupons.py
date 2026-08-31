@@ -260,6 +260,12 @@ def build_rail_lock_sections(comp):
         return oy - 40.0 + v
     # shelf + rail + key block + lock boss (geometry = FIR_BottomLid v3)
     box(comp, 0, ly(1.5), PT, 65, 3, 65, JOIN, [lid])
+    # shelf doubler segment (this slice spans lid-local -145..-80, so the
+    # spine portion -128.5..-80 lands here; the slide must clear it)
+    box(comp, lx((-INTERFACE.SHELF_DOUBLER_XMAX - 80.0) / 2.0),
+        ly(3.0 + INTERFACE.SHELF_DOUBLER_H / 2.0), PT,
+        INTERFACE.SHELF_DOUBLER_XMAX - 80.0, INTERFACE.SHELF_DOUBLER_H,
+        INTERFACE.SHELF_DOUBLER_ZMAX - PT, JOIN, [lid])
     box(comp, lx(-rail_x), ly(3 + INTERFACE.COVER_RAIL_H / 2.0), PT,
         INTERFACE.COVER_RAIL_W, INTERFACE.COVER_RAIL_H, 62, JOIN, [lid])
     box(comp, lx(-rail_x), ly(3 + INTERFACE.COVER_RAIL_H
