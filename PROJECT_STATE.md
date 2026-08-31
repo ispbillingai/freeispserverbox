@@ -60,6 +60,15 @@ slide, click, screw and reopen per the pass criteria in their popup.
 - CAP: 4 screws (2 per side) in visible counterbored pads + 6 snap detents +
   lead-in chamfer; INDOOR variant carries the centred screen window + 2 LED
   holes (INDOOR_SCREEN=False restores the sealed weatherproof roof).
+- COVER SELF-CLICK (owner, 31 Aug: the printed cover "just falls off - the
+  rails are only a guide"): stepped detent bumps on each BottomLid rail's
+  outboard face (0.8 catch / 0.4 lead-in, lid z14-20) snap into an 8mm gap in
+  the CurvedLid's outboard channel ribs (cover z47-55). Only the short rib
+  tail (z55-63) ever rides the bump, over the last ~14mm of travel, so the
+  slide stays free until it clicks. Interference 0.5mm; a firm pull frees it;
+  the 2 lock screws stay the security lock. Coupon pair 3 carries the detent
+  - reprint that pair to feel the click before reprinting the whole lid.
+  (The already-printed bottomlid.stl predates the bumps.)
 - FRONT: BottomLid with seated screws + reed groove; CurvedLid CURVED to the
   roof, landing FLUSH at Z120 with one 0.3mm shadow line (Ubiquiti-style
   seamless joint) - cover therefore slides on LAST, after the cap.

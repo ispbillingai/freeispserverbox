@@ -79,7 +79,9 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v4: TAMPER REED groove in the shelf (shell X+15, D4 wire hole into '
+VERSION = ('v5: SELF-CLICK rail detents - stepped bumps on the rail outboard faces, '
+           'the cover clicks home and holds without its screws; '
+           'TAMPER REED groove in the shelf (shell X+15, D4 wire hole into '
            'the box) + hard end stop, orientation key block, contract-driven '
            'rails; 6 face screws in visible pads (side pair now D10 - a D12 '
            'pad clipped the cover end wall) / interface {}'
@@ -239,6 +241,21 @@ def build(comp):
         box(comp, rx, 3 + INTERFACE.COVER_RAIL_H / 2.0, PT,
             INTERFACE.COVER_RAIL_W, INTERFACE.COVER_RAIL_H, 62,
             JOIN, [plate])                                    # rail: Y3-8, Z3-65 (slide guide)
+    # SELF-CLICK DETENT (owner, 31 Aug: the cover "just falls off - the rails
+    # are only a guide").  Stepped bump on each rail's OUTBOARD side face:
+    # square catch band toward the plate, half-proud lead-in band toward the
+    # shelf front; the cover's outboard rib gap drops over it at full seat and
+    # the cover holds itself.  Lock screws stay the security lock.
+    dz0, dlen = INTERFACE.COVER_DETENT_LID_Z0, INTERFACE.COVER_DETENT_LEN
+    for rx in (-rail_x, rail_x):
+        s_ = 1.0 if rx > 0 else -1.0
+        f = rx + s_ * (INTERFACE.COVER_RAIL_W / 2.0)
+        box(comp, f + s_ * INTERFACE.COVER_DETENT_PROUD / 2.0,
+            3 + INTERFACE.COVER_RAIL_H / 2.0, dz0,
+            INTERFACE.COVER_DETENT_PROUD, 4.0, dlen / 2.0, JOIN, [plate])
+        box(comp, f + s_ * INTERFACE.COVER_DETENT_STEP_PROUD / 2.0,
+            3 + INTERFACE.COVER_RAIL_H / 2.0, dz0 + dlen / 2.0,
+            INTERFACE.COVER_DETENT_STEP_PROUD, 4.0, dlen / 2.0, JOIN, [plate])
     # ORIENTATION KEY block, on top of the rail at lid-local -X = SHELL +X
     # (this plate is turned over on assembly).  The RIGHT cover's relieved
     # channel web stops 2.5mm short of it; a REVERSED cover's unrelieved web

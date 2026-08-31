@@ -106,8 +106,9 @@ SHOULDER_RISE = INTERFACE.COVER_SHOULDER_RISE
 SHOULDER_REACH = INTERFACE.COVER_SHOULDER_REACH
 SHOULDER_STEPS = INTERFACE.COVER_SHOULDER_STEPS
 
-# The rails guide the cover. The two front M3 screws are the positive lock;
-# there is no pretend snap/detent feature in this part.
+# The rails guide the cover; the rail DETENT (bump on the lid, gap in the
+# outboard rib here) clicks it home so it cannot fall off unscrewed, and the
+# two front M3 screws remain the positive security lock.
 # The slide interface (rail position, the ONE clearance value, the key and
 # the anti-rattle nubs) is shared contract data: a reviewer caught this file
 # declaring CLR=0.4 while hard-coding 0.3 in the rail maths - two competing
@@ -136,7 +137,7 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v9: KNOCKOUT cable notches - outline perforated right through, blank held by two 0.35mm hinges, push to pop out clean (no cutting); SEAMLESS - the shoulder lands FLUSH with the roof outer '
+VERSION = ('v10: SELF-CLICK - outboard rib gaps drop over the BottomLid rail bumps at full seat, the cover holds itself without its screws; KNOCKOUT cable notches - outline perforated right through, blank held by two 0.35mm hinges, push to pop out clean (no cutting); SEAMLESS - the shoulder lands FLUSH with the roof outer '
            'surface (Z120), tip butting the roof edge with one 0.3mm shadow '
            'line, so you cannot tell cover from cap. ASSEMBLY ORDER CHANGED: '
            'slide the cover on LAST, after the cap is closed - its hard end '
@@ -296,6 +297,14 @@ def build(comp):
         nub_h = CLR + INTERFACE.COVER_NUB_PROUD
         box(comp, sx, RAIL_TOP_Y + (CLR - INTERFACE.COVER_NUB_PROUD) / 2.0,
             nub_z0, 6.0, nub_h, INTERFACE.COVER_NUB_LEN, JOIN, [front])
+        # DETENT GAP (owner, 31 Aug): interrupt the OUTBOARD rib for 8mm so
+        # the BottomLid's stepped rail bump drops in at full seat.  The short
+        # rib segment behind the gap (z 55..63) is the catch: it rides the
+        # bump only over the last ~14mm of travel, clicks, and blocks the
+        # slide-out.  A firm pull flexes it free for service.
+        box(comp, sx + side * (half + rib_w / 2.0), rib_cy,
+            INTERFACE.COVER_DETENT_GAP_Z0, rib_w + 0.4, rib_h + 0.2,
+            INTERFACE.COVER_DETENT_GAP_LEN, CUT, [front])
     # ORIENTATION KEY relief: shorten the +shell-X channel web at its tub end
     # so it clears the BottomLid's key block.  A reversed cover presents its
     # UNrelieved web to the block and stops ~7mm proud with the lock seats

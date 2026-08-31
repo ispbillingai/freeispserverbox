@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-19.13'
+INTERFACE_VERSION = '2026-08-31.1'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -233,6 +233,22 @@ COVER_TAB_LEN = 25.0
 COVER_KEY_BLOCK_H = 2.5           # on the rail top
 COVER_KEY_BLOCK_LEN = 9.0         # from the lid plate face
 COVER_KEY_RELIEF_LEN = 9.5        # web shortened by this at the tub end
+# SELF-CLICK DETENT (owner, 31 Aug 2026: the printed cover "just falls off -
+# the rails are only a guide").  A stepped bump on each rail's OUTBOARD side
+# face snaps into an 8mm gap cut in the cover's outboard channel rib.  Only
+# the short rib segment behind the gap (cover-local z 55..63) ever rides the
+# bump, so the slide stays free until the last ~14mm, then clicks home and
+# HOLDS - the cap-detent pattern, applied to the drawer.  The two M3 lock
+# screws remain the security lock; a firm pull still frees the cover.
+# Frame note: at full seat, lid-local z = COVER_FACE_LIDZ - cover-local z
+# (the end-stop bosses put the cover's 2.5mm inner face at lid z 65.5).
+COVER_FACE_LIDZ = 68.0
+COVER_DETENT_LID_Z0 = 14.0        # bump band, lid-local z (key block ends 12)
+COVER_DETENT_LEN = 6.0            # catch half + lead-in half
+COVER_DETENT_PROUD = 0.8          # catch band, off the rail side face
+COVER_DETENT_STEP_PROUD = 0.4     # lead-in band (faces the shelf front)
+COVER_DETENT_GAP_Z0 = 47.0        # rib gap start, cover-local z
+COVER_DETENT_GAP_LEN = 8.0
 
 # ---------------------------------------------------------------------------
 # Front-closure TAMPER SENSING: reed switch + press-fit magnet (owner, 18 Aug)
@@ -641,6 +657,23 @@ def validate():
     if lid_land < 1.5:
         errors.append('BottomLid counterbore leaves only {:.1f}mm under the head'
                       .format(lid_land))
+    # Cover detent: the rib gap must swallow the bump at seat with slack,
+    # the bump must clear the orientation key block, the click interference
+    # must stay in the flexible range, and a real catch segment must remain
+    # between the gap and the channel end (cover z runs 2.5..63).
+    _gap_lid_lo = COVER_FACE_LIDZ - (COVER_DETENT_GAP_Z0 + COVER_DETENT_GAP_LEN)
+    _gap_lid_hi = COVER_FACE_LIDZ - COVER_DETENT_GAP_Z0
+    if not (_gap_lid_lo <= COVER_DETENT_LID_Z0 - 0.8
+            and COVER_DETENT_LID_Z0 + COVER_DETENT_LEN + 0.8 <= _gap_lid_hi):
+        errors.append('cover detent bump does not land in its rib gap at seat')
+    if COVER_DETENT_LID_Z0 < 3.0 + COVER_KEY_BLOCK_LEN + 1.5:
+        errors.append('cover detent bump crowds the orientation key block')
+    if not 0.3 <= COVER_DETENT_PROUD - COVER_RAIL_CLR <= 0.7:
+        errors.append('cover detent interference outside 0.3..0.7mm')
+    if COVER_DETENT_STEP_PROUD >= COVER_DETENT_PROUD:
+        errors.append('cover detent lead-in step must be under the catch band')
+    if 63.0 - (COVER_DETENT_GAP_Z0 + COVER_DETENT_GAP_LEN) < 5.0:
+        errors.append('cover detent catch rib segment shorter than 5mm')
     if COVER_SEAT_DEPTH > 1.2:
         errors.append('cover seat recess cuts too deep into the 2.5mm face')
     if not 3.8 <= M3_INSERT_BORE_D <= 4.8:

@@ -917,7 +917,7 @@ def check_tree(root, label):
         world, p('FIR_BottomLid'), 'bottomlid')
     c.check('FIR_BottomLid run() completed',
             msgs and 'failed' not in msgs[-1])
-    c.check('FIR_BottomLid popup states v4', any('v4' in m for m in msgs))
+    c.check('FIR_BottomLid popup states v5', any('v5' in m for m in msgs))
     lid = body_named(lid_design, 'FIR Bottom Lid')
     lpads = [s for s in lid.solids('join', 'circle', 'xY')
              if near(s.shape[2], interface.M3_SEAT_PAD_D / 2.0)
@@ -1043,6 +1043,59 @@ def check_tree(root, label):
             len(relief) == 1
             and web_tip_shell_y - block_end_shell_y >= 1.5
             and interface.COVER_KEY_BLOCK_H - interface.COVER_RAIL_CLR >= 1.0)
+
+    # ---- SELF-CLICK rail detent (owner, 31 Aug: the printed cover "just
+    # falls off - the rails are only a guide").  Bumps live on the LID's rail
+    # outboard faces; gaps live in the COVER's outboard ribs; at full seat
+    # (lid z = COVER_FACE_LIDZ - cover z) each bump must land inside its gap
+    # with slack, and a catch rib segment must remain behind the gap.
+    det_bumps = [b for b in lid.solids('join', 'rect', 'xY')
+                 if b.shape[2] * 2 <= 1.0
+                 and near(abs(b.shape[0]),
+                          interface.COVER_RAIL_X + interface.COVER_RAIL_W / 2.0
+                          + b.shape[2])]
+    c.check('BottomLid: 4 detent bump bands (catch + lead-in on each rail), '
+            'catch {:.1f} proud / lead-in {:.1f}'
+            .format(interface.COVER_DETENT_PROUD,
+                    interface.COVER_DETENT_STEP_PROUD),
+            len(det_bumps) == 4
+            and sorted(round(b.shape[2] * 2, 1) for b in det_bumps)
+            == sorted([interface.COVER_DETENT_PROUD,
+                       interface.COVER_DETENT_STEP_PROUD] * 2)
+            and all(near(b.a0, interface.COVER_DETENT_LID_Z0)
+                    or near(b.a0, interface.COVER_DETENT_LID_Z0
+                            + interface.COVER_DETENT_LEN / 2.0)
+                    for b in det_bumps))
+    det_gaps = [g for g in cover.solids('cut', 'rect', 'xY')
+                if near(g.a0, interface.COVER_DETENT_GAP_Z0)
+                and near(g.a1 - g.a0, interface.COVER_DETENT_GAP_LEN)]
+    c.check('CurvedLid: 2 outboard rib detent gaps ({}mm at cover z{})'
+            .format(interface.COVER_DETENT_GAP_LEN,
+                    interface.COVER_DETENT_GAP_Z0),
+            len(det_gaps) == 2
+            and sorted(round(g.shape[0], 1) for g in det_gaps)
+            == sorted(round(v, 1) for v in
+                      (-(interface.COVER_RAIL_X + interface.COVER_RAIL_W / 2.0
+                         + interface.COVER_RAIL_CLR
+                         + interface.COVER_CHANNEL_RIB_W / 2.0),
+                       interface.COVER_RAIL_X + interface.COVER_RAIL_W / 2.0
+                       + interface.COVER_RAIL_CLR
+                       + interface.COVER_CHANNEL_RIB_W / 2.0)))
+    gap_lid_lo = interface.COVER_FACE_LIDZ - (interface.COVER_DETENT_GAP_Z0
+                                              + interface.COVER_DETENT_GAP_LEN)
+    gap_lid_hi = interface.COVER_FACE_LIDZ - interface.COVER_DETENT_GAP_Z0
+    c.check('cover detent: at seat the bump ({:.0f}..{:.0f}) sits inside its '
+            'rib gap ({:.0f}..{:.0f}) with >=0.8mm slack; click interference '
+            '{:.2f}mm; catch segment {:.0f}mm'
+            .format(interface.COVER_DETENT_LID_Z0,
+                    interface.COVER_DETENT_LID_Z0 + interface.COVER_DETENT_LEN,
+                    gap_lid_lo, gap_lid_hi,
+                    interface.COVER_DETENT_PROUD - interface.COVER_RAIL_CLR,
+                    63.0 - (interface.COVER_DETENT_GAP_Z0
+                            + interface.COVER_DETENT_GAP_LEN)),
+            gap_lid_lo <= interface.COVER_DETENT_LID_Z0 - 0.8
+            and interface.COVER_DETENT_LID_Z0 + interface.COVER_DETENT_LEN
+            + 0.8 <= gap_lid_hi)
 
     side_slots = [x for x in cover.solids('cut', 'rect', 'xY')
                   if near(2 * x.shape[2], cov_mod.KNOCK_SLOT)

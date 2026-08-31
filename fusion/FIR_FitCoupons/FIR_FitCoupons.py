@@ -266,6 +266,15 @@ def build_rail_lock_sections(comp):
                               + INTERFACE.COVER_KEY_BLOCK_H / 2.0), PT,
         INTERFACE.COVER_RAIL_W, INTERFACE.COVER_KEY_BLOCK_H,
         INTERFACE.COVER_KEY_BLOCK_LEN, JOIN, [lid])
+    # rail detent bump (outboard face of this lid-local -X rail = its -x side)
+    dz0, dlen = INTERFACE.COVER_DETENT_LID_Z0, INTERFACE.COVER_DETENT_LEN
+    df = -rail_x - INTERFACE.COVER_RAIL_W / 2.0
+    box(comp, lx(df - INTERFACE.COVER_DETENT_PROUD / 2.0),
+        ly(3 + INTERFACE.COVER_RAIL_H / 2.0), dz0,
+        INTERFACE.COVER_DETENT_PROUD, 4.0, dlen / 2.0, JOIN, [lid])
+    box(comp, lx(df - INTERFACE.COVER_DETENT_STEP_PROUD / 2.0),
+        ly(3 + INTERFACE.COVER_RAIL_H / 2.0), dz0 + dlen / 2.0,
+        INTERFACE.COVER_DETENT_STEP_PROUD, 4.0, dlen / 2.0, JOIN, [lid])
     box(comp, lx(-lock_x), ly(9.5), PT + 54,
         INTERFACE.COVER_LOCK_BOSS_W, 13, 8.5, JOIN, [lid])
     cyl(comp, lx(-lock_x), ly(12), PT + 54,
@@ -308,6 +317,10 @@ def build_rail_lock_sections(comp):
     nub_h = CLR + INTERFACE.COVER_NUB_PROUD
     box(comp, sx, cy(RAIL_TOP_Y + (CLR - INTERFACE.COVER_NUB_PROUD) / 2.0),
         46.0, 6.0, nub_h, INTERFACE.COVER_NUB_LEN, JOIN, [cov])
+    # detent gap in the OUTBOARD rib (+x side of this +X channel slice)
+    box(comp, sx + (half + rib_w / 2.0), cy(rib_cy),
+        INTERFACE.COVER_DETENT_GAP_Z0, rib_w + 0.4, rib_h + 0.2,
+        INTERFACE.COVER_DETENT_GAP_LEN, CUT, [cov])
     box(comp, sx, cy(web_cy + 0.1), TZ1 - INTERFACE.COVER_KEY_RELIEF_LEN,
         2.0 * (half + rib_w) + 0.4, 3.4,
         INTERFACE.COVER_KEY_RELIEF_LEN + 1.0, CUT, [cov])
