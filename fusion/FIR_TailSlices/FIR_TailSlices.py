@@ -1,27 +1,28 @@
 # FIR_TailSlices.py - Autodesk Fusion 360 script
-# TAIL-END TEST SLICES OF THE REAL PARTS (owner, 21 Aug): "print the whole
-# box, then slice the last tenth - as easy as that, not just parts."
+# TAIL-END TEST SLICES (owner, 31 Aug): "the ROOF LID and the BOTTOM LID -
+# cut them at the tail end, like the last eighth of both."  (Replaces the
+# 21 Aug tub+cap corner pair: the tub is already printed in full, and the
+# BottomLid print carries the OLD weak-joint geometry, so the two parts
+# worth slicing now are the two lids.)
 #
-# This script builds the ACTUAL tub (FIR_Shell) and the ACTUAL top lid
-# (FIR_TopLid) with their own real builders - nothing redrawn, nothing
-# approximated - then cuts away everything except the BOTTOM-END strip
-# (shell Y >= 70, the last ~70mm where the whole front closure lives).
-# Print the two slices plus the REAL FIR_BottomLid and the REAL FIR_CurvedLid
-# and you can assemble and close the entire busy bottom end:
+# This script builds the ACTUAL FIR_BottomLid and the ACTUAL FIR_TopLid with
+# their own real builders - nothing redrawn, nothing approximated - then cuts
+# each down to its KEY-END strip, roughly the last eighth of the width.  Both
+# strips are the SAME assembled corner of the box (shell +X), so they test
+# the same neighbourhood the owner photographed.
 #
-#   1. screw the real BottomLid onto the TUB TAIL - all SIX bosses are in
-#      the slice, so every screw is tested;
-#   2. slide the real CurvedLid home on its rails, click, lock;
-#   3. drop the TOP LID TAIL over the tub wall: 0.5mm slide fit, chamfer
-#      lead-in, and its two Y+85 screws must line up at Z72 through the
-#      visible pads;
-#   4. the cover's shoulder must land on the cap tail's roof edge with the
-#      0.3mm hairline - the seamless joint, tested for real.
-#
-# The screen window and LED holes also land inside the cap slice, so the
-# Landzo module can be trial-fitted once it is measured.
-# Because both slices are cut at the SAME shell line, they correspond to the
-# same region of the assembled box and mate exactly like the full parts.
+#   TAIL 1  BottomLid end strip (lid-local x <= -105, 35mm): the rail WITH
+#           its new detent bumps, the 8mm shelf spine edge, the +-111 gusset,
+#           the orientation KEY block, the lock boss / hard end stop, and two
+#           of the six face screws.  Slide COUPON 3b (or the real cover) on:
+#           it must run free, CLICK at full seat, hold, and unclick with a
+#           firm pull - and the rail must feel SOLID, not wobbly.
+#   TAIL 2  TopLid end strip (cap-local x <= -109, ~36mm): that side wall
+#           with ALL its screw seat pads, the snap-detent windows, the
+#           lead-in chamfer and the roof edge.  Drop it over the printed
+#           tub's +X wall (the assembly flip lands this strip on that side):
+#           slide fit, click, screws line up at Z72, and the cover shoulder
+#           lands on its roof edge with the 0.3mm hairline.
 
 import importlib.util
 import os
@@ -29,14 +30,11 @@ import sys
 
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
-TAIL_KEEP_Y = 70.0                # keep shell Y >= this (the bottom end)
-TAIL_KEEP_X = 60.0                # ...and only the |X| >= this corner: the
-                                  # slices are small CORNER BLOCKS now
-                                  # (~80 x 70mm each), one body per print.
-                                  # The tub keeps its +X corner; the cap
-                                  # keeps its local -X corner, which the
-                                  # assembly flip lands on that SAME corner,
-                                  # so the two blocks mate exactly.
+LID_TAIL_XMAX = -105.0            # BottomLid: keep lid-local x <= this
+                                  # (280/8 = 35mm; the key/rail end)
+CAP_TAIL_XMAX = -109.0            # TopLid: keep cap-local x <= this
+                                  # (~291/8; the assembly flip lands this
+                                  # strip on the SAME shell +X corner)
 
 CM = 0.1
 
@@ -88,15 +86,9 @@ def _cut_rect(comp, body, x0, x1, y0, y1):
     f.add(ei)
 
 
-def tail_cut(comp, body, keep_x_sign):
-    """Keep only the bottom-end CORNER, in the part's own frame."""
-    # everything below the keep line goes
-    _cut_rect(comp, body, -250.0, 250.0, -400.0, TAIL_KEEP_Y)
-    # ...and everything on the far side of the keep-X line goes too
-    if keep_x_sign > 0:
-        _cut_rect(comp, body, -400.0, TAIL_KEEP_X, -400.0, 400.0)
-    else:
-        _cut_rect(comp, body, -TAIL_KEEP_X, 400.0, -400.0, 400.0)
+def tail_cut(comp, body, keep_xmax):
+    """Keep only the end strip x <= keep_xmax, in the part's own frame."""
+    _cut_rect(comp, body, keep_xmax, 400.0, -400.0, 400.0)
 
 
 def translate_body(comp, body, dx, dy, dz):
@@ -133,41 +125,42 @@ def run(context):
                 except Exception:
                     pass
 
-        # 1. the REAL tub, then the tail cut
-        shell_source = _load_active_builder('FIR_Shell')
-        del shell_source.SKIPPED[:]
-        tub = shell_source.build(comp)
-        tail_cut(comp, tub, +1)
-        tub.name = ('TAIL 1: TUB corner (real FIR_Shell, X>={:.0f} Y>={:.0f}) '
-                    '- 2 BottomLid bosses + the Y85 cap boss + rail'
-                    .format(TAIL_KEEP_X, TAIL_KEEP_Y))
+        # 1. the REAL BottomLid, cut to its key-end strip
+        lid_source = _load_active_builder('FIR_BottomLid')
+        del lid_source.SKIPPED[:]
+        lid = lid_source.build(comp)
+        tail_cut(comp, lid, LID_TAIL_XMAX)
+        lid.name = ('TAIL 1: BOTTOM LID end strip (real FIR_BottomLid, '
+                    'x<={:.0f}) - rail + DETENT + spine + KEY + boss + 2 screws'
+                    .format(LID_TAIL_XMAX))
 
-        # 2. the REAL top lid, then the same cut (its print frame keeps the
-        #    front at +Y, so the same line slices the same assembled region)
+        # 2. the REAL top lid, cut to the matching end strip (the assembly
+        #    flip lands this local -X strip on the SAME shell +X corner)
         toplid_source = _load_active_builder('FIR_TopLid')
         del toplid_source.SKIPPED[:]
         cap = toplid_source.build_top_lid(comp, 0.0)
-        # the cap keeps its local -X corner: the assembly flip lands it on
-        # the same corner the tub block keeps, so the two blocks mate
-        tail_cut(comp, cap, -1)
-        cap.name = ('TAIL 2: TOP LID corner (real FIR_TopLid, local X<=-{:.0f} '
-                    'Y>={:.0f}) - seat pad, front wall, chamfer, roof edge'
-                    .format(TAIL_KEEP_X, TAIL_KEEP_Y))
+        tail_cut(comp, cap, CAP_TAIL_XMAX)
+        cap.name = ('TAIL 2: TOP LID end strip (real FIR_TopLid, local '
+                    'x<={:.0f}) - side wall, screw pads, detent windows, '
+                    'chamfer, roof edge'.format(CAP_TAIL_XMAX))
         translate_body(comp, cap, 330.0, 0.0, 0.0)
 
         app.activeViewport.fit()
         ui.messageBox(
-            'FIR_TailSlices built 2 small CORNER BLOCKS cut from the REAL '
-            'parts (~80x70mm each). Export and print them SEPARATELY: '
-            'right-click a body > Save As Mesh.\n\n'
-            'The corner test:\n'
-            ' 1. screw the real BottomLid end onto TAIL 1 (2 screws);\n'
-            ' 2. slide the real CurvedLid end onto its rail;\n'
-            ' 3. drop TAIL 2 over TAIL 1 wall - slide fit, chamfer, and the '
-            'Y85 screw must line up at Z72 through the pad;\n'
+            'FIR_TailSlices built the LAST-EIGHTH end strips of the TWO LIDS '
+            '(owner, 31 Aug). Export and print them SEPARATELY: right-click '
+            'a body > Save As Mesh.\n\n'
+            'The tail test:\n'
+            ' 1. TAIL 1 in hand: the rail must feel SOLID (8mm spine), not '
+            'wobbly like the old print;\n'
+            ' 2. slide COUPON 3b (or the real cover end) onto TAIL 1: free '
+            'run, CLICK at full seat, holds, firm pull unclicks;\n'
+            ' 3. drop TAIL 2 over the printed tub +X wall: slide fit, '
+            'detents click into its windows, screws line up at Z72 through '
+            'the visible pads;\n'
             ' 4. the cover shoulder must land on TAIL 2 roof edge with the '
             '0.3mm hairline.\n\n'
-            'Anything that fights = one contract number + a corner reprint.')
+            'Anything that fights = one contract number + a strip reprint.')
     except:  # noqa
         if ui:
             ui.messageBox('FIR_TailSlices failed:\n{}'.format(traceback.format_exc()))

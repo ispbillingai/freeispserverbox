@@ -1274,34 +1274,31 @@ def check_tree(root, label):
             msgs and 'failed' not in msgs[-1])
     tails = [b for b in ts_design.rootComponent.bodies_list
              if b.name.startswith('TAIL')]
-    c.check('TailSlices: 2 REAL tail slices (tub + top lid)', len(tails) == 2)
+    c.check('TailSlices: 2 REAL tail slices (BOTTOM lid + TOP lid end strips)',
+            len(tails) == 2)
     if len(tails) == 2:
-        tub_t, cap_t = tails[0], tails[1]
-        keep = ts_mod.TAIL_KEEP_Y
-        # material probes: solid in the kept strip, EMPTY below the line
-        # (the stub's aabb only sums joins, so probe the actual CSG)
-        ok_cut = (tub_t.material_at((138.5, 100.0, 40.0))      # +X wall kept
-                  and not tub_t.material_at((0.0, -138.5, 40.0))   # back gone
-                  and not tub_t.material_at((0.0, 130.0, 1.5))     # mid-front gone
-                  and not tub_t.material_at((-138.5, 100.0, 40.0))  # -X wall gone
-                  and not tub_t.material_at((138.5, keep - 5.0, 40.0))
-                  and cap_t.material_at((330.0 - 141.7, 100.0, 30.0))
-                  and not cap_t.material_at((330.0 + 141.7, 100.0, 30.0))
-                  and not cap_t.material_at((330.0 - 141.7, -100.0, 30.0)))
-        c.check('TailSlices: everything below shell Y{:.0f} is cut away - the '
-                'slices are the genuine last stretch of each part'
-                .format(keep), ok_cut)
-        lid_pilots = [x for x in tub_t.solids('cut', 'circle', 'xZ')
-                      if near(x.shape[2],
-                              interface.BOTTOM_LID_BOSS_PILOT_D / 2.0)
-                      and x.world_centre()[0] > ts_mod.TAIL_KEEP_X]
-        cap_pilots = [x for x in tub_t.solids('cut', 'circle', 'yZ')
-                      if near(x.shape[2], interface.CAP_BOSS_PILOT_D / 2.0)
-                      and x.world_centre()[1] > keep
-                      and (x.a0 + x.a1) / 2.0 > ts_mod.TAIL_KEEP_X]
-        c.check('TailSlices: the corner keeps 2 BottomLid pilots + the Y85 '
-                'cap pilot on its wall',
-                len(lid_pilots) == 2 and len(cap_pilots) == 1)
+        lid_t, cap_t = tails[0], tails[1]
+        # material probes: solid inside each kept strip, EMPTY outside it
+        ok_cut = (lid_t.material_at((-133.0, 5.5, 30.0))          # rail kept
+                  and lid_t.material_at((-120.0, 40.0, 1.5))      # plate kept
+                  and not lid_t.material_at((0.0, 40.0, 1.5))     # centre gone
+                  and not lid_t.material_at((133.0, 5.5, 30.0))   # far rail gone
+                  and cap_t.material_at((330.0 - 141.7, 0.0, 30.0))
+                  and not cap_t.material_at((330.0 + 141.7, 0.0, 30.0))
+                  and not cap_t.material_at((330.0, 0.0, 1.5)))
+        c.check('TailSlices: each lid is cut to its last-eighth end strip '
+                '(lid x<={:.0f}, cap local x<={:.0f})'
+                .format(ts_mod.LID_TAIL_XMAX, ts_mod.CAP_TAIL_XMAX), ok_cut)
+        # the strip must carry the features the owner is actually testing:
+        # the detent bump bands on the kept rail and 2 of the 6 face screws
+        strip_bumps = [b for b in lid_t.solids('join', 'rect', 'xY')
+                       if b.shape[2] * 2 <= 1.0
+                       and b.shape[0] < ts_mod.LID_TAIL_XMAX]
+        strip_screws = [x for x in lid_t.solids('cut', 'circle', 'xY')
+                        if near(x.shape[2], 3.5 / 2.0)
+                        and x.shape[0] < ts_mod.LID_TAIL_XMAX]
+        c.check('TailSlices: TAIL 1 carries the rail detent bumps + 2 face '
+                'screws', len(strip_bumps) == 2 and len(strip_screws) == 2)
 
     # ---------------- FIR_ShellCheck, both modes -------------------------
     for shells_only in (True, False):
