@@ -34,7 +34,7 @@ slide, click, screw and reopen per the pass criteria in their popup.
 - 2 wall screws 4.5 x 40 + plugs (the box hangs on their heads)
 - M3 self-tappers: 4 cap sides, 6 port face, 2 cover locks (+ the brain
   stack's own M3s, settled earlier)
-- M4 x 10: 2 horn wing screws; M4 x 8: 3 horn foot bolts (bench, into sled)
+- M4 x 10: 2 horn bolts (rear foot holes, straight into the floor pads)
 - 2 magnets D12.1 x 4.7 (measured), 2 reed switches, green + red 5mm LEDs
 - Landzo 3.5" TFT (UNO/Mega shield) for the cap roof window
 
@@ -44,7 +44,7 @@ slide, click, screw and reopen per the pass criteria in their popup.
    cap. 2. BENCH-TEST reed+magnet at ~10.5mm in both orientations (head-on
    for the cover pair, face-down/beside for the cap pair). 3. Heat-set
    inserts: geometry is one flag per closure; needs the purchase + the real
-   insert's bore. 4. Still unmeasured: horn foot 99mm (sled only), switch
+   insert's bore. 4. Still unmeasured: horn foot 99mm (now moves the tub's two floor pads), switch
    jack height 11.5mm, adapter 46x46x52. 5. Wall-plate load test is OBSOLETE
    (no plate any more); the keyhole mount hangs on two screws - sanity-check
    on the wall with the empty tub before loading it.
@@ -74,7 +74,8 @@ slide, click, screw and reopen per the pass criteria in their popup.
   seamless joint) - cover therefore slides on LAST, after the cap.
 - TAMPER: two reed+magnet pairs (cover ~10.3mm, cap ~10.4mm), press-fit
   D12.05 pockets, nothing visible outside.
-- HORN: bench-bolted to its sled, two wing screws, NO cage (owner).
+- HORN: bolts DIRECTLY to two floor pads (M4 x 10, rear foot holes, apex
+  unused) - NO sled, NO cage (owner, 19 Aug).
 - PRINTER: Ender 3 Plus 300x300x340 is a hard envelope check in the harness.
 - VERIFICATION: `python tools/fusion_offline_check.py [deployed_dir]` after
   every change - it measures real Fusion behaviour (plane conventions were
