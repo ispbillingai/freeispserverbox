@@ -60,6 +60,17 @@ slide, click, screw and reopen per the pass criteria in their popup.
 - CAP: 4 screws (2 per side) in visible counterbored pads + 6 snap detents +
   lead-in chamfer; INDOOR variant carries the centred screen window + 2 LED
   holes (INDOOR_SCREEN=False restores the sealed weatherproof roof).
+- PRINTED-JOINT STRENGTH PASS (owner, 31 Aug: "the joints keep snapping and
+  breaking off"): the cradle snap fingers were square 4mm hooks with no
+  lead-in - clicking a device in bent each 2.5mm post ~1.4% at a layer-line
+  root, guaranteed breakage. Now: 1.8mm curl with a half-curl ramp band
+  (device wedges the finger open, peak strain ~0.6%), a 1.2mm strap tying
+  each hook down its post's outer face (kills hook peel-off), and 3mm root
+  feet under the devices. BottomLid gets two stepped shelf gussets at +-111
+  (clear of slot/RJ45/bosses/rails/magnet sweep). The cover detent softened
+  to 0.3mm interference on a 10mm rib tail for the same layer-line reason.
+  The printed tubshell.stl/bottomlid.stl predate ALL of this - reprint after
+  coupons.
 - COVER SELF-CLICK (owner, 31 Aug: the printed cover "just falls off - the
   rails are only a guide"): stepped detent bumps on each BottomLid rail's
   outboard face (0.8 catch / 0.4 lead-in, lid z14-20) snap into an 8mm gap in

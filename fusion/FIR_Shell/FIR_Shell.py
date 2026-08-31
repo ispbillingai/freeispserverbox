@@ -418,7 +418,11 @@ def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, la
     #   post leaves the material above it hanging on nothing.
     wt, clr, P = 2.5, 0.5, 14.0
     hw, hd = w / 2 + clr, d / 2 + clr
-    HK = 4.0                                                                          # how far the hook curls IN
+    # 31 Aug rework after printed fingers kept snapping: 1.8mm curl with a
+    # half-curl ramp band (wedges open gradually), an outer strap tying each
+    # hook down its post, and root feet under the device.  See the contract.
+    HK = INTERFACE.CRADLE_HOOK_CURL
+    RAMP = INTERFACE.CRADLE_HOOK_RAMP
 
     def part(fx, fy, z0, sx, sy, sz, what):
         # Build one cradle feature, trimmed to whatever hangs above it, and return the
@@ -441,10 +445,20 @@ def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, la
     # back: 3 posts that RISE PAST the device top, each with a hook growing off the post + curling IN
     for px in (cx - hw + P / 2, cx, cx + hw - P / 2):
         top = part(px, cy - hd - wt / 2, FLOOR, P, wt, h + 4, 'back post')             # back post (rises to h+4)
+        part(px, cy - hd + INTERFACE.CRADLE_FOOT_REACH / 2.0, FLOOR,
+             P, INTERFACE.CRADLE_FOOT_REACH, INTERFACE.CRADLE_FOOT_H,
+             'post root foot')                                                         # under the device, widens the floor weld
         # A hook only makes sense on a post that still reaches the device top; growing one
         # off a trimmed post would leave it floating in mid-air.
         if top is not None and top >= FLOOR + h - 1e-6:
-            part(px, cy - hd + HK / 2, FLOOR + h, P, wt + HK, 3, 'back hook')          # hook, curls IN over top
+            part(px, cy - hd - wt - INTERFACE.CRADLE_STRAP_T / 2.0 + 0.2,
+                 FLOOR + h - INTERFACE.CRADLE_STRAP_H + 3.0, P,
+                 INTERFACE.CRADLE_STRAP_T + 0.4, INTERFACE.CRADLE_STRAP_H,
+                 'hook strap')                                                         # ties the hook down the post's outer face
+            part(px, cy - hd + (HK - wt) / 2.0, FLOOR + h,
+                 P, wt + HK, 1.5, 'back hook catch')                                   # full 1.8 curl - the retention lip
+            part(px, cy - hd + (RAMP - wt) / 2.0, FLOOR + h + 1.5,
+                 P, wt + RAMP, 1.5, 'back hook ramp')                                  # half curl on top = lead-in
     # front arms sit 11mm BACK from the device front: the lid's holding frames own the front 10mm
     # (tub Y127-137) and the arms used to occupy the exact same space - the lid could not seat.
     fyc = cy + hd - 11 - P / 2
@@ -453,9 +467,22 @@ def cradle_grip(comp, sh, cx, cy, w, d, h, ceiling=None, side_post_clip=None, la
         if side_post_clip and side_post_clip[0] == s:
             side_h = max(0.0, side_post_clip[1] - FLOOR)
         part(cx + s * (hw + wt / 2), cy - hd + P / 2, FLOOR, wt, P, side_h, 'back side post')
+        part(cx + s * (hw - INTERFACE.CRADLE_FOOT_REACH / 2.0),
+             cy - hd + P / 2, FLOOR, INTERFACE.CRADLE_FOOT_REACH, P,
+             INTERFACE.CRADLE_FOOT_H, 'side post root foot')
         top = part(cx + s * (hw + wt / 2), fyc, FLOOR, wt, P, h + 5, 'front arm')      # rises past top
+        part(cx + s * (hw - INTERFACE.CRADLE_FOOT_REACH / 2.0), fyc, FLOOR,
+             INTERFACE.CRADLE_FOOT_REACH, P, INTERFACE.CRADLE_FOOT_H,
+             'front arm root foot')
         if top is not None and top >= FLOOR + h - 1e-6:
-            part(cx + s * (hw - 0.75), fyc, FLOOR + h, HK + wt, P, 3, 'front hook')    # hook, curls IN
+            part(cx + s * (hw + wt + INTERFACE.CRADLE_STRAP_T / 2.0 - 0.2), fyc,
+                 FLOOR + h - INTERFACE.CRADLE_STRAP_H + 3.0,
+                 INTERFACE.CRADLE_STRAP_T + 0.4, P, INTERFACE.CRADLE_STRAP_H,
+                 'front hook strap')
+            part(cx + s * (hw + (wt - HK) / 2.0), fyc, FLOOR + h,
+                 HK + wt, P, 1.5, 'front hook catch')                                  # full curl lip
+            part(cx + s * (hw + (wt - RAMP) / 2.0), fyc, FLOOR + h + 1.5,
+                 RAMP + wt, P, 1.5, 'front hook ramp')                                 # lead-in on top
         part(cx + s * w / 4, cy - hd + 2, FLOOR, 3, 3, 3, 'alignment lug')
     return
 
@@ -789,7 +816,9 @@ def horn_clearances():
     return checks
 
 
-VERSION = ('v43: TUB ONLY (the cap is FIR_TopLid now); horn bolts DIRECTLY to '
+VERSION = ('v44: GENTLE cradle fingers - 1.8mm ramped hooks, outer straps, root '
+           'feet (the old square 4mm hooks snapped printed posts); TUB ONLY '
+           '(the cap is FIR_TopLid now); horn bolts DIRECTLY to '
            'two floor pads - no sled, no cage; tamper reed senses the CURVED '
            'LID only, so the top-rail groove is gone; blind watertight '
            'keyholes; floor prints flat / interface {}'

@@ -21,7 +21,7 @@ deployment location.
 
 import math
 
-INTERFACE_VERSION = '2026-08-31.1'
+INTERFACE_VERSION = '2026-08-31.2'
 
 # Electronics tray: FIR_ModulePlate
 #
@@ -243,12 +243,33 @@ COVER_KEY_RELIEF_LEN = 9.5        # web shortened by this at the tub end
 # Frame note: at full seat, lid-local z = COVER_FACE_LIDZ - cover-local z
 # (the end-stop bosses put the cover's 2.5mm inner face at lid z 65.5).
 COVER_FACE_LIDZ = 68.0
-COVER_DETENT_LID_Z0 = 14.0        # bump band, lid-local z (key block ends 12)
+# Softened 31 Aug after the owner reported printed joints snapping: PETG
+# flexed across FDM layer lines takes far less strain than the bulk plastic.
+# 0.3mm of click interference on a 10mm rib tail keeps root strain well under
+# the layer-bond limit; 0.5mm on an 8mm tail did not.
+COVER_DETENT_LID_Z0 = 16.0        # bump band, lid-local z (key block ends 12)
 COVER_DETENT_LEN = 6.0            # catch half + lead-in half
-COVER_DETENT_PROUD = 0.8          # catch band, off the rail side face
-COVER_DETENT_STEP_PROUD = 0.4     # lead-in band (faces the shelf front)
-COVER_DETENT_GAP_Z0 = 47.0        # rib gap start, cover-local z
+COVER_DETENT_PROUD = 0.6          # catch band, off the rail side face
+COVER_DETENT_STEP_PROUD = 0.3     # lead-in band (faces the shelf front)
+COVER_DETENT_GAP_Z0 = 45.0        # rib gap start, cover-local z
 COVER_DETENT_GAP_LEN = 8.0
+
+# ---------------------------------------------------------------------------
+# Device cradle fingers (owner, 31 Aug: "the joints keep snapping")
+# ---------------------------------------------------------------------------
+# The old snap hooks were square blocks curling 4.0mm over the device with NO
+# lead-in: clicking a device in forced each 2.5mm post to bend the full 4mm,
+# ~1.4% strain at a root made of stacked layers - they snapped as designed.
+# Now: a 1.8mm curl with a half-curl ramp band on top (the device wedges the
+# finger open gradually, peak strain ~0.6%), a 1.2mm strap tying each hook
+# down the post's outer face (kills the peel-off failure at the hook joint),
+# and a 3mm root foot tucked under the device (more weld area at the floor).
+CRADLE_HOOK_CURL = 1.8
+CRADLE_HOOK_RAMP = 0.9            # upper band curl = gentler first contact
+CRADLE_STRAP_T = 1.2              # hook-to-post outer strap
+CRADLE_STRAP_H = 9.0
+CRADLE_FOOT_H = 3.0               # under-device root feet (device base is 6.5)
+CRADLE_FOOT_REACH = 2.0
 
 # ---------------------------------------------------------------------------
 # Front-closure TAMPER SENSING: reed switch + press-fit magnet (owner, 18 Aug)
@@ -674,6 +695,12 @@ def validate():
         errors.append('cover detent lead-in step must be under the catch band')
     if 63.0 - (COVER_DETENT_GAP_Z0 + COVER_DETENT_GAP_LEN) < 5.0:
         errors.append('cover detent catch rib segment shorter than 5mm')
+    if CRADLE_HOOK_CURL > 2.5:
+        errors.append('cradle hook curl over 2.5mm snaps printed posts again')
+    if CRADLE_HOOK_RAMP >= CRADLE_HOOK_CURL:
+        errors.append('cradle ramp band must curl less than the catch band')
+    if CRADLE_FOOT_H > 3.4:
+        errors.append('cradle root feet would lift the devices off their standoffs')
     if COVER_SEAT_DEPTH > 1.2:
         errors.append('cover seat recess cuts too deep into the 2.5mm face')
     if not 3.8 <= M3_INSERT_BORE_D <= 4.8:

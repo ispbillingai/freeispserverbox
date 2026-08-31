@@ -79,7 +79,7 @@ JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
 CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
 SKIPPED = []
 
-VERSION = ('v5: SELF-CLICK rail detents - stepped bumps on the rail outboard faces, '
+VERSION = ('v6: shelf root gussets at +-111 + SOFTER detents (0.3mm click); SELF-CLICK rail detents - stepped bumps on the rail outboard faces, '
            'the cover clicks home and holds without its screws; '
            'TAMPER REED groove in the shelf (shell X+15, D4 wire hole into '
            'the box) + hard end stop, orientation key block, contract-driven '
@@ -241,6 +241,15 @@ def build(comp):
         box(comp, rx, 3 + INTERFACE.COVER_RAIL_H / 2.0, PT,
             INTERFACE.COVER_RAIL_W, INTERFACE.COVER_RAIL_H, 62,
             JOIN, [plate])                                    # rail: Y3-8, Z3-65 (slide guide)
+    # SHELF ROOT GUSSETS (owner, 31 Aug: printed joints snapping).  The shelf
+    # is a 3mm wall on a 3mm plate; these two stepped webs at lid-local +-111
+    # triple the root section right where hands pry.  X chosen clear of the
+    # switch slot (ends 105.4), the last RJ45 (starts 117.75), the lock
+    # bosses (+-122), the rails (+-133) and the magnet sweep (-15).
+    for gx in (-111.0, 111.0):
+        box(comp, gx, 9.0, PT, 6.0, 12.0, 5.0, JOIN, [plate])
+        box(comp, gx, 6.5, PT + 5.0, 6.0, 7.0, 4.0, JOIN, [plate])
+        box(comp, gx, 4.5, PT + 9.0, 6.0, 3.0, 4.0, JOIN, [plate])
     # SELF-CLICK DETENT (owner, 31 Aug: the cover "just falls off - the rails
     # are only a guide").  Stepped bump on each rail's OUTBOARD side face:
     # square catch band toward the plate, half-proud lead-in band toward the
