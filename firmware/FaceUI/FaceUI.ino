@@ -218,17 +218,74 @@ static inline int pollZ() { int z = zRead(); yRead(); return z; }
 // blind at the XP end of the glass (that is the bottom -- the reason
 // SETTINGS never answered), and yRead is the read that stays awake there.
 // A press is either one waking up. Nothing new is configured.
-int tZ1 = 0, tZ2 = 0;
-#define T_ON  120                     // Francis, at the bench: "even a 200
-#define T_OFF  60                     // touch should register". Idle traces
-                                      // a clean 0, so 120 is still far above
-                                      // the noise floor and catches the weak
-                                      // presses the old 260 was dropping.
+// Same pin config as the proven zRead -- nothing new is driven -- but it
+// also grabs the OTHER free corner (YP) while the plates are already set
+// up. Francis swiped the left side and nothing registered: zRead and yRead
+// both fall to 0 at the SAME end of the glass, so together they still have
+// one blind region, and the left edge is it. YP is the corner that moves
+// when the others cannot.
+int tZ1 = 0, tZ2 = 0, tYp = 0;
+void zReadPair() {                    // zRead's exact setup, two readings
+  tft.desel();
+  pinMode(T_XP, OUTPUT); digitalWrite(T_XP, LOW);
+  pinMode(T_YM, OUTPUT); digitalWrite(T_YM, HIGH);
+  pinMode(T_XM, INPUT);  pinMode(T_YP, INPUT);
+  delayMicroseconds(200);
+  tZ1 = analogRead(T_XM);
+  tYp = analogRead(T_YP);
+  done();
+}
+// Idles are MEASURED, never assumed. Assuming YP rests at the 4095 rail is
+// exactly what made the earlier pressure build tap forever with nobody
+// touching the glass -- on this panel it actually rests near 1749. So each
+// signal learns its own resting level at boot and a press is any of the
+// three moving away from its own.
+int iZ1 = 0, iYp = 0, iY = 0;
+// THE RELEASE THRESHOLD MUST CLEAR THE NOISE FLOOR. YP wanders +/-80 at
+// rest, and an exit gate of 60 sat UNDER that: one noise spike latched the
+// state down and it could never let go, so the box hung forever in
+// wait-for-release, printing nothing. That silence looked like a dead
+// panel and cost another round. Exit is 130 now -- above the noise, still
+// below Francis's 200.
+#define T_ON  200                     // his number, and the median-of-5
+#define T_OFF 130                     // filter buys the headroom for it
 bool tDown = false; int tStreak = 0, tLastZ = 0, tLastB = 0;
+int peakDev = 0, peakXM = 0, peakYP = 0, peakY = 0;   // evidence of a press
+int  touchDev() {                     // biggest deviation from rest
+  // YP drifts +/-80 on its own (measured: rests 2834, wanders 2753..2912),
+  // so a single sample cannot be trusted near the threshold. Median of 3,
+  // interleaved with yRead per the back-to-back law.
+  // ONE round, exactly TouchProof's loop body: a z config, then a y config,
+  // and the caller leaves ~120ms and a real draw before asking again.
+  // Hammering ten reads every 12ms is what railed all three signals at 4095
+  // and drifted YP a thousand counts off its boot rest -- the sense node
+  // never got time to settle. The proven sketch was never fast, and speed
+  // was never the requirement.
+  // NO YP read. Adding that one extra analogRead is what pinned XM and
+  // yRead at 4095 all night: YP is on ADC2, and a poisoned ADC2 conversion
+  // wrecks the ADC1 read that follows -- the effect the 20 Aug session
+  // already suspected and I re-introduced. Dropped, and both signals come
+  // back to life. What remains is TouchProof.ino's loop body verbatim.
+  //
+  // The "blind left/bottom edge" is NOT re-assumed here: every scrap of
+  // evidence for it was gathered on builds that were hung or rebooting,
+  // so it was never really measured. Prove it on a working build first.
+  tZ1 = zRead();
+  tYp = iYp;                          // parked: not read, cannot deviate
+  tZ2 = yRead();
+  // A read of 4095 is the charged-node artifact this panel is famous for,
+  // never a real position (genuine presses live in the hundreds). Counting
+  // it as a deviation is what produced phantom presses -- "release timed
+  // out" over and over with A=0 B=0 and no finger anywhere near the glass.
+  int d1 = (tZ1 > 4000) ? 0 : abs(tZ1 - iZ1);
+  int d2 = (tYp > 4000) ? 0 : abs(tYp - iYp);
+  int d3 = (tZ2 > 4000) ? 0 : abs(tZ2 - iY);
+  int d  = max(d1, max(d2, d3));
+  if (d > peakDev) { peakDev = d; peakXM = tZ1; peakYP = tYp; peakY = tZ2; }
+  return d;
+}
 bool touchDown() {                    // one detection round + state update
-  tZ1 = zRead();                      // interleaved by construction: the
-  tZ2 = yRead();                      // two configs alternate every round
-  tLastZ = max(tZ1, tZ2);
+  tLastZ = touchDev();
   tLastB = tDown;
   bool now = tLastZ > (tDown ? T_OFF : T_ON);
   if (now == tDown) { tStreak = 0; return tDown; }
@@ -539,36 +596,59 @@ void gridChrome() {
   for (int r = 1; r < GR; r++) tft.drawFastHLine(0, r * GH, 480, C_EDGE);
   textAt(6, 4, 1, C_LABEL, "press any box - it prints its own numbers");
 }
-void gridMap() {                      // never returns: this IS the build
-  gridChrome();
-  int taps = 0, beat = 0;
-  for (;;) {
+// ONE PASS, called from loop(). It used to be an endless for(;;) run from
+// setup(), and that is why the box kept silently rebooting mid-session:
+// setup() never returning starves the Arduino loop task's watchdog feed,
+// so the panic handler restarted the board before a finger ever arrived.
+// Diagnostics that reboot are worse than no diagnostics.
+int gTaps = 0, gBeat = 0;
+void gridStep() {
+  {
     if (!touchDown()) {
       // Trace what the detector SEES, always -- the only way to tell a
       // finger that is not registering from a finger that never came.
-      if (++beat % 40 == 0) {
-        Serial.printf("watch zRead=%4d yRead=%4d max=%4d (down at >%d)\n",
-                      tZ1, tZ2, tLastZ, T_ON);
-        tft.fillRect(300, 2, 176, 12, C_BG);
-        textAt(302, 4, 1, C_OK, "z1 " + String(tZ1) + "  z2 " + String(tZ2) +
-                                "  z " + String(tLastZ));
+      if (++gBeat % 8 == 0) {
+        // PEAK is the important number: the largest movement seen since the
+        // last line. A swipe that never reaches the threshold still leaves
+        // its mark here, which tells us whether the glass moved at all.
+        Serial.printf("watch now XM=%4d YP=%4d y=%4d dev=%3d | PEAK dev=%4d (XM=%4d YP=%4d y=%4d)\n",
+                      tZ1, tYp, tZ2, tLastZ, peakDev, peakXM, peakYP, peakY);
+        tft.fillRect(250, 2, 226, 12, C_BG);
+        textAt(252, 4, 1, peakDev > T_ON ? C_OK : C_LABEL,
+               "peak " + String(peakDev) + "  now " + String(tLastZ));
+        peakDev = 0;                  // fresh window each line
       }
-      delay(12);
-      continue;
+      // TouchProof's cadence AND its workload. Both signals read a correct
+      // 0 at boot and only rail to 4095 once the loop is running, so the
+      // difference is how much bus traffic each round carries: TouchProof
+      // repainted big live numbers every iteration, while my tick pushed
+      // nine pixels. The file's own header says it -- the draw is not
+      // cosmetic, it is what lets the sense node settle. So repaint the
+      // readout EVERY round, in big text, exactly as the proven sketch did.
+      tft.setTextSize(3); tft.setTextColor(C_TXT, C_BG);
+      tft.setCursor(20, 120); tft.printf("XM %4d ", tZ1);
+      tft.setCursor(20, 160); tft.printf("y  %4d ", tZ2);
+      tft.setCursor(20, 200); tft.printf("YP %4d ", tYp);
+      delay(110);
+      return;
     }
     int a[7], b[7], m = 0;            // median across the whole contact.
     while (touchDown() && m < 7) {    // A and B are the two proven reads,
       a[m] = tZ2; b[m] = tZ1; m++;    // captured by touchDown itself -- no
-      delay(15);                      // extra pin juggling to go wrong
+      delay(110);                     // extra pin juggling to go wrong
     }
-    while (touchDown()) delay(10);
-    if (m < 3) continue;
+    // Bounded, always. No wait-for-release may ever be able to trap the
+    // loop -- that is what made the board go silent.
+    uint32_t rel = millis();
+    while (touchDown() && millis() - rel < 2500) delay(110);
+    if (millis() - rel >= 2000) Serial.println("release timed out - noise?");
+    if (m < 3) return;
     for (int i = 1; i < m; i++)
       for (int j = i; j > 0 && a[j] < a[j-1]; j--) { int t=a[j]; a[j]=a[j-1]; a[j-1]=t; }
     for (int i = 1; i < m; i++)
       for (int j = i; j > 0 && b[j] < b[j-1]; j--) { int t=b[j]; b[j]=b[j-1]; b[j-1]=t; }
     long rawA = a[m/2], rawB = b[m/2];
-    if (rawA > 4090 && rawB > 4090) continue;    // both railed = junk
+    if (rawA > 4090 && rawB > 4090) return;      // both railed = junk
 
     if (rawA < loA) loA = rawA;   if (rawA > hiA) hiA = rawA;
     if (rawB < loB) loB = rawB;   if (rawB > hiB) hiB = rawB;
@@ -589,9 +669,9 @@ void gridMap() {                      // never returns: this IS the build
     textAt(8, 300, 2, C_TXT, "A=" + String(rawA) + "  B=" + String(rawB) +
                              "   A seen " + String(loA) + ".." + String(hiA));
 
-    taps++;
+    gTaps++;
     Serial.printf("GRID %d: A=%ld B=%ld -> band %d of %d | A %ld..%ld  B %ld..%ld\n",
-                  taps, rawA, rawB, row, GR, loA, hiA, loB, hiB);
+                  gTaps, rawA, rawB, row, GR, loA, hiA, loB, hiB);
   }
 }
 
@@ -739,31 +819,40 @@ void setup() {
     delay(120);
   }
 
-  int s[24];                            // now measure the resting level
-  for (int i = 0; i < 24; i++) { s[i] = pollZ(); delay(20); }
-  for (int i = 1; i < 24; i++)
-    for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
-  Z_IDLE = s[12];
-  Serial.printf("idle z=%d (reference only); press = A+B sum ~4095, 2 rounds\n", Z_IDLE);
-  if (Z_IDLE > 3500) {                  // still railed: keep waiting, say so
-    Serial.println("WARN: resting level still railed - warming up longer");
-    for (int i = 0; i < 30; i++) { pollZ(); delay(60); }
-    for (int i = 0; i < 24; i++) { s[i] = pollZ(); delay(20); }
-    for (int i = 1; i < 24; i++)
-      for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
-    Z_IDLE = s[12];
-    Serial.printf("idle z (2nd try)=%d\n", Z_IDLE);
+  // Learn each signal's OWN resting level -- medians, hands off the glass.
+  int q1[15], q2[15], q3[15];
+  for (int i = 0; i < 15; i++) {
+    zReadPair(); q1[i] = tZ1; q2[i] = tYp; q3[i] = yRead(); delay(20);
   }
+  for (int i = 1; i < 15; i++)
+    for (int j = i; j > 0 && q1[j] < q1[j-1]; j--) { int t=q1[j]; q1[j]=q1[j-1]; q1[j-1]=t; }
+  for (int i = 1; i < 15; i++)
+    for (int j = i; j > 0 && q2[j] < q2[j-1]; j--) { int t=q2[j]; q2[j]=q2[j-1]; q2[j-1]=t; }
+  for (int i = 1; i < 15; i++)
+    for (int j = i; j > 0 && q3[j] < q3[j-1]; j--) { int t=q3[j]; q3[j]=q3[j-1]; q3[j-1]=t; }
+  iZ1 = q1[7]; iYp = q2[7]; iY = q3[7];
+  Serial.printf("rest levels: XM=%d YP=%d yRead=%d  (press = any moving %d+)\n",
+                iZ1, iYp, iY, T_ON);
 
+  // The legacy Z_IDLE measurement is gone: nothing reads it now that
+  // detection works on per-signal deviation, and it was pure dead weight
+  // between the board booting and the grid appearing.
+  //
+  // calibrate() and drawHome() are gone from setup TOO, and that was the
+  // hidden fault behind "nothing is working": calibrate() waits for a press
+  // inside its own loop, called from setup(), so the box sat on the old
+  // crosshair screen -- not the grid -- with the watchdog unfed and the
+  // serial silent. Every "no output" reading tonight was that. The grid
+  // owns this build end to end; the menus come back once the map is proven.
   loadSettings();
-  gridMap();                            // DIAGNOSTIC BUILD: never returns --
-                                        // map the glass, learn the extents
-  if (!loadCal()) calibrate();          // stored cal survives reboots now;
-  drawHome();                           // calibrate() re-saves itself
+  gridChrome();                         // gridStep() runs from loop(), so
+  Serial.println("GRID READY - press anywhere");   // the WDT stays fed
 }
 
 uint32_t lastPulse = 0;
 void loop() {
+  gridStep();                         // DIAGNOSTIC BUILD: the grid owns the
+  return;                             // loop until the map is proven
   int sy;
   if (millis() - lastPulse > 900) {   // heartbeat: one real LCD write per
     lastPulse = millis();             // second, because waiting loops with
