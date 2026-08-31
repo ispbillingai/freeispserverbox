@@ -219,8 +219,11 @@ static inline int pollZ() { int z = zRead(); yRead(); return z; }
 // SETTINGS never answered), and yRead is the read that stays awake there.
 // A press is either one waking up. Nothing new is configured.
 int tZ1 = 0, tZ2 = 0;
-#define T_ON  260                     // both reads are 0 at rest and ~830
-#define T_OFF 150                     // pressed; 260/150 = hysteresis
+#define T_ON  120                     // Francis, at the bench: "even a 200
+#define T_OFF  60                     // touch should register". Idle traces
+                                      // a clean 0, so 120 is still far above
+                                      // the noise floor and catches the weak
+                                      // presses the old 260 was dropping.
 bool tDown = false; int tStreak = 0, tLastZ = 0, tLastB = 0;
 bool touchDown() {                    // one detection round + state update
   tZ1 = zRead();                      // interleaved by construction: the
@@ -570,23 +573,25 @@ void gridMap() {                      // never returns: this IS the build
     if (rawA < loA) loA = rawA;   if (rawA > hiA) hiA = rawA;
     if (rawB < loB) loB = rawB;   if (rawB > hiB) hiB = rawB;
 
-    // Provisional map from the extents learned SO FAR: rough at first,
-    // the real calibration once the glass has been swept.
-    int col = (hiB - loB > 200) ? constrain((int)((rawB - loB) * GC / (hiB - loB)), 0, GC-1) : 0;
-    int row = (hiA - loA > 200) ? constrain((int)((rawA - loA) * GR / (hiA - loA)), 0, GR-1) : 0;
-    int x = col * GW, y = row * GH;
-    tft.fillRect(x + 1, y + 1, GW - 1, GH - 1, C_ACC);
-    textAt(x + 3, y + 8,  1, C_BG, String(rawA));
-    textAt(x + 3, y + 22, 1, C_BG, String(rawB));
+    // ONE honest coordinate, not two. yRead (A) drives one plate and reads
+    // the other -- a real position. zRead (B) is the pressure config and
+    // only wobbles with position; using it as a column is what lit a box
+    // nowhere near the finger. So light the whole BAND that A maps to and
+    // claim nothing about the other axis. Which way the band moves under a
+    // top-to-bottom sweep versus a left-to-right sweep is the answer we
+    // still need: if left-right moves it, the readable axis is horizontal
+    // and the UI turns portrait.
+    int row = (hiA - loA > 150)
+            ? constrain((int)((rawA - loA) * GR / (hiA - loA)), 0, GR-1) : 0;
+    gridChrome();
+    tft.fillRect(0, row * GH + 1, 480, GH - 1, C_ACC);
+    textAt(150, row * GH + 12, 2, C_BG, "band " + String(row));
+    textAt(8, 300, 2, C_TXT, "A=" + String(rawA) + "  B=" + String(rawB) +
+                             "   A seen " + String(loA) + ".." + String(hiA));
 
     taps++;
-    Serial.printf("GRID %d: A=%ld B=%ld -> col %d row %d | A %ld..%ld  B %ld..%ld\n",
-                  taps, rawA, rawB, col, row, loA, hiA, loB, hiB);
-    if (taps % 24 == 0) {             // keep the glass readable
-      gridChrome();
-      textAt(6, 310, 1, C_ACC, "A " + String(loA) + ".." + String(hiA) +
-                               "   B " + String(loB) + ".." + String(hiB));
-    }
+    Serial.printf("GRID %d: A=%ld B=%ld -> band %d of %d | A %ld..%ld  B %ld..%ld\n",
+                  taps, rawA, rawB, row, GR, loA, hiA, loB, hiB);
   }
 }
 
