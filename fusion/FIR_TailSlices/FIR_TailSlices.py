@@ -17,10 +17,12 @@
 #   TAIL TOP     TopLid front strip (cap-local y >= 123, 20mm of roof): the
 #                roof edge the shoulder butts, the short front wall and the
 #                chamfer.  Prints roof-down, flat.
-#   TAIL BOTTOM  BottomLid top strip (lid-local y >= 63, the last 20mm): the
-#                top build-out with its full-width GROOVE (where the curved
-#                lid's locator tabs land), the clip tabs, and all four top
-#                face screws at y72.  Prints flat on its plate.
+#   TAIL BOTTOM  BottomLid BOTTOM end (lid-local y <= 20): the 20mm plate
+#                band carrying ALL the standing walls - the 68mm shelf with
+#                its 8mm spine, both rails WITH their new detent bumps, the
+#                orientation key, and both lock bosses with the hard end
+#                stop.  This is the piece the curved lid actually slides
+#                onto.  Prints flat on its plate band, walls standing.
 #   TAIL CURVED  CurvedLid top strip (cover-local y >= 20): upper face band,
 #                top wall, the four locator TABS and the ENTIRE curved
 #                shoulder.  Print STANDING ON AN END WALL like the full
@@ -46,9 +48,12 @@ import adsk.core, adsk.fusion, adsk.cam, traceback
 CAP_TAIL_YMIN = 123.0             # TopLid: keep cap-local y >= this
                                   # (roof edge at 143 -> a 20mm strip; misses
                                   # the +-85 screws and the screen window)
-LID_TAIL_YMIN = 63.0              # BottomLid: keep lid-local y >= this (the
-                                  # last 20mm: build-out, GROOVE, clip tabs,
-                                  # all four y72 face screws)
+LID_TAIL_YMAX = 20.0              # BottomLid: keep lid-local y <= this (the
+                                  # bottom 20mm: shelf + spine + rails +
+                                  # detents + key + lock bosses - all the
+                                  # standing walls the cover slides onto;
+                                  # the cut runs through the port openings,
+                                  # which is cosmetic only)
 COVER_TAIL_YMIN = 20.0            # CurvedLid: keep cover-local y >= this
                                   # (face band + top wall + tabs + the whole
                                   # shoulder; channels/knockouts/magnet stay
@@ -153,15 +158,15 @@ def run(context):
                     'y>={:.0f}) - the roof edge + front wall the shoulder '
                     'lands on'.format(CAP_TAIL_YMIN))
 
-        # 2. TAIL BOTTOM: the REAL BottomLid, cut to its top strip - the
-        #    groove the curved lid's tabs land in, plus the 4 top screws
+        # 2. TAIL BOTTOM: the REAL BottomLid, cut to its BOTTOM end - the
+        #    shelf, rails, detents and bosses the curved lid slides onto
         lid_source = _load_active_builder('FIR_BottomLid')
         del lid_source.SKIPPED[:]
         lid = lid_source.build(comp)
-        tail_cut(comp, lid, LID_TAIL_YMIN)
-        lid.name = ('TAIL BOTTOM: BOTTOM LID top strip (real FIR_BottomLid, '
-                    'local y>={:.0f}) - build-out + GROOVE + clip tabs + 4 '
-                    'face screws'.format(LID_TAIL_YMIN))
+        _cut_rect(comp, lid, -400.0, 400.0, LID_TAIL_YMAX, 400.0)
+        lid.name = ('TAIL BOTTOM: BOTTOM LID bottom end (real FIR_BottomLid, '
+                    'local y<={:.0f}) - shelf + spine + rails + DETENTS + '
+                    'KEY + lock bosses'.format(LID_TAIL_YMAX))
         translate_body(comp, lid, 0.0, -160.0, 0.0)
 
         # 3. TAIL CURVED: the REAL curved cover, cut to its top strip - the
@@ -178,21 +183,24 @@ def run(context):
         app.activeViewport.fit()
         ui.messageBox(
             'FIR_TailSlices built THREE 280mm-wide strips of the front '
-            'closure - the last ~20mm of BOTH lids plus the curved shoulder '
-            '(owner, 31 Aug). Export and print them SEPARATELY: right-click '
-            'a body > Save As Mesh.\n\n'
-            'Print: TAIL TOP roof-down flat; TAIL BOTTOM flat on its plate; '
-            'TAIL CURVED standing on an end wall, like the full cover.\n\n'
-            'The triple-joint test:\n'
-            ' 1. stack TAIL BOTTOM + TAIL TOP: the cap front wall rides '
-            '0.5mm above the lid build-out, one even seam;\n'
-            ' 2. lay TAIL CURVED over both: its TABS drop into the groove '
-            'in TAIL BOTTOM while the shoulder tip lands FLUSH on TAIL TOP '
-            'with the 0.3mm hairline, end to end;\n'
-            ' 3. a wedge gap = FDM bow; a feelable step = flush plane off;\n'
-            ' 4. rail/click testing is COUPON PAIR 3, not these strips.\n\n'
-            'Anything that fights = one contract number + a 20mm strip '
-            'reprint, never a full 280mm part.')
+            'closure (owner, 31 Aug). Export and print them SEPARATELY: '
+            'right-click a body > Save As Mesh.\n\n'
+            'Print: TAIL TOP roof-down flat; TAIL BOTTOM flat on its plate '
+            'band (shelf and rails standing up, like the full lid); TAIL '
+            'CURVED standing on an end wall, like the full cover.\n\n'
+            'The fit test:\n'
+            ' 1. TAIL BOTTOM in hand: shelf and rails must feel SOLID '
+            '(8mm spine), nothing like the old wobbly print;\n'
+            ' 2. SLIDE YOUR CURVED LID onto TAIL BOTTOM: free run, CLICK '
+            'over the detents at full seat against the end stop, holds, '
+            'firm pull unclicks (an old-geometry cover slides but has no '
+            'gaps for the bumps - expect it stiffer at the end);\n'
+            ' 3. hold TAIL TOP at the top: the shoulder tip must land '
+            'FLUSH with its roof surface, one even 0.3mm hairline;\n'
+            ' 4. TAIL CURVED is the same test with the NEW cover geometry '
+            'if the old print fights.\n\n'
+            'Anything wrong = one contract number + a strip reprint, '
+            'never a full 280mm part.')
     except:  # noqa
         if ui:
             ui.messageBox('FIR_TailSlices failed:\n{}'.format(traceback.format_exc()))
