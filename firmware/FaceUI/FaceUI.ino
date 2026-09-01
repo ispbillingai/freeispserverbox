@@ -752,11 +752,20 @@ void loop() {
     return;
   }
   int sy;
-  if (millis() - lastPulse > 900) {   // heartbeat: one real LCD write per
-    lastPulse = millis();             // second, because waiting loops with
-    tft.fillRect(0, 0, 2, 2, C_BAR);  // zero bus traffic go dead on this
-  }                                   // panel (probe screen proved it)
-  if (!waitTap(&sy)) { delay(15); return; }
+  // WHY THIS BLOCK IS THE DIFFERENCE BETWEEN A LIVE UI AND A DEAD ONE.
+  // Calibration polls while constantly repainting its live readout, and
+  // touch works there. This loop used to poll every 15ms and draw four
+  // pixels a second -- and measured on this board, a poll loop with no bus
+  // traffic rails BOTH touch signals to 4095 within seconds, while heavy
+  // redrawing holds them at a steady 0 for minutes. A railed read is
+  // discarded as an artifact, so no press could EVER register on Home.
+  // That is the whole "calibration works, SETTINGS does nothing" report.
+  //
+  // So every poll round now does real drawing at calibration's cadence.
+  // The rect is invisible -- it repaints header background in the header's
+  // own colour, clear of every title -- but the bus work is what counts.
+  tft.fillRect(300, 18, 80, 20, C_BAR);
+  if (!waitTap(&sy)) { delay(100); return; }
 
   if (screen == SCR_HOME) {
     // HOME tiles into two bands. 268-319 is the SETTINGS band (matches the
