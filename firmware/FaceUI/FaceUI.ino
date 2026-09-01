@@ -207,16 +207,14 @@ bool tDown = false; int tStreak = 0, tLastZ = 0, tLastB = 0;
 int peakDev = 0, peakXM = 0, peakY = 0;   // evidence of a press
 int lastTapRounds = 0;
 int  touchDev() {                     // biggest deviation from rest
-  // zRead ONLY. This used to take zRead and yRead back to back -- the exact
-  // pattern the whole file warns against -- and it ran immediately before
-  // every position sample. The bench log is unambiguous: live tap samples
-  // came back "4095 3878 4095 3706", railing on alternate reads, while the
-  // calibration walk read a clean 2688..3613. Detection never needed the
-  // second read anyway: zRead alone rests at 0 and lifts under a finger.
-  // Removing it leaves a strict z, y, z, y alternation, each 110ms apart --
-  // which is precisely SettleTest's proven sequence.
+  // EXACTLY BoxCal.ino's detector -- zRead then yRead, back to back. I
+  // removed the yRead here on the theory that the pair was poisoning the
+  // position sample; the bench answered plainly, samples still railed on
+  // alternate reads ("4095 4095 3533 4095 3697 4095 3916"). BoxCal keeps
+  // the pair and resolved 16 rows at 15/16 on this same glass, so the pair
+  // is not the fault and this file stops diverging from what works.
   tZ1 = zRead();
-  tZ2 = tZ1;                          // reported only; not a second read
+  tZ2 = yRead();
   // A read of 4095 is the charged-node artifact this panel is famous for,
   // never a real position (genuine presses live in the hundreds). Counting
   // it as a deviation is what produced phantom presses -- "release timed
@@ -294,20 +292,24 @@ int screenY(int raw) {
 //
 // (Settle delay inside yRead is NOT the mechanism: 200us to 20ms moved the
 // same reading by 2%. It is the spacing between the two configs.)
-int posRead() {
-  // The caller has just done a zRead inside touchDown(), so this supplies
-  // only the gap and the y half -- keeping the alternation strict instead
-  // of firing an extra z that would sit back-to-back with the previous one.
+int posRead() {                       // BoxCal's, verbatim
+  zRead();
   delay(110);
   return yRead();
 }
 int readTapRaw() {
-  int cap[7], m = 0;
-  while (touchDown() && m < 7) { cap[m++] = posRead(); delay(110); }
+  // BoxCal's capture(), verbatim: filter inside the loop, 60ms between
+  // samples (not 110), no first-sample discard, plain median of whatever
+  // had contact. That combination read 149..1011 cleanly and resolved 16
+  // rows; every variation on it this file invented has railed instead.
+  int cap[6], m = 0;
+  while (touchDown() && m < 6) {
+    int v = posRead();
+    if (v >= 30 && v <= 4000) cap[m++] = v;
+    delay(60);
+  }
   lastTapRounds = m;
-  // Back down to 2 rounds: hold-to-select was a workaround for the
-  // back-to-back read bug, and posRead() removes the need for it.
-  if (m < 2) return -1;
+  if (m < 1) return -1;               // BoxCal accepted any usable sample
   // MEDIAN of the samples that had contact -- BoxCal's exact statistic, the
   // one that put 15 of 16 test taps in the right box. Samples under 30 are
   // dropped as NO CONTACT, not believed as low positions: measured, the
@@ -318,26 +320,10 @@ int readTapRaw() {
   // this file through a dozen wrong diagnoses.
   Serial.print("tap samples:");
   for (int a = 0; a < m; a++) Serial.printf(" %d", cap[a]);
-
-  // DISCARD THE FIRST SAMPLE OF EVERY PRESS. The opening conversions of a
-  // touch read high on this panel -- the same effect the boot warm-up
-  // already throws away 16 rounds for. Calibration never noticed because a
-  // press-and-HOLD gives 7 samples and the bad opener is outvoted; a quick
-  // tap gives 2, where it dominates the median. That is precisely why the
-  // walk measured 2688..3613 and live taps came back 3678..3925, ABOVE the
-  // whole calibrated range, sending every press to the bottom row. The map
-  // was never wrong; the tap was sampled badly.
-  int s[7], n = 0;
-  for (int a = (m > 1 ? 1 : 0); a < m; a++)
-    if (cap[a] >= 30 && cap[a] <= 4000) s[n++] = cap[a];
-  if (n == 0) {
-    Serial.printf("  -> dropped (%d samples, none usable)\n", m);
-    return -1;                        // do nothing beats acting on garbage
-  }
-  for (int i = 1; i < n; i++)
-    for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
-  Serial.printf("  -> using %d of %d, median %d\n", n, m, s[n / 2]);
-  return s[n / 2];
+  for (int i = 1; i < m; i++)
+    for (int j = i; j > 0 && cap[j] < cap[j-1]; j--) { int t=cap[j]; cap[j]=cap[j-1]; cap[j-1]=t; }
+  Serial.printf("  -> median %d\n", cap[m / 2]);
+  return cap[m / 2];
 }
 
 void textAt(int x,int y,uint8_t sz,uint16_t c,const String&s){

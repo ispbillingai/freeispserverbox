@@ -54,7 +54,55 @@ Build (never use `--output-dir`; it leaves stale binaries):
 
 Uploads intermittently fail with "chip stopped responding" — just retry once.
 
-## 3. THE QUESTION, stated as sharply as the bench allows
+## 3. ANSWERED — the LCD image content dominates the touch reading
+
+`ABTrace.ino`, one finger held still at screen centre, reading 300ms after
+each paint so the write burst itself is not a factor:
+
+```
+5 screen DARK  +300ms :  z=   0 y=   0 | z=   0 y=   0 | z=   0 y=   0
+6 screen WHITE +300ms :  z=4095 y=4095 | z=4095 y=4095 | z=4095 y=4095
+```
+
+Repeated across three presses, every sample, no exceptions. **What is on the
+glass sets the reading; the finger barely gets a vote.** White rails it to
+4095, dark drives it to 0.
+
+That single fact explains the entire mystery in this file:
+
+- FaceUI (bright cards, white text) read **2700–4095**; BoxCal and ABTrace
+  (near-black screens) read **150–1000** — same panel, same code, same hour.
+- A calibration captured on one screen cannot work on another, because the
+  screens themselves shift the scale.
+- The "railing at 4095" in the product UI was the bright Home screen.
+- The earlier "66–658 after a small repaint" was the same effect mid-transition.
+
+A secondary, weaker effect is also confirmed: a *small* LCD write immediately
+before the read suppresses it to ~40% (case 2/3 read 210–270 against case 1's
+605–690), while a *full* repaint does not — because a full repaint takes
+~200ms and so supplies its own settle time.
+
+**Mechanism:** the resistive film is bonded directly onto the LCD, and the
+panel's source drivers swing much harder for a bright image, coupling into
+the film. GPIO33 is simultaneously LCD_RS and the touch sense line, and
+`done()`/`busOut()` drives it HIGH as an output immediately before each
+conversion re-samples it as a high-impedance input — so there is no isolation
+between the display's activity and the measurement.
+
+**Consequences for design:**
+1. No firmware calibration can fix this in general, because the offset is a
+   function of what is displayed, which changes constantly in a real UI.
+2. A usable coarse UI is still possible *if* the screen content stays
+   constant while touch is read — i.e. calibrate per screen, keep the palette
+   uniformly dark, and never sample within ~200ms of a write.
+3. **The durable fix is hardware:** a dedicated resistive-touch controller
+   (XPT2046 / ADS7846, SPI) on the planned PCB. It owns the four electrodes,
+   controls excitation and sample timing, and its ADC is not sharing a pin
+   with the LCD command line. Given the measured magnitude of the coupling
+   here — full scale, not a trim — this is the right call rather than a
+   nice-to-have.
+
+## 4. The original question, kept for the record
 
 **The identical touch-read function returns a different SCALE in different
 sketches and different code paths on the same hardware, same wiring, same
