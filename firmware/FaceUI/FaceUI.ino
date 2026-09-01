@@ -51,7 +51,7 @@ static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};
 // 0 = normal product UI (the default).  1 = raw grid diagnostic only.
 // The grid intentionally replaces the UI, so keep this switch explicit: a
 // grid build cannot reach the Settings > Calibrate touch menu.
-#define FACEUI_GRID_DIAGNOSTIC 0
+#define FACEUI_GRID_DIAGNOSTIC 1
 
 #define RGB(r,g,b) ((uint16_t)((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|((b)>>3)))
 #define C_BG   RGB(13,17,23)
@@ -230,9 +230,10 @@ bool calibrationRequired = false;
 int  lastTapRaw = -1, lastTapY = -1;  // shown on the INFO screen
 
 Preferences prefs;
-#define CAL_VER 4                   // v4 anchors are the PEAK of the press,
-                                    // matching live taps; v3 medians must
-                                    // not be reused against them
+#define CAL_VER 5                   // v5 anchors come from posRead() -- the
+                                    // spaced z-then-y sequence; every older
+                                    // anchor was measured back-to-back and
+                                    // is on a different scale entirely
 
 int screenY(int raw) {
   // Two segments hinged at the middle anchor, signed math throughout: this
@@ -252,39 +253,56 @@ int screenY(int raw) {
 // 4095 charged-node failure.  tZ2 is yRead() from touchDown()'s current,
 // already-settled round, so no extra pin juggling is needed.
 // Returns -1 for a graze too short for 3 rounds or a railed result.
+// PROVEN BY SettleTest.ino, and it is the whole bug. A yRead taken
+// immediately after a zRead comes back collapsed -- badly so for a light
+// press, which is why holding firmly used to mask it and why every quick
+// tap reported a position near the bottom of the scale no matter where the
+// finger was. Give the two configs 110ms apart and a LIGHT press reads
+// true: measured 1070 top / 533 middle / 176 bottom, a clean gradient.
+//
+// (Settle delay inside yRead is NOT the mechanism: 200us to 20ms moved the
+// same reading by 2%. It is the spacing between the two configs.)
+int posRead() {
+  zRead();
+  delay(110);
+  return yRead();
+}
 int readTapRaw() {
   int cap[7], m = 0;
-  while (touchDown() && m < 7) { cap[m++] = tZ2; delay(110); }
+  while (touchDown() && m < 7) { cap[m++] = posRead(); delay(110); }
   lastTapRounds = m;
-  // 4 rounds (~0.44s of contact). Deliberately back UP from 2: the only
-  // sampling regime that reads true position on this panel is a sustained
-  // hold -- exactly what calibration asks for and gets right. Brief taps
-  // do not merely read low, they read a position unrelated to the finger.
-  // So the UI is hold-to-select until that is understood; a stray brush
-  // now does nothing instead of firing the wrong row.
-  if (m < 4) return -1;
+  // Back down to 2 rounds: hold-to-select was a workaround for the
+  // back-to-back read bug, and posRead() removes the need for it.
+  if (m < 2) return -1;
   // PEAK, not median. Contact error on this panel is one-directional: a
   // firm press reads high, a poor one collapses toward 0 -- which is also
   // where the BOTTOM of the glass lives. So the best-contact sample is the
   // highest one, and a median just blends in the bad ones.
-  int raw = cap[0];
-  for (int a = 1; a < m; a++) if (cap[a] > raw) raw = cap[a];
-
-  // REJECT POOR CONTACT INSTEAD OF BELIEVING IT. Measured: anchors captured
-  // by holding read 997/645/282, while quick taps ANYWHERE on the glass --
-  // including on the top rows -- come back 3..251. That is not a position
-  // error, it is the reading collapsing when contact is brief: a light tap
-  // on WiFi (top row) and one on Info (bottom row) are indistinguishable,
-  // both landing at the bottom of the scale. Mapping those was what made
-  // every row select Info. Anything below the calibrated span is contact
-  // failure, not a low position, so it is discarded and logged.
-  long lo = min(min(rawA, rawB), rawC);
-  long hi = max(max(rawA, rawB), rawC);
-  if (raw < lo - (hi - lo) / 8) {
-    Serial.printf("TAP rejected: peak=%d below cal floor %ld (poor contact)\n",
-                  raw, lo - (hi - lo) / 8);
-    return -1;
+  // DISCARD NO-CONTACT SAMPLES. Measured: pressing the same row twice gives
+  // raw=538 then raw=0. Zero is not a position, it is the finger having
+  // already lifted -- each sample costs 220ms, so a quick tap is over
+  // before its own reading is taken. Believing those zeros is what made
+  // every other press jump to Info, since 0 maps to the bottom of the
+  // scale. 30 is far below the real bottom anchor (~253), so a genuine
+  // bottom-of-glass press is never rejected by this.
+  int raw = -1;
+  int good = 0;
+  for (int a = 0; a < m; a++) {
+    if (cap[a] < 30) continue;        // no contact, not a low position
+    good++;
+    if (cap[a] > raw) raw = cap[a];   // peak of the samples that had contact
   }
+  if (good == 0) {
+    Serial.printf("TAP dropped: %d samples, all no-contact\n", m);
+    return -1;                        // do nothing beats acting on garbage
+  }
+
+  // The old "reject anything below the calibrated span" floor is GONE. It
+  // was a plaster over the back-to-back read bug, and it was correctly
+  // criticised in review: a genuine press below the bottom anchor
+  // legitimately extrapolates under it, so the floor made the real bottom
+  // strip of the glass untouchable. With posRead() the readings are honest,
+  // so nothing needs to be thrown away.
   return (raw > 4000) ? -1 : raw;
 }
 
@@ -426,12 +444,12 @@ retry:
     // converged to the same number. First-contact-onward rounds with a
     // median across them is what produced the spread that mapped true.
     int cap[7], m = 0;
-    while (touchDown() && m < 7) { cap[m++] = tZ2; calibrationDelay(110); }
+    while (touchDown() && m < 7) { cap[m++] = posRead(); calibrationDelay(110); }
     while (touchDown()) calibrationDelay(110);
-    // PEAK, matching readTapRaw exactly. The anchors MUST be measured with
-    // the same statistic the live taps use, or the map is calibrated
-    // against numbers normal use never produces -- which is precisely how
-    // anchors of 1639/919/256 ended up judging taps that arrive as 14..397.
+    // posRead() and the peak statistic, matching readTapRaw EXACTLY. The
+    // anchors must be measured the same way live taps are, or the map is
+    // calibrated against numbers normal use never produces -- which is how
+    // anchors of 1639/919/256 ended up judging taps arriving as 14..397.
     int best = -1;
     for (int a = 0; a < m; a++) if (cap[a] > best) best = cap[a];
     if (m < 3 || best > 4000) {
@@ -532,13 +550,21 @@ long probeOne(int cx, int cy, const char *label) {
 #define GR 8                          // rows,    40px ~ 6mm
 #define GW (480 / GC)
 #define GH (320 / GR)
-long loA = 4095, hiA = 0, loB = 4095, hiB = 0;   // learned extents
 
+// NOTHING IS LEARNED HERE. The grid uses the SAVED calibration exactly as
+// the product UI does, so it is a pure pass/fail test: press row 2, row 2
+// must fill. An auto-calibrating grid would fit itself to whatever it was
+// given and could never fail, which makes it useless as evidence.
 void gridChrome() {
   tft.fillScreen(C_BG);
-  for (int c = 1; c < GC; c++) tft.drawFastVLine(c * GW, 0, 320, C_EDGE);
-  for (int r = 1; r < GR; r++) tft.drawFastHLine(0, r * GH, 480, C_EDGE);
-  textAt(6, 4, 1, C_LABEL, "press any box - it prints its own numbers");
+  for (int r = 0; r < GR; r++)
+    for (int c = 0; c < GC; c++) {
+      int n = r * GC + c + 1;         // 1..96, numbered as Francis asked
+      tft.drawRect(c * GW, r * GH, GW, GH, C_EDGE);
+      textAt(c * GW + 4, r * GH + 4, 1, C_LABEL, String(n));
+    }
+  for (int r = 0; r < GR; r++)        // row number, big, down the middle
+    textAt(228, r * GH + 14, 2, C_EDGE, String(r + 1));
 }
 // ONE PASS, called from loop(). It used to be an endless for(;;) run from
 // setup(), and that is why the box kept silently rebooting mid-session:
@@ -575,46 +601,34 @@ void gridStep() {
       delay(110);
       return;
     }
-    int a[7], b[7], m = 0;            // median across the whole contact.
-    while (touchDown() && m < 7) {    // A and B are the two proven reads,
-      a[m] = tZ2; b[m] = tZ1; m++;    // captured by touchDown itself -- no
-      delay(110);                     // extra pin juggling to go wrong
-    }
-    // Bounded, always. No wait-for-release may ever be able to trap the
-    // loop -- that is what made the board go silent.
-    uint32_t rel = millis();
+    // Exactly the product UI's tap path -- same readTapRaw, same screenY,
+    // same saved anchors. If the grid passes and the menu does not, the
+    // fault is in the menu; if the grid fails, the map is wrong. That only
+    // means something because nothing here adapts.
+    int raw = readTapRaw();
+    uint32_t rel = millis();          // bounded release wait, always
     while (touchDown() && millis() - rel < 2500) delay(110);
-    if (millis() - rel >= 2000) Serial.println("release timed out - noise?");
-    if (m < 3) return;
-    for (int i = 1; i < m; i++)
-      for (int j = i; j > 0 && a[j] < a[j-1]; j--) { int t=a[j]; a[j]=a[j-1]; a[j-1]=t; }
-    for (int i = 1; i < m; i++)
-      for (int j = i; j > 0 && b[j] < b[j-1]; j--) { int t=b[j]; b[j]=b[j-1]; b[j-1]=t; }
-    long rawA = a[m/2], rawB = b[m/2];
-    if (rawA > 4090 && rawB > 4090) return;      // both railed = junk
+    if (raw < 0) {
+      Serial.println("GRID: tap discarded (no contact samples)");
+      return;
+    }
+    int sy  = screenY(raw);
+    int row = constrain(sy / GH, 0, GR - 1);
 
-    if (rawA < loA) loA = rawA;   if (rawA > hiA) hiA = rawA;
-    if (rawB < loB) loB = rawB;   if (rawB > hiB) hiB = rawB;
-
-    // ONE honest coordinate, not two. yRead (A) drives one plate and reads
-    // the other -- a real position. zRead (B) is the pressure config and
-    // only wobbles with position; using it as a column is what lit a box
-    // nowhere near the finger. So light the whole BAND that A maps to and
-    // claim nothing about the other axis. Which way the band moves under a
-    // top-to-bottom sweep versus a left-to-right sweep is the answer we
-    // still need: if left-right moves it, the readable axis is horizontal
-    // and the UI turns portrait.
-    int row = (hiA - loA > 150)
-            ? constrain((int)((rawA - loA) * GR / (hiA - loA)), 0, GR-1) : 0;
     gridChrome();
-    tft.fillRect(0, row * GH + 1, 480, GH - 1, C_ACC);
-    textAt(150, row * GH + 12, 2, C_BG, "band " + String(row));
-    textAt(8, 300, 2, C_TXT, "A=" + String(rawA) + "  B=" + String(rawB) +
-                             "   A seen " + String(loA) + ".." + String(hiA));
+    for (int c = 0; c < GC; c++) {    // fill every box in the mapped row
+      tft.fillRect(c * GW + 1, row * GH + 1, GW - 2, GH - 2, C_ACC);
+      textAt(c * GW + 4, row * GH + 4, 1, C_BG, String(row * GC + c + 1));
+    }
+    textAt(228, row * GH + 14, 2, C_BG, String(row + 1));
+    textAt(6, 306, 1, C_TXT, "raw " + String(raw) + " -> y " + String(sy) +
+                             " -> ROW " + String(row + 1) +
+                             "   cal " + String(rawA) + "/" + String(rawB) +
+                             "/" + String(rawC));
 
     gTaps++;
-    Serial.printf("GRID %d: A=%ld B=%ld -> band %d of %d | A %ld..%ld  B %ld..%ld\n",
-                  gTaps, rawA, rawB, row, GR, loA, hiA, loB, hiB);
+    Serial.printf("GRID %d: raw=%d -> y=%d -> ROW %d (boxes %d..%d)\n",
+                  gTaps, raw, sy, row + 1, row * GC + 1, row * GC + GC);
   }
 }
 
@@ -777,8 +791,13 @@ void setup() {
 
   loadSettings();
 #if FACEUI_GRID_DIAGNOSTIC
-  gridChrome();
-  Serial.println("GRID READY - press anywhere (diagnostic build)");
+  // The grid tests the SAVED map, so it needs one -- calibrate first if
+  // none is stored, then never adapt again.
+  calibrationRequired = !loadCal();
+  if (!calibrationRequired) {
+    gridChrome();
+    Serial.println("GRID READY - press a row; that row must fill");
+  }
 #else
   calibrationRequired = !loadCal();
   if (calibrationRequired)
@@ -791,6 +810,13 @@ void setup() {
 uint32_t lastPulse = 0;
 void loop() {
 #if FACEUI_GRID_DIAGNOSTIC
+  if (calibrationRequired) {          // from loop(), so the WDT stays fed
+    calibrationRequired = false;
+    calibrate();
+    gridChrome();
+    Serial.println("GRID READY - press a row; that row must fill");
+    return;
+  }
   gridStep();
   return;
 #endif
