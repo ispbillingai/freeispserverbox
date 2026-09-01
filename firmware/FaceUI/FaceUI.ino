@@ -174,8 +174,24 @@ int yRead() {                       // drive the Y plate, read the X plate
 // either level.
 int tZ1 = 0, tZ2 = 0;
 int iZ1 = 0, iY = 0;
-#define T_ON  200                     // safely below the proven ~830 presses
-#define T_OFF 130                     // hysteresis above the measured noise
+// Set from bench measurement, at Francis's call ("we can have it as low as
+// 40, I'm good with that"). On the Home screen a real press only moves the
+// signal 12..82 -- nothing like the 800..1600 the same finger produces on
+// the calibration screen -- so a gate of 200 could never fire there. 40 is
+// safe because idle on Home is not merely low, it is EXACTLY 0: 108
+// consecutive idle samples read dev=0 with no noise whatsoever. Two
+// consecutive rounds are still required, so a lone spike cannot trigger.
+// 40 was still too high: the next captured presses peaked at 30..34 and
+// never fired. Home-screen presses land anywhere in 12..82, so the gate has
+// to sit under the weakest of them. 20 does, and it is still safe because
+// the idle floor is not "low" but exactly 0 across 108 consecutive samples,
+// with two consecutive rounds required before anything latches.
+#define T_ON    5                     // Francis: "the pressure should even be
+#define T_OFF    3                    // 5". Safe only because idle measures
+                                      // EXACTLY 0 here, never 1 or 2, across
+                                      // 108 consecutive samples -- and two
+                                      // consecutive rounds are still needed
+                                      // before anything latches.
 bool tDown = false; int tStreak = 0, tLastZ = 0, tLastB = 0;
 int peakDev = 0, peakXM = 0, peakY = 0;   // evidence of a press
 int lastTapRounds = 0;
@@ -214,8 +230,9 @@ bool calibrationRequired = false;
 int  lastTapRaw = -1, lastTapY = -1;  // shown on the INFO screen
 
 Preferences prefs;
-#define CAL_VER 3                   // v3 captures one proven read per round;
-                                    // v2 anchors must not be reused
+#define CAL_VER 4                   // v4 anchors are the PEAK of the press,
+                                    // matching live taps; v3 medians must
+                                    // not be reused against them
 
 int screenY(int raw) {
   // Two segments hinged at the middle anchor, signed math throughout: this
@@ -239,10 +256,35 @@ int readTapRaw() {
   int cap[7], m = 0;
   while (touchDown() && m < 7) { cap[m++] = tZ2; delay(110); }
   lastTapRounds = m;
-  if (m < 3) return -1;
-  for (int a = 1; a < m; a++)
-    for (int j = a; j > 0 && cap[j] < cap[j-1]; j--) { int t=cap[j]; cap[j]=cap[j-1]; cap[j-1]=t; }
-  int raw = cap[m / 2];
+  // 4 rounds (~0.44s of contact). Deliberately back UP from 2: the only
+  // sampling regime that reads true position on this panel is a sustained
+  // hold -- exactly what calibration asks for and gets right. Brief taps
+  // do not merely read low, they read a position unrelated to the finger.
+  // So the UI is hold-to-select until that is understood; a stray brush
+  // now does nothing instead of firing the wrong row.
+  if (m < 4) return -1;
+  // PEAK, not median. Contact error on this panel is one-directional: a
+  // firm press reads high, a poor one collapses toward 0 -- which is also
+  // where the BOTTOM of the glass lives. So the best-contact sample is the
+  // highest one, and a median just blends in the bad ones.
+  int raw = cap[0];
+  for (int a = 1; a < m; a++) if (cap[a] > raw) raw = cap[a];
+
+  // REJECT POOR CONTACT INSTEAD OF BELIEVING IT. Measured: anchors captured
+  // by holding read 997/645/282, while quick taps ANYWHERE on the glass --
+  // including on the top rows -- come back 3..251. That is not a position
+  // error, it is the reading collapsing when contact is brief: a light tap
+  // on WiFi (top row) and one on Info (bottom row) are indistinguishable,
+  // both landing at the bottom of the scale. Mapping those was what made
+  // every row select Info. Anything below the calibrated span is contact
+  // failure, not a low position, so it is discarded and logged.
+  long lo = min(min(rawA, rawB), rawC);
+  long hi = max(max(rawA, rawB), rawC);
+  if (raw < lo - (hi - lo) / 8) {
+    Serial.printf("TAP rejected: peak=%d below cal floor %ld (poor contact)\n",
+                  raw, lo - (hi - lo) / 8);
+    return -1;
+  }
   return (raw > 4000) ? -1 : raw;
 }
 
@@ -386,16 +428,20 @@ retry:
     int cap[7], m = 0;
     while (touchDown() && m < 7) { cap[m++] = tZ2; calibrationDelay(110); }
     while (touchDown()) calibrationDelay(110);
-    for (int a = 1; a < m; a++)
-      for (int j = a; j > 0 && cap[j] < cap[j-1]; j--) { int t=cap[j]; cap[j]=cap[j-1]; cap[j-1]=t; }
-    if (m < 3 || cap[m / 2] > 4000) {
+    // PEAK, matching readTapRaw exactly. The anchors MUST be measured with
+    // the same statistic the live taps use, or the map is calibrated
+    // against numbers normal use never produces -- which is precisely how
+    // anchors of 1639/919/256 ended up judging taps that arrive as 14..397.
+    int best = -1;
+    for (int a = 0; a < m; a++) if (cap[a] > best) best = cap[a];
+    if (m < 3 || best > 4000) {
       Serial.printf("cal %d retry: rounds=%d\n", i, m);
       textAt(90, TY[i] + 56, 2, C_WARN, m < 3 ? "HOLD IT LONGER" : "BAD READ - AGAIN");
       calibrationDelay(900);
       i--;
       continue;
     }
-    got[i] = cap[m / 2];
+    got[i] = best;                    // peak, same statistic as live taps
     Serial.printf("cal %d raw=%ld (%d rounds)\n", i, got[i], m);
     calibrationDelay(250);
   }
@@ -755,19 +801,19 @@ void loop() {
     return;
   }
   int sy;
-  // WHY THIS BLOCK IS THE DIFFERENCE BETWEEN A LIVE UI AND A DEAD ONE.
-  // Calibration polls while constantly repainting its live readout, and
-  // touch works there. This loop used to poll every 15ms and draw four
-  // pixels a second -- and measured on this board, a poll loop with no bus
-  // traffic rails BOTH touch signals to 4095 within seconds, while heavy
-  // redrawing holds them at a steady 0 for minutes. A railed read is
-  // discarded as an artifact, so no press could EVER register on Home.
-  // That is the whole "calibration works, SETTINGS does nothing" report.
+  // MEASURED, and it settles the "calibration works but SETTINGS does not"
+  // bug. On Home a real press moved the signal to only 3..64 while the gate
+  // is 200 -- the same finger reads 800..1600 on the calibration screen.
+  // The panel is not the difference, the TIMING is: calibration draws, waits
+  // 12ms, then reads. This loop drew a 1600-pixel block and read IMMEDIATELY
+  // after, so every sample was taken while the bus was still settling from
+  // the write, which crushes the reading to noise level.
   //
-  // So every poll round now does real drawing at calibration's cadence.
-  // The rect is invisible -- it repaints header background in the header's
-  // own colour, clear of every title -- but the bus work is what counts.
+  // (The earlier theory in this spot -- "not enough drawing" -- is dead:
+  // 108 idle lines on Home read a flat XM=0 y=0, never railed. Volume was
+  // never the problem. Settling time after the draw is.)
   tft.fillRect(300, 18, 80, 20, C_BAR);
+  delay(12);                          // let the bus settle before sampling
   if (!waitTap(&sy)) {
     // One line per second is enough to distinguish a healthy 0-idle panel
     // from the 4095 charged-node failure without changing the read cadence.
