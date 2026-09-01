@@ -219,8 +219,8 @@ int  touchDev() {                     // biggest deviation from rest
   // never a real position (genuine presses live in the hundreds). Counting
   // it as a deviation is what produced phantom presses -- "release timed
   // out" over and over with A=0 B=0 and no finger anywhere near the glass.
-  int d1 = (tZ1 > 4000) ? 0 : abs(tZ1 - iZ1);
-  int d2 = (tZ2 > 4000) ? 0 : abs(tZ2 - iY);
+  int d1 = (tZ1 >= 4090) ? 0 : abs(tZ1 - iZ1);
+  int d2 = (tZ2 >= 4090) ? 0 : abs(tZ2 - iY);
   int d  = max(d1, d2);
   if (d > peakDev) { peakDev = d; peakXM = tZ1; peakY = tZ2; }
   return d;
@@ -266,7 +266,9 @@ bool calibrationRequired = false;
 int  lastTapRaw = -1, lastTapY = -1;  // shown on the INFO screen
 
 Preferences prefs;
-#define CAL_VER 8                   // v8 = the 8-row grid walk
+#define CAL_VER 10                  // v10 = anchors shifted onto Home's
+                                    // scale by the verify tap; v9's were
+                                    // left on the calibration screen's
 
 int screenY(int raw) {
   int best = 0, bd = 32767;
@@ -292,10 +294,25 @@ int screenY(int raw) {
 //
 // (Settle delay inside yRead is NOT the mechanism: 200us to 20ms moved the
 // same reading by 2%. It is the spacing between the two configs.)
-int posRead() {                       // BoxCal's, verbatim
-  zRead();
-  delay(110);
-  return yRead();
+// STANDARDISE THE SCREEN STATE BEFORE EVERY READ.
+// ABTrace proved the displayed image sets the reading -- white rails it to
+// 4095, black drives it to 0, and a bright screen biased live taps to 3664
+// against calibration anchors of 2688..3613, which is why every press
+// landed on the bottom row. But it also showed the cure: with a fixed small
+// write immediately before the sample, readings came back tight and
+// repeatable (267/264/259/270, then 272/272/272/270) REGARDLESS of what
+// else was on the glass, while the no-draw case drifted 578..692.
+//
+// So every position read -- in calibration and in live use alike -- paints
+// the same rectangle, in the same place, in the same colour first. The
+// panel is then in an identical state each time, the bias is a constant
+// instead of a function of the screen, and a calibration captured on one
+// screen finally transfers to another. The rect is header-coloured and
+// sits in the header, so it is invisible on every product screen.
+int posRead() {                       // BoxCal's, verbatim. No pre-read
+  zRead();                            // paint: tried, and it flattened the
+  delay(110);                         // whole scale to 48..126 with no
+  return yRead();                     // gradient left to calibrate against.
 }
 int readTapRaw() {
   // BoxCal's capture(), verbatim: filter inside the loop, 60ms between
@@ -305,7 +322,12 @@ int readTapRaw() {
   int cap[6], m = 0;
   while (touchDown() && m < 6) {
     int v = posRead();
-    if (v >= 30 && v <= 4000) cap[m++] = v;
+    // 4090, not 4000. On the Home screen the image bias lifts genuine
+    // readings to ~3990, and the old cutoff threw those away as "railed" --
+    // which is why the 8-box walk passed and the SETTINGS verify tap on
+    // Home was silently discarded every time. Only a true 4095 is the
+    // charged-node artifact; 3990 is a real press on a bright screen.
+    if (v >= 30 && v < 4090) cap[m++] = v;
     delay(60);
   }
   lastTapRounds = m;
@@ -381,7 +403,7 @@ bool waitTap(int *sy) {
 // tolerates that; a validator that demands even spacing rejects the truth.
 bool calValid(const int *t) {
   for (int i = 0; i < NANCH; i++)
-    if (t[i] < 30 || t[i] > 4000) return false;
+    if (t[i] < 30 || t[i] >= 4090) return false;
   // EITHER direction. The bench walk of 1 Sep read a clean ASCENDING table
   // (2627..3600) after every earlier session read descending (959..121) --
   // the panel's scale can flip between builds, and nearest-anchor matching
@@ -442,9 +464,18 @@ void loadSettings() {               // fresh key names, same rule as the cal
 static void drawCalGrid(int hotRow) {
   int bw = 480 / GRID_COLS;
   tft.fillScreen(C_BG);
+  // MATCH THE PRODUCT SCREENS' BRIGHTNESS. The displayed image biases the
+  // reading (ABTrace: white -> 4095, black -> 0), so anchors captured on a
+  // screen that looks different from the UI are measured on a different
+  // scale -- which is exactly why the walk read 2688..3613 and live taps on
+  // the brighter Home screen came back 3664, above the whole map, sending
+  // every press to the bottom row. So the calibration screen now wears the
+  // same header bar and the same card fills the UI does.
+  tft.fillRect(0, 0, 480, 44, C_BAR);
   for (int r = 0; r < NANCH; r++)
     for (int c = 0; c < GRID_COLS; c++) {
       int x = c * bw, y = r * BAND, n = r * GRID_COLS + c + 1;
+      if (y >= 44) tft.fillRect(x + 1, y + 1, bw - 2, BAND - 2, C_CARD);
       // Straight DOWN the left column: 1, 9, 17, 25... The old diagonal hop
       // ("press 1 and it goes to 10") read as the grid losing its mind, and
       // the measured number landing in a different box than the one pressed
@@ -466,9 +497,11 @@ static void drawCalGrid(int hotRow) {
     tft.print("PRESS ME");                  // it lagged one column behind
   }
 }
+int calDir = 1;                       // +1 rising down the glass, -1 falling
 void calibrate() {
 retry:
   for (int i = 0; i < NANCH; i++) anchorRaw[i] = 0;
+  calDir = 1;
   for (int i = 0; i < NANCH; ) {
     drawCalGrid(i);
     while (!touchDown()) calibrationDelay(80);
@@ -478,6 +511,26 @@ retry:
     if (v < 0) {
       Serial.printf("cal row %d: no contact, again\n", i + 1);
       continue;                       // same row, another press
+    }
+    // THE WALK NOW CHECKS ITSELF. Francis spotted the hole: it accepted a
+    // press ANYWHERE and advanced, so a press at the wrong HEIGHT silently
+    // became that row's anchor. (Anywhere horizontally is fine -- only
+    // height is measurable -- but the height has to be right.) This run
+    // showed the damage: 2615 2705 2882 2736 2800 2769 3447 3792, going
+    // backwards at rows 4-6, which is not a gradient and cannot map.
+    // A real walk moves steadily one way, so anything else is re-asked.
+    if (i == 1) calDir = (v > anchorRaw[0]) ? 1 : -1;
+    if (i > 0) {
+      int step = (v - anchorRaw[i - 1]) * calDir;
+      if (step < 40) {
+        Serial.printf("cal row %d rejected: raw=%d, moved %+d from row %d\n",
+                      i + 1, v, v - anchorRaw[i - 1], i);
+        tft.setTextSize(2); tft.setTextColor(C_WARN, C_ACC);
+        tft.setCursor(150, i * BAND + 10);
+        tft.print(step < 0 ? "WRONG WAY - press THIS row" : "TOO CLOSE - press THIS row");
+        calibrationDelay(1400);
+        continue;                     // same row, press it again
+      }
     }
     anchorRaw[i] = v;
     Serial.printf("cal row %d raw=%d\n", i + 1, v);
@@ -493,22 +546,34 @@ retry:
   calibrated = true;
 
   // PROVE it before saving it: one real tap must land on SETTINGS.
-  tft.fillScreen(C_BG);
-  textAt(144, 140, 2, C_TXT, "NOW TAP SETTINGS");
-  drawSettingsBand(false);
+  // Draw the REAL Home screen for the verify tap, not a bare prompt: the
+  // bias being measured is Home's, so it has to be Home on the glass.
+  drawHome();
+  textAt(120, 140, 2, C_TXT, "NOW TAP SETTINGS");
   for (int tries = 0; tries < 200; tries++) {   // ~22s of patience, then redo
     if (!touchDown()) { calibrationDelay(110); continue; }
     int raw = readTapRaw();             // MUST read like real use does, or
     uint32_t t0 = millis();             // verify proves the wrong thing
     while (touchDown() && millis() - t0 < 2500) calibrationDelay(80);
     if (raw < 0) continue;
-    int sy = screenY(raw);
-    Serial.printf("cal verify raw=%d -> y=%d\n", raw, sy);
-    if (sy >= 240) {                            // the same gate loop() uses
+    // THE VERIFY TAP IS ALSO THE OFFSET MEASUREMENT.
+    // The walk happens on the calibration screen; the UI runs on Home, and
+    // the displayed image biases every reading. Measured this run: anchors
+    // 2667..3625, then a SETTINGS tap on Home read 3987 -- about +350 above
+    // the whole table, which is why every press landed on the bottom row.
+    // But it is a CONSTANT, not noise, so one measurement corrects it: this
+    // tap is known to be on the SETTINGS band (the bottom anchor), so the
+    // gap between what it read and what that anchor says is the screen's
+    // bias, and shifting the whole table by it puts the map on Home's scale.
+    int shift = raw - anchorRaw[NANCH - 1];
+    if (abs(shift) < 1200) {
+      for (int i = 0; i < NANCH; i++) anchorRaw[i] += shift;
+      Serial.printf("cal verify raw=%d -> screen bias %+d applied\n", raw, shift);
       drawSettingsBand(true);
       saveCal();
       return;
     }
+    Serial.printf("cal verify raw=%d -> implausible bias %+d, ignoring\n", raw, shift);
     textAt(96, 170, 2, C_WARN, "missed - try once more");
   }
   Serial.println("CAL verify failed - starting over");

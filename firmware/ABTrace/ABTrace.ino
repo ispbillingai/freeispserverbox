@@ -185,19 +185,31 @@ static void drawBig()   { tft.fillScreen(C_BG); }
 // LCD, so a bright complex image means far more source-driver switching
 // coupling into it. Both cases wait 300ms after painting, so any
 // difference is the IMAGE, not the write burst.
-const char *CASE[6] = {
+// THE DECIDING PAIR. Cases 5/6 showed dark->0 and white->4095 at 300ms.
+// What we still do not know is whether that is RECENCY (the write burst
+// fading) or STEADY STATE (the image itself, permanently). Cases 7 and 8
+// repeat them after a full TWO SECONDS of stillness:
+//   both come back ~650  -> recency only. Fix = wait longer after drawing,
+//                           and any UI colours are fine.
+//   white still 4095     -> the displayed image itself biases the film, so
+//                           the UI must stay uniformly dark, per screen.
+const char *CASE[8] = {
   "1 no draw            ",
   "2 small draw BEFORE z",
   "3 small draw z..y    ",
   "4 FULL repaint before",
   "5 screen DARK  +300ms",
-  "6 screen WHITE +300ms"
+  "6 screen WHITE +300ms",
+  "7 screen DARK  +2000 ",
+  "8 screen WHITE +2000 "
 };
 
 void runCase(int c) {
   Serial.printf("%s : ", CASE[c]);
   if (c == 4) { tft.fillScreen(C_BG);  delay(300); }   // dark, settled
   if (c == 5) { tft.fillScreen(0xFFFF); delay(300); }  // white, settled
+  if (c == 6) { tft.fillScreen(C_BG);  delay(2000); }  // dark, fully settled
+  if (c == 7) { tft.fillScreen(0xFFFF); delay(2000); } // white, fully settled
   for (int i = 0; i < 4; i++) {
     if (c == 1) drawSmall();
     if (c == 3) drawBig();
@@ -233,7 +245,7 @@ void loop() {
   if (!touchDown()) { delay(90); return; }
   run++;
   Serial.printf("---- press %d ----\n", run);
-  for (int c = 0; c < 6; c++) runCase(c);
+  for (int c = 0; c < 8; c++) runCase(c);
   tft.fillScreen(C_BG);
   tft.setTextSize(2); tft.setTextColor(C_TXT, C_BG);
   tft.setCursor(20, 140); tft.printf("run %d done - lift", run);
