@@ -51,7 +51,7 @@ static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};
 // 0 = normal product UI (the default).  1 = raw grid diagnostic only.
 // The grid intentionally replaces the UI, so keep this switch explicit: a
 // grid build cannot reach the Settings > Calibrate touch menu.
-#define FACEUI_GRID_DIAGNOSTIC 1
+#define FACEUI_GRID_DIAGNOSTIC 0
 
 #define RGB(r,g,b) ((uint16_t)((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|((b)>>3)))
 #define C_BG   RGB(13,17,23)
@@ -129,6 +129,17 @@ public:
     for (uint32_t n = (uint32_t)w*h; n; n--) { writeData(hi); writeData(lo); }
   }
   void fillScreen(uint16_t c) override { fillRect(0,0,_width,_height,c); }
+  // Without these, Adafruit_GFX draws every line pixel by pixel, and each
+  // pixel re-sends a full window command -- about 13 bus writes for one
+  // dot. A 64-box grid then costs ~170,000 writes and the panel gave up
+  // mid-draw and sat WHITE. Routing lines through the windowed fillRect
+  // makes the same grid a few hundred writes.
+  void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t c) override {
+    fillRect(x, y, w, 1, c);
+  }
+  void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t c) override {
+    fillRect(x, y, 1, h, c);
+  }
 };
 Lcd tft;
 
@@ -224,27 +235,42 @@ bool touchDown() {                    // one detection round + state update
 // PIECEWISE -- two segments instead of one straight line -- because the
 // 2-bar version calibrated "fine" and SETTINGS still wasn't hittable: one
 // line through two soft presses squeezed the whole bottom of the glass.
-long rawA = 1000, rawB = 500, rawC = 0;   // raw at screen y=40 / 160 / 280
+// SIXTEEN measured anchors, one per 20px band, replacing every fitted map
+// this file has ever had. Francis's design, proven end to end in BoxCal.ino
+// (15 of 16 test taps landed right; the one miss was a 20-count sliver at
+// the panel's compressed top, i.e. the glass's own limit). A tap is matched
+// to the NEAREST anchor -- no line fit, no extrapolation, no hinge. The
+// arithmetic that kept sending presses to the wrong row is simply gone.
+// 16 is also the panel's measured ceiling: span ~820 counts, tap error up
+// to ~39, so 32 bands would be error-sized. The UI only needs 6.
+// THE 32-BOX GRID -- Francis's foundation for the whole UI: "a grid that we
+// will use to even add other pressing options, so we know this and this are
+// pressable." 8 rows x 4 columns of 120x40 boxes, numbered 1..32. The 8
+// rows are the pressable zones TODAY (the 8-row walk went 8 for 8 on the
+// bench); the 4 columns are drawn and numbered so layouts can be planned on
+// them now, and they become individually pressable when the motherboard PCB
+// frees the second ADC pin -- GridCal measured today's X axis as scatter
+// (spread 5091 across rows vs 4596 down columns, statistically nothing).
+// Until then a press resolves to its row, and each row splits into its four
+// boxes later with no redesign.
+#define GRID_COLS 8                 // 8x8 = 64 boxes, Francis: "full work
+#define NANCH 8                     // around". One anchor per ROW -- 8/8
+#define BAND  (320 / NANCH)         // reliable; 40px per row, 60px per box
+int  anchorRaw[NANCH];
 bool calibrated = false;
 bool calibrationRequired = false;
 int  lastTapRaw = -1, lastTapY = -1;  // shown on the INFO screen
 
 Preferences prefs;
-#define CAL_VER 5                   // v5 anchors come from posRead() -- the
-                                    // spaced z-then-y sequence; every older
-                                    // anchor was measured back-to-back and
-                                    // is on a different scale entirely
+#define CAL_VER 8                   // v8 = the 8-row grid walk
 
 int screenY(int raw) {
-  // Two segments hinged at the middle anchor, signed math throughout: this
-  // panel's raws RUN BACKWARDS (bigger raw = higher on the glass) and both
-  // directions must keep working after any recalibration.
-  long y;
-  if ((long)(raw - rawB) * (rawA - rawB) >= 0)        // rawB..rawA: top half
-    y = 160 + (long)(raw - rawB) * (40 - 160) / (rawA - rawB);
-  else                                                // rawB..rawC: bottom
-    y = 160 + (long)(raw - rawB) * (280 - 160) / (rawC - rawB);
-  return constrain((int)y, 0, 319);
+  int best = 0, bd = 32767;
+  for (int i = 0; i < NANCH; i++) {
+    int d = abs(raw - anchorRaw[i]);
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best * BAND + BAND / 2;    // centre of the nearest measured band
 }
 
 // Position of the current press: median of TouchProof-style rounds spanning
@@ -274,36 +300,22 @@ int readTapRaw() {
   // Back down to 2 rounds: hold-to-select was a workaround for the
   // back-to-back read bug, and posRead() removes the need for it.
   if (m < 2) return -1;
-  // PEAK, not median. Contact error on this panel is one-directional: a
-  // firm press reads high, a poor one collapses toward 0 -- which is also
-  // where the BOTTOM of the glass lives. So the best-contact sample is the
-  // highest one, and a median just blends in the bad ones.
-  // DISCARD NO-CONTACT SAMPLES. Measured: pressing the same row twice gives
-  // raw=538 then raw=0. Zero is not a position, it is the finger having
-  // already lifted -- each sample costs 220ms, so a quick tap is over
-  // before its own reading is taken. Believing those zeros is what made
-  // every other press jump to Info, since 0 maps to the bottom of the
-  // scale. 30 is far below the real bottom anchor (~253), so a genuine
-  // bottom-of-glass press is never rejected by this.
-  int raw = -1;
-  int good = 0;
-  for (int a = 0; a < m; a++) {
-    if (cap[a] < 30) continue;        // no contact, not a low position
-    good++;
-    if (cap[a] > raw) raw = cap[a];   // peak of the samples that had contact
-  }
-  if (good == 0) {
+  // MEDIAN of the samples that had contact -- BoxCal's exact statistic, the
+  // one that put 15 of 16 test taps in the right box. Samples under 30 are
+  // dropped as NO CONTACT, not believed as low positions: measured, the
+  // same row pressed twice gave 538 then 0, because a sample costs ~220ms
+  // and a quick tap ends before its own read -- and 0 maps to the bottom
+  // of the glass, which is how every other press used to select Info.
+  int s[7], n = 0;
+  for (int a = 0; a < m; a++)
+    if (cap[a] >= 30 && cap[a] <= 4000) s[n++] = cap[a];
+  if (n == 0) {
     Serial.printf("TAP dropped: %d samples, all no-contact\n", m);
     return -1;                        // do nothing beats acting on garbage
   }
-
-  // The old "reject anything below the calibrated span" floor is GONE. It
-  // was a plaster over the back-to-back read bug, and it was correctly
-  // criticised in review: a genuine press below the bottom anchor
-  // legitimately extrapolates under it, so the floor made the real bottom
-  // strip of the glass untouchable. With posRead() the readings are honest,
-  // so nothing needs to be thrown away.
-  return (raw > 4000) ? -1 : raw;
+  for (int i = 1; i < n; i++)
+    for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
+  return s[n / 2];
 }
 
 void textAt(int x,int y,uint8_t sz,uint16_t c,const String&s){
@@ -313,7 +325,9 @@ void textAt(int x,int y,uint8_t sz,uint16_t c,const String&s){
 // Calibration deliberately waits for a human.  It is invoked from loop(),
 // but it can legitimately wait longer than the loop task's watchdog period.
 static inline void calibrationDelay(uint32_t ms) {
-  esp_task_wdt_reset();
+  // No esp_task_wdt_reset() here: loopTask is not subscribed to the task
+  // WDT on this core, so the call just spammed "task not found" every 80ms.
+  // delay() itself yields, which is all that is needed.
   delay(ms);
 }
 
@@ -352,40 +366,43 @@ bool waitTap(int *sy) {
 // All-new key names on purpose: the old keys hold calibration from previous
 // wirings and must never be read again.  Touch resting levels are deliberately
 // not stored because they are measured fresh at every boot.
-bool calValid(long a, long b, long c) {
-  long s1 = b - a, s2 = c - b;                  // top / bottom segment spans
-  if (a < 0 || a > 4095 || b < 0 || b > 4095 || c < 0 || c > 4095) return false;
-  if (labs(s1) < 80 || labs(s2) < 80) return false;     // squeezed segment
-  if ((s1 > 0) != (s2 > 0)) return false;               // direction flip
-  return true;
-  // THE 3x SKEW RULE IS GONE, and it was rejecting good calibrations. On
-  // the bench: 1241 / 1088 / 458 -- three presses, correctly ordered, real
-  // varying numbers -- thrown out only because the lower half of the glass
-  // spanned 630 counts against the upper half's 153. That is not a fault,
-  // it is exactly the uneven panel the PIECEWISE map with its middle hinge
-  // exists to absorb; demanding even halves defeats the hinge's whole
-  // purpose. Railed reads are already caught upstream (>4000 -> discard),
-  // so ordering plus a minimum span is all the sanity this needs.
+// Light-touch sanity: every anchor in a sane range, and the table clearly
+// descending end to end (this panel runs backwards: big raw = high on the
+// glass). Per-gap rules are deliberately absent -- the compressed top can
+// legitimately produce near-equal neighbours, and nearest-anchor matching
+// tolerates that; a validator that demands even spacing rejects the truth.
+bool calValid(const int *t) {
+  for (int i = 0; i < NANCH; i++)
+    if (t[i] < 30 || t[i] > 4000) return false;
+  // EITHER direction. The bench walk of 1 Sep read a clean ASCENDING table
+  // (2627..3600) after every earlier session read descending (959..121) --
+  // the panel's scale can flip between builds, and nearest-anchor matching
+  // never cared which way it runs. Demanding "descending" threw away the
+  // cleanest table this glass has ever produced. A real span is the only
+  // requirement.
+  return abs(t[0] - t[NANCH - 1]) > 300;
 }
 bool loadCal() {                    // boot path: true = stored cal is usable
+  int t[NANCH];
   prefs.begin("freeisp", true);
   bool verOk = prefs.getUChar("vcal_ver", 0) == CAL_VER;
-  long a = prefs.getLong("vcal_a", -1), b = prefs.getLong("vcal_b", -1),
-       c = prefs.getLong("vcal_c", -1);
+  size_t got = prefs.getBytes("anch16", t, sizeof(t));
   prefs.end();
-  if (!verOk || !calValid(a, b, c)) return false;
-  rawA = a; rawB = b; rawC = c; calibrated = true;
-  Serial.printf("CAL loaded a=%ld b=%ld c=%ld\n", a, b, c);
+  if (!verOk || got != sizeof(t) || !calValid(t)) return false;
+  memcpy(anchorRaw, t, sizeof(t));
+  calibrated = true;
+  Serial.printf("CAL loaded band1=%d .. band%d=%d (%d anchors)\n",
+                anchorRaw[0], NANCH, anchorRaw[NANCH - 1], NANCH);
   return true;
 }
 void saveCal() {                    // only ever called from calibrate()
   prefs.begin("freeisp", false);
   prefs.putUChar("vcal_ver", CAL_VER);
-  prefs.putLong("vcal_a", rawA);
-  prefs.putLong("vcal_b", rawB);
-  prefs.putLong("vcal_c", rawC);
+  prefs.putBytes("anch16", anchorRaw, sizeof(anchorRaw));
   prefs.end();
-  Serial.printf("CAL SAVED a=%ld b=%ld c=%ld  (factory-default candidates)\n", rawA, rawB, rawC);
+  Serial.print("CAL SAVED:");
+  for (int i = 0; i < NANCH; i++) Serial.printf(" %d=%d", i + 1, anchorRaw[i]);
+  Serial.println("  (factory-default candidates)");
 }
 void saveU8(const char *key, uint8_t v) {
   prefs.begin("freeisp", false);
@@ -406,90 +423,76 @@ void loadSettings() {               // fresh key names, same rule as the cal
 }
 
 // ------------------------------------------------------------ calibration --
-// Francis's spec: real targets you press -- top, middle, bottom, staggered
-// across the glass like a proper corner calibration -- not bars. Touch is
-// vertical-only, so only the target's HEIGHT feeds the math; the stagger is
-// honest looks. Each point is press-and-HOLD: median reads are collected
-// across the whole hold and the median of those is the anchor, so one soft
-// contact cannot skew the map the way it did the 2-bar version. Then nothing
-// is saved until a REAL tap proves the map: the last step is hitting
-// SETTINGS itself. Calibrated-but-not-tappable can no longer be stored.
-static void calTarget(int cx, int cy) {
-  tft.drawCircle(cx, cy, 14, C_ACC);
-  tft.drawCircle(cx, cy, 6,  C_ACC);
-  tft.drawFastHLine(cx - 20, cy, 40, C_ACC);
-  tft.drawFastVLine(cx, cy - 20, 40, C_ACC);
+// Francis's box walk, verbatim from BoxCal.ino where it went 15/16 on the
+// bench: sixteen full-width bands A..P, press the middle of the highlighted
+// one, the measured number becomes that band's anchor. Then prove the map
+// with one real tap on SETTINGS before anything is saved.
+// The full 32-box grid. During calibration ONE box is blue -- press its
+// middle. Any column works electrically (rows are what is measured), and
+// the hot box hops columns as the walk descends so it LOOKS and behaves
+// like the grid Francis asked for, not like bars.
+static void drawCalGrid(int hotRow) {
+  int bw = 480 / GRID_COLS;
+  tft.fillScreen(C_BG);
+  for (int r = 0; r < NANCH; r++)
+    for (int c = 0; c < GRID_COLS; c++) {
+      int x = c * bw, y = r * BAND, n = r * GRID_COLS + c + 1;
+      // Straight DOWN the left column: 1, 9, 17, 25... The old diagonal hop
+      // ("press 1 and it goes to 10") read as the grid losing its mind, and
+      // the measured number landing in a different box than the one pressed
+      // finished the impression. Predictable beats clever.
+      bool hot = (r == hotRow) && (c == 0);
+      if (hot) tft.fillRect(x + 1, y + 1, bw - 2, BAND - 2, C_ACC);
+      tft.drawRect(x, y, bw, BAND, C_EDGE);
+      tft.setTextSize(1);
+      tft.setTextColor(hot ? C_BG : C_TXT, hot ? C_ACC : C_BG);
+      tft.setCursor(x + 5, y + 4); tft.print(n);
+      if (anchorRaw[r] > 0 && c == 0) {
+        tft.setTextColor(C_OK, C_BG);
+        tft.setCursor(x + 5, y + 24); tft.print(anchorRaw[r]);
+      }
+    }
+  if (hotRow >= 0) {
+    tft.setTextSize(1); tft.setTextColor(C_BG, C_ACC);
+    tft.setCursor(5, hotRow * BAND + 24);   // in the SAME box as the blue --
+    tft.print("PRESS ME");                  // it lagged one column behind
+  }
 }
 void calibrate() {
-  const int CY[3] = {40, 160, 280};   // anchor rows on the glass
-  const int CX[3] = {60, 240, 420};   // stagger: top-left, centre, bottom-right
-  const int TY[3] = {196, 220, 84};   // instruction block, clear of the target
-  long got[3];
 retry:
-  for (int i = 0; i < 3; i++) {
-    tft.fillScreen(C_BG);
-    calTarget(CX[i], CY[i]);
-    textAt(90, TY[i], 2, C_TXT, "PRESS AND HOLD THE TARGET " + String(i + 1) + "/3");
-    textAt(90, TY[i] + 28, 2, C_LABEL, "z=");
-    textAt(300, TY[i] + 28, 2, C_LABEL, "gate=" + String(T_ON));
-    while (!touchDown()) {            // wait-for-press with a live readout;
-      // The repaint is part of the proven read cadence, not decoration.
-      tft.fillRect(114, TY[i] + 26, 90, 18, C_BG);
-      textAt(116, TY[i] + 28, 2, C_OK, (tLastB ? "DOWN " : "up ") + String(tLastZ));
-      calibrationDelay(110);
+  for (int i = 0; i < NANCH; i++) anchorRaw[i] = 0;
+  for (int i = 0; i < NANCH; ) {
+    drawCalGrid(i);
+    while (!touchDown()) calibrationDelay(80);
+    int v = readTapRaw();             // the SAME statistic live taps use
+    uint32_t t0 = millis();
+    while (touchDown() && millis() - t0 < 2500) calibrationDelay(80);
+    if (v < 0) {
+      Serial.printf("cal row %d: no contact, again\n", i + 1);
+      continue;                       // same row, another press
     }
-    // Sample for as long as the hold lasts, up to 7 median rounds from the
-    // FIRST instant of contact -- no seat delay. The 50ms-delay experiment
-    // proved the firm phase reads pressure, not position: all three targets
-    // converged to the same number. First-contact-onward rounds with a
-    // median across them is what produced the spread that mapped true.
-    int cap[7], m = 0;
-    while (touchDown() && m < 7) { cap[m++] = posRead(); calibrationDelay(110); }
-    while (touchDown()) calibrationDelay(110);
-    // posRead() and the peak statistic, matching readTapRaw EXACTLY. The
-    // anchors must be measured the same way live taps are, or the map is
-    // calibrated against numbers normal use never produces -- which is how
-    // anchors of 1639/919/256 ended up judging taps arriving as 14..397.
-    int best = -1;
-    for (int a = 0; a < m; a++) if (cap[a] > best) best = cap[a];
-    if (m < 3 || best > 4000) {
-      Serial.printf("cal %d retry: rounds=%d\n", i, m);
-      textAt(90, TY[i] + 56, 2, C_WARN, m < 3 ? "HOLD IT LONGER" : "BAD READ - AGAIN");
-      calibrationDelay(900);
-      i--;
-      continue;
-    }
-    got[i] = best;                    // peak, same statistic as live taps
-    Serial.printf("cal %d raw=%ld (%d rounds)\n", i, got[i], m);
-    calibrationDelay(250);
+    anchorRaw[i] = v;
+    Serial.printf("cal row %d raw=%d\n", i + 1, v);
+    i++;
   }
-  // Accept with the SAME validator the boot path uses, or a map that loads
-  // tomorrow differs from the map that saved today.
-  if (!calValid(got[0], got[1], got[2])) {
-    Serial.printf("CAL rejected: %ld %ld %ld\n", got[0], got[1], got[2]);
+  if (!calValid(anchorRaw)) {
+    Serial.println("CAL rejected: table not descending / out of range");
     tft.fillScreen(C_BG);
-    textAt(66, 150, 2, C_WARN, "POINTS DON'T LINE UP - AGAIN");
-    calibrationDelay(900);
+    textAt(66, 150, 2, C_WARN, "TABLE LOOKS WRONG - AGAIN");
+    calibrationDelay(1200);
     goto retry;
   }
-  rawA = got[0]; rawB = got[1]; rawC = got[2];
   calibrated = true;
-  Serial.printf("CAL candidate a=%ld b=%ld c=%ld\n", rawA, rawB, rawC);
 
-  // PROVE it before saving it.
+  // PROVE it before saving it: one real tap must land on SETTINGS.
   tft.fillScreen(C_BG);
   textAt(144, 140, 2, C_TXT, "NOW TAP SETTINGS");
-  textAt(180, 176, 2, C_LABEL, "z=");
   drawSettingsBand(false);
   for (int tries = 0; tries < 200; tries++) {   // ~22s of patience, then redo
-    if (!touchDown()) {
-      tft.fillRect(204, 174, 90, 18, C_BG);
-      textAt(206, 176, 2, C_OK, (tLastB ? "DOWN " : "up ") + String(tLastZ));
-      calibrationDelay(110);
-      continue;
-    }
+    if (!touchDown()) { calibrationDelay(110); continue; }
     int raw = readTapRaw();             // MUST read like real use does, or
-    while (touchDown()) calibrationDelay(110);  // verify proves the wrong thing
+    uint32_t t0 = millis();             // verify proves the wrong thing
+    while (touchDown() && millis() - t0 < 2500) calibrationDelay(80);
     if (raw < 0) continue;
     int sy = screenY(raw);
     Serial.printf("cal verify raw=%d -> y=%d\n", raw, sy);
@@ -504,41 +507,10 @@ retry:
   goto retry;
 }
 
-// ---- DIAGNOSTIC: which SCREEN axis does the readable raw actually track?
-// Approach change (Francis: "try another approach"). Every calibration so
-// far staggered its targets across BOTH width and height, so a clean
-// gradient never proved the axis -- and every SETTINGS verify tap at the
-// bottom-CENTRE mapped to mid-scale and missed. If the GPIO33 read runs
-// along the native LONG side of this portrait-born panel, then in our
-// landscape rotation it is HORIZONTAL, and the whole vertical-only belief
-// inherited from the BigUI era is backwards. Four corners answer it:
-// same-height pairs vs same-side pairs.
-long probeOne(int cx, int cy, const char *label) {
-  for (;;) {
-    tft.fillScreen(C_BG);
-    calTarget(cx, cy);
-    int ty = cy < 160 ? 200 : 60;
-    textAt(130, ty, 2, C_TXT, "HOLD: " + String(label));
-    textAt(130, ty + 28, 2, C_LABEL, "z=");
-    while (!touchDown()) {            // live readout: the repaint IS the bus
-      tft.fillRect(154, ty + 26, 90, 18, C_BG);
-      textAt(156, ty + 28, 2, C_OK, (tLastB ? "DOWN " : "up ") + String(tLastZ));
-      calibrationDelay(110);
-    }
-    int cap[7], m = 0;
-    while (touchDown() && m < 7) { cap[m++] = tZ2; calibrationDelay(110); }
-    while (touchDown()) calibrationDelay(110);
-    for (int a = 1; a < m; a++)
-      for (int j = a; j > 0 && cap[j] < cap[j-1]; j--) { int t=cap[j]; cap[j]=cap[j-1]; cap[j-1]=t; }
-    if (m >= 3 && cap[m / 2] <= 4000) {
-      Serial.printf("probe %-12s raw=%d (%d rounds)\n", label, cap[m / 2], m);
-      calibrationDelay(250);
-      return cap[m / 2];
-    }
-    Serial.printf("probe %s retry (rounds=%d)\n", label, m);
-    calibrationDelay(500);
-  }
-}
+// (The four-corner axis probe that used to live here is deleted. Its
+// question was answered properly by GridCal.ino: X across rows spread 5091
+// vs 4596 down columns -- statistically nothing. One readable axis,
+// vertical, exactly as the working BoxCal assumes.)
 // ---- GRID MAP: Francis's calibration, and a better one than targets.
 // Tile the glass in small boxes. Press any box and that spot's raw numbers
 // are printed IN it. No point to hit, so nothing to miss -- the map builds
@@ -623,8 +595,8 @@ void gridStep() {
     textAt(228, row * GH + 14, 2, C_BG, String(row + 1));
     textAt(6, 306, 1, C_TXT, "raw " + String(raw) + " -> y " + String(sy) +
                              " -> ROW " + String(row + 1) +
-                             "   cal " + String(rawA) + "/" + String(rawB) +
-                             "/" + String(rawC));
+                             "   cal A=" + String(anchorRaw[0]) +
+                             " P=" + String(anchorRaw[NANCH - 1]));
 
     gTaps++;
     Serial.printf("GRID %d: raw=%d -> y=%d -> ROW %d (boxes %d..%d)\n",
@@ -655,12 +627,12 @@ void flashRow(int i, const String& name) {
   int y = ROW_TOP + i * ROW_H;
   tft.fillRect(8, y, 464, ROW_H - 6, C_ACC);
   textAt(22, y + 14, 2, C_BG, name);
-  delay(140);
+  delay(160);                         // flash AND the post-draw settle
 }
 void flashHeader(const String& s) {
   tft.fillRect(0, 0, 480, 44, C_ACC);
   textAt(16, 15, 2, C_BG, s);
-  delay(140);
+  delay(160);
 }
 void drawSettingsBand(bool pressed) {
   tft.fillRect(0, 268, 480, 52, pressed ? C_ACC : C_CARD);
@@ -705,6 +677,7 @@ void drawHome() {
   }
 
   drawSettingsBand(false);
+  delay(150);                         // see settleAfterDraw note in drawMenu
 }
 
 void drawMenu() {
@@ -719,6 +692,13 @@ void drawMenu() {
                             alarmArmed ? C_OK : C_LABEL);
   row(3, "Calibrate touch", "",             C_LABEL);
   row(4, "Info",            "",             C_LABEL);
+  // QUIET AFTER A BIG DRAW, BEFORE ANY TOUCH READ. Measured twice now: a
+  // read taken right after heavy bus traffic comes back on a totally
+  // different scale (2688..3613 during the calm calibration walk versus
+  // 66..658 in a loop that repainted first), and every tap then collapses
+  // onto one row. Home worked and the menu did not for exactly this reason
+  // -- entering the menu paints five rows, then polls immediately.
+  delay(150);
 }
 
 void drawInfo() {
@@ -741,11 +721,14 @@ void drawInfo() {
 
   textAt(24, 176, 1, C_LABEL, "touch gate"); textAt(140, 176, 1, C_ACC, String(T_ON));
   textAt(24, 192, 1, C_LABEL, "cal A/B/C");
-  textAt(140, 192, 1, C_ACC, String(rawA) + " / " + String(rawB) + " / " + String(rawC));
+  textAt(140, 192, 1, C_ACC, "r1=" + String(anchorRaw[0]) +
+                             "  r4=" + String(anchorRaw[3]) +
+                             "  r8=" + String(anchorRaw[NANCH - 1]));
   textAt(24, 224, 1, C_LABEL, "last tap");
   textAt(140, 224, 1, C_ACC, String(lastTapRaw) + " -> " + String(lastTapY));
 
   textAt(24, 288, 1, C_LABEL, "tap anywhere to go back");
+  delay(150);                         // same settle rule as drawMenu
 }
 
 // ------------------------------------------------------------------ sketch --
@@ -753,7 +736,8 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("\n>>> FaceUI: built on the proven TouchProof core");
-  tft.begin();
+  tft.begin();                        // once; the white screen was the
+                                      // draw cost, not a missed init
 
   // Paint first, read second -- the order TouchProof.ino happens to use and
   // the only remaining difference from it. Empirically the panel reads
@@ -827,19 +811,14 @@ void loop() {
     return;
   }
   int sy;
-  // MEASURED, and it settles the "calibration works but SETTINGS does not"
-  // bug. On Home a real press moved the signal to only 3..64 while the gate
-  // is 200 -- the same finger reads 800..1600 on the calibration screen.
-  // The panel is not the difference, the TIMING is: calibration draws, waits
-  // 12ms, then reads. This loop drew a 1600-pixel block and read IMMEDIATELY
-  // after, so every sample was taken while the bus was still settling from
-  // the write, which crushes the reading to noise level.
-  //
-  // (The earlier theory in this spot -- "not enough drawing" -- is dead:
-  // 108 idle lines on Home read a flat XM=0 y=0, never railed. Volume was
-  // never the problem. Settling time after the draw is.)
-  tft.fillRect(300, 18, 80, 20, C_BAR);
-  delay(12);                          // let the bus settle before sampling
+  // NO DRAW IMMEDIATELY BEFORE THE READ. This is what made the finished UI
+  // disagree with its own calibration: the walk measured 2688..3613 and the
+  // very same finger then read 66..658 in the product loop, so every tap
+  // collapsed onto row 1. The difference was a header repaint 12ms before
+  // sampling; calibration always had ~80ms of quiet first. The repaint was
+  // added on a hunch that the bus needed work, and the evidence killed that
+  // hunch anyway -- 108 idle samples read a flat 0 with no drawing at all.
+  // Quiet before the read, and match calibration's cadence.
   if (!waitTap(&sy)) {
     // One line per second is enough to distinguish a healthy 0-idle panel
     // from the 4095 charged-node failure without changing the read cadence.

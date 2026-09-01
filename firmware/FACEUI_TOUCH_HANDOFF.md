@@ -1,171 +1,170 @@
-# FaceUI touch — handoff brief
+# FaceUI touch — handoff brief (rewritten 1 Sep 2026)
 
-**Symptom to solve:** the 3.5" resistive panel calibrates fine, but once the
-product UI is showing, taps do nothing. "It only worked when calibrating."
+**One sentence:** the panel produces a clean, repeatable position gradient when
+measured, but the *scale* of that reading shifts drastically depending on what
+the firmware did in the milliseconds before the sample — so a calibration
+captured in one code path does not transfer to another, and taps land on the
+wrong row.
 
-Everything below is measured on the bench, not assumed. Please distrust the
-theories and re-measure; several confident-sounding diagnoses in this file's
-history were wrong.
+Everything below is measured on the bench. Please distrust the interpretations
+and re-measure; several confident diagnoses in this file's history were wrong
+and are listed as such so they are not repeated.
 
 ---
 
-## 1. Hardware (fixed — do not propose rewiring)
+## 1. Hardware — frozen, do not propose rewiring
 
-- Classic **ESP32 dev board**, Arduino core, FQBN `esp32:esp32:esp32`, on **COM6**.
+- Classic **ESP32 dev board**, `esp32:esp32:esp32`, **COM6**, Serial 115200.
 - **3.5" 480x320 ILI9486**, 8-bit parallel, mcufriend-style shield, driven by a
-  hand-rolled driver (not MCUFRIEND_kbv). Landscape, MADCTL 0x28.
+  hand-rolled driver in the sketch (not MCUFRIEND_kbv). Landscape, MADCTL 0x28.
 - 4-wire resistive touch film sharing the LCD pins.
 
 ```
 LCD_D0..D7 -> 16, 17, 18, 19, 2, 22, 23, 5
 LCD_WR -> 14   LCD_RS -> 33 (J4 "BLK")
-LCD_CS -> 21 (U4 "SDA")   LCD_RD -> 12 (J14 "D12")
-LCD_RST -> 4   5V + GND from J4
+LCD_CS -> 21 (U4 "SDA")   LCD_RD -> 12 (J14 "D12")   LCD_RST -> 4
 
-Touch: T_XP = 23 (D6)   T_XM = 33 (RS, ADC1)
-       T_YP = 14 (WR, ADC2)   T_YM = 5 (D7)
+Touch: T_XP = 23 (D6)        T_XM = 33 (RS, ADC1)  <- the pin we read
+       T_YP = 14 (WR, ADC2)  T_YM = 5  (D7)
 ```
 
-**The pins are frozen by the owner.** A motherboard PCB will reallocate them
-later. Do not suggest moving a wire; work with this map.
+The owner has frozen the pin map; a motherboard PCB will reallocate later.
+Work within this wiring.
 
-## 2. The sketch
+## 2. Sketches
 
-`firmware/FaceUI/FaceUI.ino` — single file, **no WiFi** (deliberately the last
-layer). Built up from `firmware/TouchProof/TouchProof.ino`, which is the
-known-good reference: display + touch, nothing else.
+- `firmware/FaceUI/FaceUI.ino` — the product UI. **No WiFi** (deliberately the
+  last layer to add).
+- `firmware/TouchProof/TouchProof.ino` — the known-good reference: display +
+  touch, nothing else. **When in doubt, flash this; it works.**
+- `firmware/BoxCal/BoxCal.ino` — the owner's calibration idea, and the best
+  result achieved: N labelled boxes, press each one's middle, match live taps
+  to the *nearest measured anchor*. Went **15/16** on the bench.
+- `firmware/SettleTest/SettleTest.ino` — the settle-delay experiment (below).
+- `firmware/GridCal/GridCal.ino` — 4x4 two-axis test (below).
+- `firmware/BigUI/BigUI.ino` — abandoned. Palette ideas only; **never copy its
+  touch code**.
 
-- `firmware/BigUI/BigUI.ino` — abandoned top-down attempt. Palette ideas only.
-  **Never copy its touch code.**
-- `firmware/HelloScreen/HelloScreen.ino` — the old 1.8" ST7735 product build.
-  Unrelated hardware; useful only for visual language.
-
-Build/flash (never use `--output-dir`, it leaves stale binaries):
+Build (never use `--output-dir`; it leaves stale binaries):
 
 ```
 "C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe" \
   compile --upload -p COM6 --fqbn esp32:esp32:esp32 f:\freeispserverbox\firmware\FaceUI
 ```
 
-Serial is 115200. Uploads intermittently fail with "chip stopped responding";
-just retry once.
+Uploads intermittently fail with "chip stopped responding" — just retry once.
 
-## 3. What is confirmed WORKING
+## 3. THE OPEN PROBLEM — read this before touching anything
 
-- Display: solid, no streaking.
-- Touch detection during calibration: real, repeatable.
-- 3-point calibration (top / middle / bottom crosshairs, press-and-hold),
-  stored in NVS namespace `freeisp`, keys `vcal_ver`/`vcal_a`/`vcal_b`/`vcal_c`,
-  `CAL_VER = 3`.
-- Persistence across reboot. Last good map read back after a reset:
-  **a=1639, b=919, c=256** (segments -720 and -663 — evenly spaced).
-- Coordinate mapping arithmetic: a live tap logged `raw=613 -> y=215`, which is
-  exact for those anchors under the piecewise map.
+The position read is **not a stable function of finger position**. It is a
+function of position *and* of what the bus was doing just before the sample.
+Three captures, same panel, same person, same glass:
 
-## 4. What is NOT working
+| Context | Reading range |
+|---|---|
+| Calibration walk (calm; screen drawn once, then 80ms polls) | **2688 … 3613** |
+| Product loop *with* a header repaint 12ms before sampling | **66 … 658** |
+| Product loop *without* that repaint | **3678 … 3925** |
 
-Taps on the normal UI (Home / Settings / Info) do not register. The same finger
-on the calibration screen registers reliably.
+The calibration walk itself is excellent — monotonic, evenly spaced,
+repeatable, and it maps correctly *within* its own screen. The failure is
+that the numbers do not survive the trip into a different code path. In the
+last build the owner pressed the **top** of the screen and read 3678, which is
+above the top anchor (3613), so nearest-anchor matching sent it to the
+**bottom** row. Result: everything selects SETTINGS.
 
-## 5. Measured facts about this panel (these cost a lot of bench time)
+Two earlier calibration runs produced **descending** tables (959…121,
+997…282); the most recent produced an **ascending** one (2688…3613). The
+scale's direction is not stable between builds either, so no code should
+assume a direction (`calValid` now accepts both).
 
-1. **Both reads are position-dependent, and both die at one end of the glass.**
-   `zRead()` (XP low, YM high, read XM) IS a position gradient. At the XP end it
-   reads ~0 — identical to an untouched panel. A press there is not weak, it is
-   invisible. The owner spotted this: *"press the points and z is 0, press any
-   other place and it presses well."* The bottom of the screen is that end,
-   which is why the SETTINGS band specifically was unreachable for hours.
+**The question to answer:** what makes an `analogRead(GPIO33)` on this rig
+return values on a different scale in one code path than another, and how do
+we take a position sample whose absolute value is reproducible? Until that is
+answered, no calibration scheme can work, because calibration and use are by
+definition different code paths.
 
-2. **Reads must not be taken back to back.** A tight loop of `zRead()` alone
-   leaves the sense node charged and returns a frozen **4095** — indistinguishable
-   from a dead panel. Interleave `zRead()` then `yRead()`; the y-config
-   reconfigures all four lines and lets the node settle. (Repo commit 5ec1126.)
+## 4. What IS solid (do not re-derive)
 
-3. **The redraw is not cosmetic — it is part of the touch circuit's recovery.**
-   With only a 3x3-pixel draw per poll round, both signals rail to 4095 within
-   seconds. Repainting large text every round holds them at a flat **0 for
-   minutes**. This is the current best explanation for the open bug: calibration
-   repaints its live readout constantly, the product loop did not.
+1. **Detection works.** Idle reads **exactly 0** with no noise across 108
+   consecutive samples, so the press gate is 5 with 2-round confirmation.
+2. **The panel resolves position well.** A light press at top / middle /
+   bottom read 1070 / 533 / 176 — a clean gradient.
+3. **Nearest-anchor beats curve fitting.** With a measured value per box, no
+   line fit, hinge, or extrapolation is needed. BoxCal scored 15/16 this way.
+   The one miss was physical: the top of the glass is compressed (two adjacent
+   anchors only 26–47 counts apart, smaller than the ~30 tap error), so the
+   very top boxes cannot be resolved. **~8 rows is this panel's honest limit.**
+4. **Reads must not be back-to-back.** `zRead()` then `yRead()` immediately
+   returns a collapsed value; the sequence that reads true is
+   **`zRead()` → wait 110ms → `yRead()`** (`posRead()` in the sketch).
+5. **A sample under ~30 is NO CONTACT**, not a low position. A sample costs
+   ~220ms, so a quick tap ends before its own read and returns 0 — and 0 maps
+   to the bottom of the glass. Never map those; drop them.
+6. **One axis only.** GridCal measured the second axis as scatter: spread
+   across rows 5091 vs down columns 4596 — statistically nothing. Rows work,
+   columns do not. Don't re-open the axis question.
 
-4. **Rest levels are measured, never assumed.** At boot, hands off the glass:
-   `XM = 0`, `yRead = 0`. A genuine press lifts them to roughly **830**
-   (TouchProof measured 833/826). Legitimate position values live in the
-   hundreds-to-~1900 range. **4095 is always the artifact, never a real reading.**
+## 5. Ruled out — do not spend time here again
 
-5. **GPIO14 (T_YP) is ADC2.** There is no WiFi here so it *can* be read, but
-   adding an `analogRead(T_YP)` alongside the ADC1 reads coincided with both
-   ADC1 signals railing. Treat a second-axis read as suspect until proven.
+- **ADC settle delay.** Varying `yRead`'s settle from 200µs to 1ms, 5ms, 20ms
+  changed the same reading by **2%**. Not a source-impedance settling issue.
+- **Force dependence.** Light presses read true position (fact 4.2). Earlier
+  "you must press hard" conclusions were artifacts of the back-to-back bug.
+- **ADC2 / GPIO14 poisoning ADC1.** Removing the GPIO14 read did not stop the
+  railing; the cause was elsewhere.
+- **Adafruit's standard pressure formula** (`z = 4095 - (z2 - z1)`). It assumes
+  z2 rests at the rail; here it rests near 1749–2840, so the formula idles
+  around 2346 and reports a permanent press.
+- **Threshold tuning.** Ranged from 400 down to 5. Not the issue.
 
-6. **Adafruit's standard pressure formula does not work as written here.**
-   `z = 4095 - (z2 - z1)` assumes z2 rests at the rail. On this panel z2 rests
-   near **1749–2840**, so the formula idles around 2346 and reports a permanent
-   press. If you use it, calibrate the rest level; do not assume rails.
+## 6. Traps that generated fake "the touch is broken" evidence
 
-## 6. Traps that produced fake "touch is broken" evidence
-
-Much of the earlier debugging chased ghosts created by the harness itself:
+Most of the wasted time came from the harness, not the panel:
 
 - An endless diagnostic loop called from `setup()` starved the loop-task
   watchdog and **silently rebooted the board** mid-session.
-- `calibrate()` was also called from `setup()` and blocks waiting for a press,
-  so the glass sat on a stale screen with serial dead — which read as
-  "the panel is dead" when nothing was wrong.
-- A release threshold set *below* the noise floor latched the state down
-  permanently and hung the loop in wait-for-release. **Bound every wait.**
-- Counting 4095 as a deviation invented phantom presses with position 0.
+- `calibrate()` called from `setup()` blocks waiting for a press, leaving a
+  stale screen and dead serial — which reads exactly like a dead panel.
+- A release threshold set *below* the noise floor latched down permanently and
+  hung the loop in wait-for-release. **Bound every wait.**
+- Counting 4095 as a deviation invented phantom presses at position 0.
+- `esp_task_wdt_reset()` from loopTask spams `task not found`; loopTask isn't
+  subscribed. `delay()` already yields.
+- **White screen = too much drawing, not a dead display.** Adafruit_GFX draws
+  lines pixel-by-pixel and each pixel re-sends a window command (~13 bus
+  writes). A 64-box grid cost ~170,000 writes and the panel gave up mid-draw.
+  Overriding `drawFastHLine`/`drawFastVLine` to use the windowed `fillRect`
+  fixed it. Any new dense graphics must respect this.
 
-**Before concluding anything about the hardware, confirm the board is alive and
-not rebooting.** Reset it over RTS and watch for the boot banner.
+**Before concluding anything about the hardware, confirm the board is alive
+and not rebooting** — reset over RTS and watch for the boot banner.
 
-## 6b. BENCH RESULT — the "not enough bus work" theory is DISPROVED
+## 7. Suggested next steps
 
-Flashed the instrumented build and captured **108 consecutive `UI idle` lines**
-on the Home screen, glass untouched:
+1. **Characterise the scale shift directly.** One sketch, one screen, no UI:
+   sample the same stationary press (a) after 500ms of silence, (b) 12ms after
+   a large `fillRect`, (c) 150ms after one, (d) after a full-screen repaint.
+   Print all four. That isolates the mechanism instead of inferring it from UI
+   behaviour, which is how this went in circles.
+2. **If the scale proves shift-prone, stop using absolute values.** Options:
+   sample a *reference* alongside every position read and use the ratio; or
+   re-measure the two endpoints periodically and normalise; or accept a
+   coarse 3–4 zone UI where a 20% scale error still lands correctly.
+3. **Keep the UI coarse until it is solved.** The panel's honest resolution is
+   ~8 rows in the best case; the product UI needs 6 at most.
+4. **Consider the hardware answer.** On the planned PCB, a dedicated touch
+   controller (XPT2046/ADS7846, SPI) removes this entire class of problem and
+   frees the shared pins. Given how much bench time this has taken, that is
+   likely the right long-term call, and the owner should be told plainly.
 
-```
-UI idle: XM=0 y=0 dev=0 down=0 streak=0     (x108, ~110 seconds)
-```
+## 8. Working with the owner (Francis)
 
-**XM and y hold a flat 0 on the normal UI — they do not rail to 4095.** So the
-product loop's redraw volume is NOT the cause of the dead taps, and fact 5.3
-does not explain this bug. The detector is healthy on Home; the fault is
-downstream of detection.
-
-Also note: across those ~110 seconds there was **not one elevated `dev`, and no
-`TAP discarded` line at all**. Either no press was made during the window, or a
-press on Home produces literally zero signal movement. Distinguishing those two
-requires a press made while the log is being captured — that is the single
-missing measurement.
-
-## 7. Superseded hypothesis, kept as a record
-
-Hypothesis: fact 5.3 explains the open bug. The product loop polled every 15ms
-while drawing ~4 pixels per second, which rails both signals; railed reads are
-discarded upstream, so no press can ever be seen on Home. Calibration survived
-because its own repaint kept the panel alive.
-
-Change applied (untested by the owner at time of writing): every poll round in
-`loop()` now repaints an invisible 80x20 header-coloured rect and waits 100ms,
-matching calibration's cadence and workload.
-
-**If that did not fix it, the next things to check, in order:**
-
-1. Instrument `loop()`'s idle path to print `tZ1`/`tZ2` once a second. If they
-   read 4095 there but 0 during calibration, hypothesis confirmed and the fix
-   just needs more bus work per round. If they read 0 in both, the detector is
-   fine and the fault is in `waitTap()`/`readTapRaw()` gating instead.
-2. `readTapRaw()` requires **3+ rounds** of contact at 110ms each — roughly a
-   third of a second of steady press. A quick tap returns -1 and is silently
-   discarded. Consider accepting 2 rounds, and log every discard.
-3. `waitTap()` has a `stuckDown` latch; verify it cannot get stuck asserted.
-4. The HOME gate is `sy >= 240` for the SETTINGS band (drawn at 268-319),
-   deliberately loose. Log every mapped `sy` to confirm taps land where the
-   finger is before blaming detection.
-
-## 8. Owner's preferences
-
-- Pins frozen; PCB comes later.
-- He wants **every part of the UI touchable**, and calibration by pressing
-  targets/boxes he can see — his idea, and a good one.
-- He is at the bench and can press on request; ask for one specific press and
-  read the serial log rather than asking him to interpret numbers.
+- He is at the bench and will press on request. Ask for **one specific press**
+  and read the serial log yourself rather than asking him to interpret numbers.
+- Pins are frozen until the PCB.
+- His grid/box calibration idea is good and produced the best result so far —
+  keep it.
+- **Change one thing per flash.** Most of the confusion in this log came from
+  changing several things between uploads and being unable to attribute the
+  result.
