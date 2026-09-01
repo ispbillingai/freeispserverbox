@@ -117,7 +117,27 @@ Much of the earlier debugging chased ghosts created by the harness itself:
 **Before concluding anything about the hardware, confirm the board is alive and
 not rebooting.** Reset it over RTS and watch for the boot banner.
 
-## 7. Current hypothesis and the change just made
+## 6b. BENCH RESULT — the "not enough bus work" theory is DISPROVED
+
+Flashed the instrumented build and captured **108 consecutive `UI idle` lines**
+on the Home screen, glass untouched:
+
+```
+UI idle: XM=0 y=0 dev=0 down=0 streak=0     (x108, ~110 seconds)
+```
+
+**XM and y hold a flat 0 on the normal UI — they do not rail to 4095.** So the
+product loop's redraw volume is NOT the cause of the dead taps, and fact 5.3
+does not explain this bug. The detector is healthy on Home; the fault is
+downstream of detection.
+
+Also note: across those ~110 seconds there was **not one elevated `dev`, and no
+`TAP discarded` line at all**. Either no press was made during the window, or a
+press on Home produces literally zero signal movement. Distinguishing those two
+requires a press made while the log is being captured — that is the single
+missing measurement.
+
+## 7. Superseded hypothesis, kept as a record
 
 Hypothesis: fact 5.3 explains the open bug. The product loop polled every 15ms
 while drawing ~4 pixels per second, which rails both signals; railed reads are

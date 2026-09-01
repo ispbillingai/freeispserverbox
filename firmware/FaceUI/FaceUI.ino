@@ -178,6 +178,7 @@ int iZ1 = 0, iY = 0;
 #define T_OFF 130                     // hysteresis above the measured noise
 bool tDown = false; int tStreak = 0, tLastZ = 0, tLastB = 0;
 int peakDev = 0, peakXM = 0, peakY = 0;   // evidence of a press
+int lastTapRounds = 0;
 int  touchDev() {                     // biggest deviation from rest
   // ONE round, exactly TouchProof's loop body: a z config, then a y config,
   // and the caller leaves ~120ms and a real draw before asking again.
@@ -237,6 +238,7 @@ int screenY(int raw) {
 int readTapRaw() {
   int cap[7], m = 0;
   while (touchDown() && m < 7) { cap[m++] = tZ2; delay(110); }
+  lastTapRounds = m;
   if (m < 3) return -1;
   for (int a = 1; a < m; a++)
     for (int j = a; j > 0 && cap[j] < cap[j-1]; j--) { int t=cap[j]; cap[j]=cap[j-1]; cap[j-1]=t; }
@@ -262,15 +264,16 @@ bool waitTap(int *sy) {
   // re-fired its band every ~2.6s (Alarm toggling itself under one finger).
   static bool stuckDown = false;
   if (stuckDown) {
-    if (touchDown()) { delay(105); return false; }
+    if (touchDown()) return false;
     stuckDown = false;
     delay(60);
     return false;
   }
-  if (!touchDown()) { delay(105); return false; }
+  if (!touchDown()) return false;
   int raw = readTapRaw();               // seat, then median across the press
   if (raw < 0) {                        // graze, dab, or railed read
-    Serial.println("TAP discarded: unseated/railed");
+    Serial.printf("TAP discarded: rounds=%d XM=%d y=%d dev=%d\n",
+                  lastTapRounds, tZ1, tZ2, tLastZ);
     while (touchDown()) delay(10);
     delay(60);
     return false;
@@ -765,7 +768,17 @@ void loop() {
   // The rect is invisible -- it repaints header background in the header's
   // own colour, clear of every title -- but the bus work is what counts.
   tft.fillRect(300, 18, 80, 20, C_BAR);
-  if (!waitTap(&sy)) { delay(100); return; }
+  if (!waitTap(&sy)) {
+    // One line per second is enough to distinguish a healthy 0-idle panel
+    // from the 4095 charged-node failure without changing the read cadence.
+    if (millis() - lastPulse >= 1000) {
+      lastPulse = millis();
+      Serial.printf("UI idle: XM=%d y=%d dev=%d down=%d streak=%d\n",
+                    tZ1, tZ2, tLastZ, tDown, tStreak);
+    }
+    delay(100);
+    return;
+  }
 
   if (screen == SCR_HOME) {
     // HOME tiles into two bands. 268-319 is the SETTINGS band (matches the
