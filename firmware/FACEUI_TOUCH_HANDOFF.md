@@ -54,7 +54,54 @@ Build (never use `--output-dir`; it leaves stale binaries):
 
 Uploads intermittently fail with "chip stopped responding" — just retry once.
 
-## 3. THE OPEN PROBLEM — read this before touching anything
+## 3. THE QUESTION, stated as sharply as the bench allows
+
+**The identical touch-read function returns a different SCALE in different
+sketches and different code paths on the same hardware, same wiring, same
+finger, minutes apart.**
+
+| Where the sample is taken | Range a press returns |
+|---|---|
+| `BoxCal.ino` — standalone, **16 rows, 15/16 correct** | **149 – 1011** |
+| `FaceUI.ino` calibration walk (8 rows, clean monotonic table) | **2688 – 3613** |
+| `FaceUI.ino` live taps in the product loop | **3700 – 4095** (railing) |
+| `FaceUI.ino` earlier build, repaint 12ms before the read | **66 – 658** |
+
+All four use the same `zRead()` / `yRead()` primitives, the same 110ms
+spacing, the same panel, within the same hour.
+
+The owner's own framing, and he is right: *"when we had the rows, even 16 of
+them, we were able to touch even the smaller ones — it's not about pressing
+or the chip, the screen knows where we are touching it."* `BoxCal` proves the
+panel resolves position finely and repeatably. The failure is not resolution,
+not pressure, not calibration technique. **Something about the surrounding
+firmware shifts the absolute scale of `analogRead(GPIO33)`.**
+
+Specifically, in the failing case the live samples rail:
+
+```
+tap samples: 4095 4095                  -> dropped
+tap samples: 3959 4095                  -> dropped
+tap samples: 4095 3878 4095 3706 3713   -> median 3713
+```
+
+Note the **alternation** — every other sample pinned at 4095 — while the
+calibration walk minutes earlier, in the same binary, read clean values.
+
+**Questions for the next engineer:**
+1. What differs between a small standalone sketch and a larger one that could
+   move an ESP32 ADC1 reading's absolute scale by 3x? (Both are single-core
+   Arduino loops with no WiFi. FaceUI additionally links `Preferences`/NVS and
+   `esp_task_wdt`, and draws far more.)
+2. Could NVS/flash activity, or the LCD write burst, be shifting the ADC
+   reference or leaving the shared pins in a different state at sample time?
+3. Is there an `analogRead` state (attenuation, width, calibration
+   characteristics) being set differently or reset by another library?
+4. Given the panel demonstrably resolves position well in isolation, is the
+   pragmatic answer to move touch to a dedicated controller (XPT2046/ADS7846)
+   on the PCB rather than keep chasing this?
+
+## 4. THE OPEN PROBLEM — detail
 
 The position read is **not a stable function of finger position**. It is a
 function of position *and* of what the bus was doing just before the sample.

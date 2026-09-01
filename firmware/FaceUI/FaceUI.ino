@@ -207,10 +207,16 @@ bool tDown = false; int tStreak = 0, tLastZ = 0, tLastB = 0;
 int peakDev = 0, peakXM = 0, peakY = 0;   // evidence of a press
 int lastTapRounds = 0;
 int  touchDev() {                     // biggest deviation from rest
-  // ONE round, exactly TouchProof's loop body: a z config, then a y config,
-  // and the caller leaves ~120ms and a real draw before asking again.
+  // zRead ONLY. This used to take zRead and yRead back to back -- the exact
+  // pattern the whole file warns against -- and it ran immediately before
+  // every position sample. The bench log is unambiguous: live tap samples
+  // came back "4095 3878 4095 3706", railing on alternate reads, while the
+  // calibration walk read a clean 2688..3613. Detection never needed the
+  // second read anyway: zRead alone rests at 0 and lifts under a finger.
+  // Removing it leaves a strict z, y, z, y alternation, each 110ms apart --
+  // which is precisely SettleTest's proven sequence.
   tZ1 = zRead();
-  tZ2 = yRead();
+  tZ2 = tZ1;                          // reported only; not a second read
   // A read of 4095 is the charged-node artifact this panel is famous for,
   // never a real position (genuine presses live in the hundreds). Counting
   // it as a deviation is what produced phantom presses -- "release timed
@@ -289,7 +295,9 @@ int screenY(int raw) {
 // (Settle delay inside yRead is NOT the mechanism: 200us to 20ms moved the
 // same reading by 2%. It is the spacing between the two configs.)
 int posRead() {
-  zRead();
+  // The caller has just done a zRead inside touchDown(), so this supplies
+  // only the gap and the y half -- keeping the alternation strict instead
+  // of firing an extra z that would sit back-to-back with the previous one.
   delay(110);
   return yRead();
 }
@@ -306,15 +314,29 @@ int readTapRaw() {
   // same row pressed twice gave 538 then 0, because a sample costs ~220ms
   // and a quick tap ends before its own read -- and 0 maps to the bottom
   // of the glass, which is how every other press used to select Info.
+  // Log every sample, always. Guessing at what a tap measured is what put
+  // this file through a dozen wrong diagnoses.
+  Serial.print("tap samples:");
+  for (int a = 0; a < m; a++) Serial.printf(" %d", cap[a]);
+
+  // DISCARD THE FIRST SAMPLE OF EVERY PRESS. The opening conversions of a
+  // touch read high on this panel -- the same effect the boot warm-up
+  // already throws away 16 rounds for. Calibration never noticed because a
+  // press-and-HOLD gives 7 samples and the bad opener is outvoted; a quick
+  // tap gives 2, where it dominates the median. That is precisely why the
+  // walk measured 2688..3613 and live taps came back 3678..3925, ABOVE the
+  // whole calibrated range, sending every press to the bottom row. The map
+  // was never wrong; the tap was sampled badly.
   int s[7], n = 0;
-  for (int a = 0; a < m; a++)
+  for (int a = (m > 1 ? 1 : 0); a < m; a++)
     if (cap[a] >= 30 && cap[a] <= 4000) s[n++] = cap[a];
   if (n == 0) {
-    Serial.printf("TAP dropped: %d samples, all no-contact\n", m);
+    Serial.printf("  -> dropped (%d samples, none usable)\n", m);
     return -1;                        // do nothing beats acting on garbage
   }
   for (int i = 1; i < n; i++)
     for (int j = i; j > 0 && s[j] < s[j-1]; j--) { int t=s[j]; s[j]=s[j-1]; s[j-1]=t; }
+  Serial.printf("  -> using %d of %d, median %d\n", n, m, s[n / 2]);
   return s[n / 2];
 }
 
