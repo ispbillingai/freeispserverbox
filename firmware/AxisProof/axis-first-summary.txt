@@ -1,0 +1,8 @@
+﻿TARGET 3 BOTTOM x=240 y=294
+SAMPLE BOTTOM median=2157 min=2143 max=2167
+TARGET 4 LEFT x=30 y=160
+SAMPLE LEFT median=331 min=326 max=333
+TARGET 5 RIGHT x=450 y=160
+SAMPLE RIGHT median=3282 min=3277 max=3287
+AXIS RESULT top=3472 centre=1693 bottom=2157 left=331 right=3282 verticalSpan=1315 horizontalSpan=2951
+TARGET 1 TOP x=240 y=26

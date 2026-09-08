@@ -1,8 +1,9 @@
 # PinTrace
 
 Connection diagnostic for the fitted ESP32 parallel shield. Keep the glass
-untouched. It scans LCD D0–D7, RS and WR in both directions and polarities;
-LCD CS, RD and reset remain HIGH. It does not scan those three control nets.
+untouched. The current version scans LCD D0–D7, RS and CS in both directions
+and polarities; LCD RD, WR and reset remain HIGH. Both bus strobes remain
+inactive while CS is tested as a candidate electrode.
 
 The test uses internal weak pulls and one candidate output at a time.
 `low=0 high=8 FOLLOWS` means the sense input followed the driven candidate
@@ -31,3 +32,14 @@ status indicator. It does not use WiFi or write calibration to NVS.
 After confirming two plausible isolated plate pairs, measure position under
 proper excitation at known screen locations before changing the product map.
 A stable accidental bias under the old map is not sufficient validation.
+
+Bench logs, 9 September 2026:
+
+- `scan-untouched.txt`: initial scan with CS/RD/reset held HIGH. D0–RS follows
+  reciprocally; D1 remains HIGH even against its weak pull-down.
+- `scan-untouched-rd.txt`: experimental scan releasing RD, keeping CS/reset
+  HIGH. Several bus baselines and readings are disturbed. Do not infer
+  electrode pairs from that uncontrolled result.
+- `scan-untouched-cs.txt`: current scan, RD/WR/reset held HIGH. All ten
+  baselines respond normally to both pulls. Exactly two reciprocal pairs:
+  D0/GPIO16–RS/GPIO33, and D1/GPIO17–CS/GPIO21.

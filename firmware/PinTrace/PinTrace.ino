@@ -2,15 +2,16 @@
  * Inspired by MCUFRIEND_kbv/examples/diagnose_Touchpins, but uses digital
  * weak-pull tests in both polarities and both directions, not AVR ADC cutoffs.
  * This identifies conductive paths, not resistance in ohms or axis names.
- * Only one candidate pin is a strong output at a time. CS/RD/RST stay HIGH.
+ * Only one candidate pin is a strong output at a time. RD/WR/RST stay HIGH.
+ * CS is included: both read/write strobes stay inactive throughout scan.
  * Serial 115200: s = scan. Does not auto-run, draw, use WiFi, or alter NVS.
  */
 #include <Arduino.h>
 
-static const uint8_t pins[] = {16, 17, 18, 19, 2, 22, 23, 5, 33, 14};
-static const char *names[] = {"D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "RS", "WR"};
+static const uint8_t pins[] = {16, 17, 18, 19, 2, 22, 23, 5, 33, 21};
+static const char *names[] = {"D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "RS", "CS"};
 static const int count = sizeof(pins) / sizeof(pins[0]);
-static const uint8_t cs = 21, rd = 12, rst = 4;
+static const uint8_t rd = 12, wr = 14, rst = 4;
 
 static void releaseBus() {
   for (int i = 0; i < count; ++i) pinMode(pins[i], INPUT);
@@ -18,8 +19,8 @@ static void releaseBus() {
 
 static void controlsHigh() {
   // No candidate GPIO drives against another candidate output.
-  pinMode(cs, OUTPUT); digitalWrite(cs, HIGH);
   pinMode(rd, OUTPUT); digitalWrite(rd, HIGH);
+  pinMode(wr, OUTPUT); digitalWrite(wr, HIGH);
   pinMode(rst, OUTPUT); digitalWrite(rst, HIGH);
 }
 
