@@ -312,9 +312,7 @@ bool waitTap(int *sy) {
 }
 
 // -------------------------------------------------------- NVS persistence --
-// All-new key names on purpose: the old keys hold calibration from previous
-// wirings and must never be read again.  Touch resting levels are deliberately
-// not stored because they are measured fresh at every boot.
+// Keep the v13 key names stable: the working device's anchors survive UI updates.
 // Calibration must describe distinct rows in one consistent direction.
 bool calValid(const int *t) {
   int direction = t[NANCH - 1] >= t[0] ? 1 : -1;
@@ -440,37 +438,51 @@ void gridStep() {
 // ------------------------------------------------------------------ screens --
 enum { SCR_HOME, SCR_MENU, SCR_INFO } screen = SCR_HOME;
 
-// The premium cue: a 1px lighter line just inside the top edge of every
-// card so the flat fill reads as a bevelled face (HelloScreen's trick).
+// A subtle top border separates cards from the background.
 void bevel(int x, int y, int w) { tft.drawFastHLine(x + 1, y + 1, w - 2, C_BEVEL); }
 
-const int ROW_TOP = 52, ROW_H = 52;
+static int bandTop(int band) { return band * 320 / NANCH; }
+static int bandHeight(int band) { return bandTop(band + 1) - bandTop(band); }
+
+void header(const String& title, bool back) {
+  tft.fillRect(0, 0, 480, bandHeight(0), C_BAR);
+  if (back) textAt(16, 18, 2, C_ACC, "< BACK");
+  int x = back ? 240 - title.length() * 6 : 16;
+  textAt(x, 18, 2, C_TXT, title);
+  tft.drawFastHLine(0, bandTop(1) - 1, 480, C_EDGE);
+}
+
 void row(int i, const String& name, const String& val, uint16_t vc) {
-  int y = ROW_TOP + i * ROW_H;
-  tft.fillRect(8, y, 464, ROW_H - 6, C_CARD);
-  tft.drawRect(8, y, 464, ROW_H - 6, C_EDGE);
+  int y = bandTop(i + 1) + 3, h = bandHeight(i + 1) - 6;
+  tft.fillRect(8, y, 464, h, C_CARD);
+  tft.drawRect(8, y, 464, h, C_EDGE);
   bevel(8, y, 464);
-  textAt(22, y + 14, 2, C_TXT, name);
-  textAt(444 - val.length() * 12, y + 14, 2, vc, val);
+  tft.fillRect(9, y + 1, 3, h - 2, C_ACC);
+  int textY = y + (h - 16) / 2;
+  textAt(24, textY, 2, C_TXT, name);
+  if (val.length()) textAt(448 - val.length() * 12, textY, 2, vc, val);
+  else textAt(444, textY, 2, C_ACC, ">");
 }
 
 // PRESSED FLASH -- universal. Repaint the element in C_ACC with its text in
 // C_BG, hold 140ms, then the caller acts / redraws. No silent taps anywhere.
 void flashRow(int i, const String& name) {
-  int y = ROW_TOP + i * ROW_H;
-  tft.fillRect(8, y, 464, ROW_H - 6, C_ACC);
-  textAt(22, y + 14, 2, C_BG, name);
+  int y = bandTop(i + 1) + 3, h = bandHeight(i + 1) - 6;
+  tft.fillRect(8, y, 464, h, C_ACC);
+  textAt(24, y + (h - 16) / 2, 2, C_TXT, name);
   delay(160);                         // visible pressed-state feedback
 }
 void flashHeader(const String& s) {
-  tft.fillRect(0, 0, 480, 44, C_ACC);
-  textAt(16, 15, 2, C_BG, s);
+  tft.fillRect(0, 0, 480, bandHeight(0), C_ACC);
+  textAt(16, 18, 2, C_TXT, s);
   delay(160);
 }
 void drawSettingsBand(bool pressed) {
-  tft.fillRect(0, 268, 480, 52, pressed ? C_ACC : C_CARD);
-  if (!pressed) tft.drawFastHLine(0, 268, 480, C_ACC);
-  textAt(192, 284, 2, pressed ? C_BG : C_ACC, "SETTINGS");
+  int y = bandTop(5);
+  tft.fillRect(0, y, 480, 320 - y, pressed ? C_ACC : C_CARD);
+  if (!pressed) tft.drawFastHLine(0, y, 480, C_ACC);
+  textAt(192, y + 19, 2, C_TXT, "SETTINGS");
+  textAt(444, y + 19, 2, C_TXT, ">");
   if (pressed) delay(140);
 }
 
@@ -485,13 +497,9 @@ void drawJack(int x, int y, uint8_t st) {
 
 void drawHome() {
   tft.fillScreen(C_BG);
-  tft.fillRect(0, 0, 480, 44, C_BAR);
-  textAt(16, 15, 2, C_TXT, "FreeISP");
-  // Status pill, right edge pinned at x=468: w = len*12 + 16.
-  // ("ONLINE" later: C_OK, w=88, x=380.)
-  tft.fillRoundRect(368, 10, 100, 24, 12, C_WARN);
-  textAt(376, 15, 2, C_BG, "OFFLINE");
-  tft.drawFastHLine(0, 44, 480, C_EDGE);
+  header("FreeISP", false);
+  tft.fillRoundRect(368, 14, 100, 24, 12, C_WARN);
+  textAt(376, 18, 2, C_BG, "OFFLINE");
 
   tft.fillRect(12, 56, 220, 88, C_CARD); tft.drawRect(12, 56, 220, 88, C_EDGE);
   bevel(12, 56, 220);
@@ -502,57 +510,46 @@ void drawHome() {
   textAt(262, 64, 1, C_LABEL, "PPPoE");
   textAt(262, 84, 5, C_OK, "17");
 
-  textAt(12, 158, 1, C_LABEL, "PORTS");
+  textAt(12, 154, 2, C_LABEL, "PORTS");
   const uint8_t st[5] = {1,1,1,0,1};
   for (int i = 0; i < 5; i++) {            // pitch 100: jack 5 ends at x=468,
     drawJack(12 + i*100, 174, st[i]);      // flush with the cards above
     textAt(12 + i*100 + 25, 224, 1, st[i] ? C_TXT : C_LABEL, String(i + 1));
   }
 
+  textAt(12, 246, 1, C_LABEL, "Sample data - connect a router for live status");
   drawSettingsBand(false);
 }
 
 void drawMenu() {
   tft.fillScreen(C_BG);
-  tft.fillRect(0, 0, 480, 44, C_BAR);
-  textAt(16, 15, 2, C_ACC, "< BACK");
-  textAt(192, 15, 2, C_TXT, "Settings");   // centred: 240 - 8*12/2
-  tft.drawFastHLine(0, 44, 480, C_EDGE);
+  header("Settings", true);
   row(0, "WiFi",            "not set",      C_WARN);
-  row(1, "Screen",          BRI[brightIdx], C_LABEL);
+  row(1, "Screen preset",   BRI[brightIdx], C_LABEL);
   row(2, "Alarm",           alarmArmed ? "armed" : "off",
                             alarmArmed ? C_OK : C_LABEL);
   row(3, "Calibrate touch", "",             C_LABEL);
-  row(4, "Info",            "",             C_LABEL);
+  row(4, "About module",    "",             C_LABEL);
 }
 
 void drawInfo() {
   tft.fillScreen(C_BG);
-  tft.fillRect(0, 0, 480, 44, C_BAR);
-  textAt(16, 15, 2, C_ACC, "< BACK");
-  textAt(216, 15, 2, C_TXT, "Info");       // centred: 240 - 4*12/2
-  tft.drawFastHLine(0, 44, 480, C_EDGE);
+  header("About", true);
 
-  tft.fillRect(8, 52, 464, 260, C_CARD);
-  tft.drawRect(8, 52, 464, 260, C_EDGE);
-  bevel(8, 52, 464);
+  tft.fillRect(8, 60, 464, 252, C_CARD);
+  tft.drawRect(8, 60, 464, 252, C_EDGE);
+  bevel(8, 60, 464);
 
-  textAt(24, 66, 2, C_TXT, "FaceUI");
-  textAt(24, 92, 1, C_LABEL, "build " __DATE__ " " __TIME__);
-
-  textAt(24, 116, 1, C_LABEL, "D0-D7: 16 17 18 19 2 22 23 5");
-  textAt(24, 132, 1, C_LABEL, "WR 14  RS 33  CS 21  RD 12  RST 4");
-  textAt(24, 148, 1, C_LABEL, "touch pairs: 16/33 and 17/21");
-
-  textAt(24, 176, 1, C_LABEL, "touch gate"); textAt(140, 176, 1, C_ACC, String(T_ON));
-  textAt(24, 192, 1, C_LABEL, "cal A/B/C");
-  textAt(140, 192, 1, C_ACC, "r1=" + String(anchorRaw[0]) +
-                             "  r4=" + String(anchorRaw[3]) +
-                             "  r6=" + String(anchorRaw[NANCH - 1]));
-  textAt(24, 224, 1, C_LABEL, "last tap");
-  textAt(140, 224, 1, C_ACC, String(lastTapRaw) + " -> " + String(lastTapY));
-
-  textAt(24, 288, 1, C_LABEL, "tap anywhere to go back");
+  textAt(24, 76, 3, C_TXT, "FreeISP module");
+  textAt(24, 110, 1, C_LABEL, "FaceUI / " __DATE__);
+  tft.drawFastHLine(24, 134, 432, C_EDGE);
+  textAt(24, 150, 2, C_LABEL, "Connection");
+  textAt(324, 150, 2, C_WARN, "Offline");
+  textAt(24, 186, 2, C_LABEL, "Touch setup");
+  textAt(348, 186, 2, C_OK, calibrated ? "Saved" : "Needed");
+  textAt(24, 226, 1, C_LABEL, "Dashboard values are a preview.");
+  textAt(24, 244, 1, C_LABEL, "Screen and alarm presets are stored locally.");
+  textAt(24, 284, 2, C_ACC, "Tap anywhere to return");
 }
 
 // ------------------------------------------------------------------ sketch --
@@ -615,10 +612,6 @@ void loop() {
   }
 
   if (screen == SCR_HOME) {
-    // HOME tiles into two bands. 268-319 is the SETTINGS band (matches the
-    // drawn rect exactly). Everything above it -- 0-267 -- is content with
-    // no action, so a tap there flashes the SETTINGS band as a HINT: it
-    // teaches where to tap and kills the orphan dead zone.
     // The bottom calibrated row opens Settings.
     if (sy >= (NANCH - 1) * BAND) {
       drawSettingsBand(true);           // flash...
@@ -629,12 +622,8 @@ void loop() {
       drawSettingsBand(false);          // ...and restore
     }
   } else if (screen == SCR_MENU) {
-    // Band map, edges shared exactly: 0-51 BACK, then 52px per row, row 4
-    // running through the bottom margin to 319. This FIXES two live bugs:
-    // sy 44-51 used to truncate (-8)/52 == 0 into row 0, and sy 312-319
-    // was dead. BACK owning the 44-51 gutter also gives the extrapolated
-    // territory above the top cal anchor to the bigger, safer target.
-    int r = (sy <= 51) ? -1 : min((sy - ROW_TOP) / ROW_H, 4);
+    // screenY returns one of six stable anchor centres: BACK, then five rows.
+    int r = constrain(sy / BAND, 0, NANCH - 1) - 1;
     Serial.printf("menu row %d\n", r);
     if (r < 0) {
       flashHeader("< BACK");
@@ -646,8 +635,8 @@ void loop() {
       row(0, "WiFi", "not set", C_WARN);
     } else if (r == 1) {
       brightIdx = (brightIdx + 1) & 3;
-      flashRow(1, "Screen");
-      row(1, "Screen", BRI[brightIdx], C_LABEL);
+      flashRow(1, "Screen preset");
+      row(1, "Screen preset", BRI[brightIdx], C_LABEL);
       saveU8("bri2", brightIdx);
       Serial.printf("bright -> %s\n", BRI[brightIdx]);
     } else if (r == 2) {
@@ -662,7 +651,7 @@ void loop() {
       calibrate();                      // re-saves itself, so re-run and
       drawMenu();                       // persist come free
     } else {
-      flashRow(4, "Info");
+      flashRow(4, "About module");
       screen = SCR_INFO;
       drawInfo();
     }
