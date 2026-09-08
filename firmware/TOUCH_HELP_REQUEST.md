@@ -1,3 +1,10 @@
+> **UPDATE, 9 Sep 2026 — §1 and §2 below are SUPERSEDED.** The independent
+> review found the white/dark test confounded image with retained LCD bus
+> levels, and the follow-up experiment confirmed it: the reading follows the
+> levels parked on data pins D0–D5, not the picture. See
+> **`TOUCH_BUSTRACE_RESULTS.md`** for the data and the firmware fix now applied.
+> The attempt log in §4 and the hardware facts in §3 remain accurate.
+
 # Resistive touch on ESP32 + ILI9486 — escalation / request for help
 
 **What we want from you:** a way to make a 6-row touch UI select the row under

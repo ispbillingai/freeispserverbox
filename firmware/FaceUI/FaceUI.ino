@@ -145,8 +145,22 @@ Lcd tft;
 
 static void done() { tft.busOut(); tft.sel(); }
 
+// PARK THE LCD DATA BUS LOW BEFORE EVERY CONVERSION.
+// BusTrace (TOUCH_BUSTRACE_RESULTS.md) settled it: with the image fixed,
+// D0..D5 parked HIGH rail the reading to 4095 with or without a finger,
+// released they float to the same rail, and parked LOW the reading is
+// position-like and identical on dark and white images. Every "different
+// scale per screen" in this file's history was the last drawn colour's low
+// six bits left sitting on these outputs -- busOut() restores direction,
+// never a value. The LCD ignores data levels without a WR strobe, so this
+// cannot touch the picture.
+static inline void parkBusLow() {
+  for (int i = 0; i < 6; i++) { pinMode(PIN_D[i], OUTPUT); digitalWrite(PIN_D[i], LOW); }
+}
+
 int zRead() {                       // XP low, YM high, read XM
   tft.desel();
+  parkBusLow();
   pinMode(T_XP, OUTPUT); digitalWrite(T_XP, LOW);
   pinMode(T_YM, OUTPUT); digitalWrite(T_YM, HIGH);
   pinMode(T_XM, INPUT);  pinMode(T_YP, INPUT);
@@ -157,6 +171,7 @@ int zRead() {                       // XP low, YM high, read XM
 }
 int yRead() {                       // drive the Y plate, read the X plate
   tft.desel();
+  parkBusLow();
   pinMode(T_XP, INPUT);  pinMode(T_XM, INPUT);
   pinMode(T_YP, OUTPUT); digitalWrite(T_YP, HIGH);
   pinMode(T_YM, OUTPUT); digitalWrite(T_YM, LOW);
@@ -266,7 +281,10 @@ bool calibrationRequired = false;
 int  lastTapRaw = -1, lastTapY = -1;  // shown on the INFO screen
 
 Preferences prefs;
-#define CAL_VER 10                  // v10 = anchors shifted onto Home's
+#define CAL_VER 11                  // v11 = first anchors taken with the
+                                    // bus parked LOW; every earlier set was
+                                    // measured on an uncontrolled bus state.
+                                    // (v10 = anchors shifted onto Home's
                                     // scale by the verify tap; v9's were
                                     // left on the calibration screen's
 
