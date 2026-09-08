@@ -134,3 +134,206 @@ next bench step, per §5.
    next single-bit toggle sweep include them?
 3. With the bus normalised, does anything in §4 of your review change about
    how to validate six rows, or is the protocol as written still right?
+
+---
+
+## 8. Validation after the fix — FAILED, and what the failure says
+
+Run 9 Sep 2026, 00:22–00:29, `FaceUI.ino` with `parkBusLow()` in both
+primitives (D0–D5 = `0x00` before every conversion), fresh calibration
+(`CAL_VER 11`), the owner walking the 8-row calibration on the real UI.
+
+### 8a. Raw log (every touch event in the window)
+
+```
+cal row 1: no contact, again
+tap samples: 37              -> cal row 1 raw=37
+cal row 2: no contact, again
+tap samples: 32              -> cal row 2 rejected: raw=32, moved -5 from row 1
+cal row 2: no contact, again
+tap samples: 201             -> cal row 2 raw=201
+tap samples: 207 149         -> cal row 3 rejected: raw=207, moved +6 from row 2
+tap samples: 166             -> cal row 3 rejected: raw=166, moved -35 from row 2
+cal row 3: no contact, again
+tap samples: 499 288 87      -> cal row 3 raw=288
+tap samples: 79 88           -> cal row 4 rejected: raw=88,  moved -200 from row 3
+tap samples: 192             -> cal row 4 rejected: raw=192, moved -96 from row 3
+cal row 4: no contact, again
+tap samples: 80              -> cal row 4 rejected: raw=80,  moved -208 from row 3
+tap samples: 158 56          -> cal row 4 rejected: raw=158, moved -130 from row 3
+cal row 4: no contact, again
+cal row 4: no contact, again
+```
+
+The walk never got past row 4 in seven minutes.
+
+### 8b. What is different from before the fix — and what is not
+
+**Gone:** the 4095 rail. Not one railed sample in the whole run. The bus
+dependency isolated in §3 is genuinely removed by parking D0–D5 LOW.
+
+**Not gone — now exposed:** the signal that remains under `0x00` is small and
+unstable.
+
+- **Amplitude.** Presses read 32–499. In `BoxCal` (bus incidentally `0x02`)
+  the same glass read 149–1011 with ~100 counts per row; in BusTrace §3 under
+  `park=LOW` steady holds read 155–891. Here the row-to-row steps that
+  survived were 164 and 87, and the rejected ones were −5, +6, −35.
+- **Within-press spread.** `499 288 87` inside one held press; `158 56`;
+  `207 149`. A 5.7x swing while the finger does not move is not calibration
+  error, and no filter can recover position from it.
+- **Contact.** Eight "no contact" events — presses where every sample fell
+  below the 30-count floor — and most successful presses yielded a single
+  sample. Under `0x00` a real press frequently reads in the 30–90 range,
+  which the code (tuned when presses read in the hundreds) treats as no
+  contact.
+- **Direction is not even stable.** Rows 1→2→3 read 37, 201, 288
+  (increasing downward); every earlier gradient on this glass *decreased*
+  downward (BoxCal A=943 … H=149; SettleTest 1070/533/176). Row 4's four
+  attempts (80–192) all sat below row 3, i.e. decreasing again. Either row 1's
+  single-sample 37 was a bad contact, or the polarity of the divider itself
+  has changed with the bus state. Both are possible; neither is good.
+
+The FaceUI validators (30-count contact floor, 40-count minimum step) make
+this worse by discarding marginal samples, but they are not the cause:
+`499 → 87` in one hold is the panel, not the software.
+
+### 8c. Interpretation (hypothesis, not proven)
+
+Put §3 and §8 together: D0–D5 HIGH rails the node; D0–D5 LOW leaves a weak,
+noisy, possibly inverted signal; and the one bus state that ever produced a
+clean 16-row gradient was `0x02` — D1 (GPIO17) HIGH, the rest LOW — reached
+by accident in `BoxCal`.
+
+That pattern fits a **bias network**: the six data outputs are not isolated
+from the sense node, and their levels set both the offset and the effective
+gain of the measurement. All-HIGH saturates it; all-LOW starves it; one
+particular bit HIGH happened to bias it into the usable middle. If that is
+right, the "fix" of parking everything LOW was the wrong park state, and the
+correct one is whichever combination biases the node mid-scale — which the
+per-bit sweep below will show directly.
+
+The stronger reading of the same evidence is the one the reviewer raised:
+**one or more of D0–D5 are electrically part of the touch circuit**, i.e. the
+declared electrode map (`XP=D6, XM=RS, YP=WR, YM=D7`) is wrong or incomplete
+for this shield, and "parking" them is actually driving a film electrode.
+The polarity flip in §8b would be a natural consequence.
+
+### 8d. The next experiment — staged on the board
+
+`firmware/BitTrace/BitTrace.ino`, the review's own next step. Fixed dark
+image, finger held still, no WR strobe. Per press it reads two `z/y` pairs
+under each of eight park states, re-applied before every conversion:
+
+```
+0x00 (all low)   0x01 D0   0x02 D1 (BoxCal's state)   0x04 D2
+0x08 D3          0x10 D4   0x20 D5                     0x3F (all high)
+```
+
+plus a no-finger baseline per state. Whichever bit(s) move the reading, and
+by how much, identify the coupling path — and if `0x02` alone restores the
+BoxCal-quality gradient, that is the park state FaceUI should use.
+
+### 8e. Questions for the reviewer, updated
+
+1. Given §8, do you read this as a bias network on a correctly-mapped node,
+   or as a wrong electrode map? What in the per-bit sweep would distinguish
+   them?
+2. If a single bit HIGH turns out to be the "right" bias, is it legitimate to
+   depend on that in production, or is it a fluke of this shield's leakage
+   that a second unit would not share?
+3. Is there any remaining firmware route you would still pursue if the sweep
+   shows the electrodes are not where the pin map says — or does that make
+   the dedicated controller (with the film re-wired to it) the only sound
+   design?
+
+---
+
+## 9. HANDOFF — state of the board, and the owner's instructions to you
+
+**Written 9 Sep 2026 at 00:40. The previous AI has stopped making changes.**
+You are taking over the bench work: the owner's instruction is that you
+should **research what other people do with this hardware, decide the fix,
+apply it, compile it, flash it, and validate it yourself** — not hand
+patches back for someone else to run.
+
+### 9a. What is on the board right now
+
+- Port **COM6** (Silicon Labs CP210x). Board is plugged in and enumerating.
+- **Flashed: `firmware/BitTrace/BitTrace.ino`** — the per-bit bus sweep from
+  §8d. This is a diagnostic, **not the product UI**. It paints a dark screen
+  and waits; each held press logs two `z/y` pairs under each of eight D0–D5
+  park patterns. **It has not yet been run with a finger** — the owner has
+  not pressed since it was flashed. If you want its data, ask for one
+  session of ~5 presses, holding still ~7 s each, and read serial at 115200.
+- The product sketch is `firmware/FaceUI/FaceUI.ino` at commit `4805ae6`+:
+  `parkBusLow()` drives D0–D5 LOW in both primitives, `CAL_VER 11`. Its
+  validation failed as documented in §8. Re-flash it to get the UI back.
+
+### 9b. Toolchain — everything needed to compile and flash
+
+```
+"C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe" ^
+  compile --upload -p COM6 --fqbn esp32:esp32:esp32 F:\freeispserverbox\firmware\<Sketch>
+```
+
+- Arduino-ESP32 core 3.3.10 is installed under the IDE; `Adafruit_GFX` is
+  the only library dependency.
+- Uploads intermittently fail with "chip stopped responding" — retry once.
+- **Never pass `--output-dir`**: it leaves stale binaries named after the
+  sketch, which has caused a wrong build to be flashed before.
+- Serial 115200. Opening the port from PowerShell with `DtrEnable=$false;
+  RtsEnable=$false` reads without resetting the board; toggling RTS resets it.
+- If Windows shows no COM port: the CP210x will be listed as "Unknown" (i.e.
+  remembered, not present) — that is a cable/socket problem, not a driver one.
+
+### 9c. The lead to check first — the electrode map may simply be wrong
+
+The standard library for these shields, **MCUFRIEND_kbv**, ships two examples
+that exist *because* 3.5" mcufriend shields are sold with **different touch
+electrode-to-pin wirings**: `diagnose_Touchpins.ino` (measures plate
+resistance between candidate pin pairs and reports which four pins are the
+real XP/XM/YP/YM) and `TouchScreen_Calibr_native.ino`. Documented variants
+include electrode sets on the **D8/D9 header pins** — which in 8-bit mode are
+the LCD data lines this project calls **D0 and D1**, i.e. **GPIO16 and
+GPIO17**.
+
+Hold that against the measurements:
+
+- The only bus state that ever produced a clean 16-row gradient was **D1
+  (GPIO17) HIGH**, all else LOW (`0x02`, BoxCal, §4.4).
+- Driving D0–D5 HIGH rails the sense node; releasing them floats it to the
+  rail (§3).
+- Parking them LOW starves the signal and flips its polarity (§8).
+
+If GPIO17 (and possibly GPIO16) are actual film electrodes, every one of
+those results is what you would expect from driving an electrode while
+believing it was an idle data pin — and "D1 HIGH" was not a bias fluke but the
+correct excitation for that plate. **This is a hypothesis; confirm it with
+the resistance test, not by assumption.** Porting `diagnose_Touchpins` to the
+ESP32 pin numbers in §3 of `TOUCH_HELP_REQUEST.md` is a small job and
+would settle the map in one run. The BitTrace sweep already on the board
+answers a related question electrically (which bit moves the node).
+
+### 9d. Suggested searches
+
+- `MCUFRIEND_kbv diagnose_Touchpins` — how the plate-resistance test works
+  and the list of known pin variants.
+- `mcufriend 3.5 ILI9486 touch pins XP YP XM YM variants` — which shields use
+  which pairs.
+- `ESP32 mcufriend shield touchscreen analogRead shared pins` — others who
+  moved these shields to ESP32 and what pin restore sequence they use after
+  each read (this project's `done()`/`busOut()` restores direction only).
+- `Adafruit TouchScreen library pressure ESP32 4095` — the `z2` rest-level
+  issue in attempt #35 of `TOUCH_HELP_REQUEST.md`.
+
+### 9e. Constraints from the owner (unchanged)
+
+- **Pins are frozen** — no rewiring until the PCB. Work with the map as
+  fitted, but *verify* what that map actually is.
+- Deliverable is a **six-row, full-width UI** that selects the row under the
+  finger, correctly, on every screen. Columns are not required.
+- **Hold-to-select is not acceptable** as the final UX.
+- Do not re-run anything in `TOUCH_HELP_REQUEST.md` §4 — 36 attempts are
+  logged there with outcomes.
+- Commit and push what you change; the owner's repos deploy from GitHub.
