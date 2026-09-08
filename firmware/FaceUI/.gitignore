@@ -1,0 +1,6 @@
+# First serial capture contained duplicated/damaged text. Keep it locally;
+# the distinct readable measurements are retained in corrected-map-summary.txt.
+corrected-map-validation.txt
+ratio-validation.txt
+# Device-specific calibration backup; keep locally, never publish NVS contents.
+nvs-working-v13.bin

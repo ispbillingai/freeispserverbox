@@ -1,0 +1,4 @@
+# Raw serial stream retained locally; readable lines are in summary.txt.
+capture.txt
+capture-refined.txt
+capture-calibrated.txt

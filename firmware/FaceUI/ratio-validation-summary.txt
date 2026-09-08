@@ -1,0 +1,27 @@
+﻿tap raw=2388 burst=1895..2779
+tap raw=2388 bur88
+CAL target row=3 x=240 y=133
+tap raw=2872 burst=2753..4675
+CAL row=3 raw=2872
+CAL target row=4 x=240 y=186
+tap raw=3500 burst=2381..4035
+CAL row=4 raw=3500
+CAL target row=5 x=240 y=239
+tap raw=4751 burst=4343..4963
+CAL row=5 raw=4751
+CAL target row=6 x=240 y=293
+tap raw=6574 burst=6308..6731
+CAL row=6 raw=6574
+tap raw=2377 burst=1848..2599
+CAL CHECK row=1 raw=2377 matched=2
+tap raw=2440 burst=1798..2978
+CAL CHECK row=2 raw=2440 matched=2
+tap raw=2841 burst=2692..3302
+CAL CHECK row=3 raw=2841 matched=3
+tap raw=3491 burst=2992..3843
+CAL CHECK row=4 raw=3491 matched=4
+tap raw=5216 burst=5031..6178
+CAL CHECK row=5 raw=5216 matched=5
+tap raw=6133 burst=5610..7032
+CAL CHECK row=6 raw=6133 matched=6
+CAL failed: vertical rows are not repeatably separated; anchors not saved

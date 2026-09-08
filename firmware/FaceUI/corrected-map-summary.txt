@@ -1,0 +1,18 @@
+﻿tap raw=1637 burst=1634..1643
+tap raw=16raw=1637
+CAL target row=2 x=240 y=79
+tap raw=1681 burst=1673..1690
+CAL row=2 raw=1681
+CAL target row=3 x=240 y=133
+tap raw=1619 burst=1616..1621
+CAL row=3 raw=1619
+CAL target row=4 x=240 y=186
+tap raw=1555 burst=1535..1561
+CAL row=4 raw=1555
+CAL target row=5 x=240 y=239
+tap raw=1806 burst=1798..1808
+CAL row=5 raw=1806
+CAL target row=6 x=240 y=293
+tap raw=1674 burst=1667..1675
+CAL row=6 raw=1674
+CAL failed: vertical rows are not repeatably separated; anchors not saved
