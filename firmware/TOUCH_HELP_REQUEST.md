@@ -1,3 +1,5 @@
+> **SUPERSEDED, 9 Sep 2026.** The electrode pin map this document reasons from was WRONG (3 of 4 pins). PinTrace measured the real pairs as GPIO16/33 and GPIO17/21 -- CS is a touch electrode -- and the ADC axis is horizontal in landscape. Every bus-level, image-coupling and parkBusLow() conclusion below was an artefact of driving real film electrodes as if they were idle data pins. Authoritative record: `TOUCH_PINTRACE_RESULTS.md` and `FaceUI/README.md`. Kept for the attempt log and as a record of the misdirection.
+
 > **UPDATE, 9 Sep 2026 — §1 and §2 below are SUPERSEDED.** The independent
 > review found the white/dark test confounded image with retained LCD bus
 > levels, and the follow-up experiment confirmed it: the reading follows the
