@@ -9,6 +9,11 @@
 
 #include <Adafruit_GFX.h>
 #include <Preferences.h>
+#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSansBold9pt7b.h>
+#include <Fonts/FreeSansBold12pt7b.h>
+#include <Fonts/FreeSansBold18pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
 #include "driver/gpio.h"
 #include "soc/gpio_struct.h"
 
@@ -30,9 +35,9 @@ static const uint8_t PIN_D[8] = {16, 17, 18, 19, 2, 22, 23, 5};
 #define FACEUI_GRID_DIAGNOSTIC 0
 
 #define RGB(r,g,b) ((uint16_t)((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|((b)>>3)))
-#define C_BG   RGB(13,17,23)
-#define C_OK   RGB(63,185,80)
-#define C_TXT  0xFFFF
+#define C_BG   RGB(242,243,248)
+#define C_OK   RGB(40,154,86)
+#define C_TXT  RGB(25,29,38)
 
 static uint32_t lutSet[256], lutClr[256], WR_MASK;
 #if PIN_RS >= 32
@@ -218,13 +223,13 @@ int yRead() {
 }
 
 // ---------------------------------------------------------------- palette --
-#define C_BAR   RGB(22,27,34)
-#define C_CARD  RGB(22,27,34)
-#define C_EDGE  RGB(48,54,61)
-#define C_LABEL RGB(140,140,150)
-#define C_ACC   RGB(31,111,235)
-#define C_WARN  RGB(255,210,0)
-#define C_BEVEL RGB(58,64,72)       // 1px inner top-light line on every card
+#define C_BAR   C_BG
+#define C_CARD  0xFFFF
+#define C_EDGE  RGB(222,226,234)
+#define C_LABEL RGB(111,119,134)
+#define C_ACC   RGB(0,112,245)
+#define C_WARN  RGB(168,105,27)
+#define C_BEVEL RGB(248,249,252)
 
 // ------------------------------------------------------------- touch state --
 
@@ -371,11 +376,11 @@ static void drawCalGrid(int hotRow, int targetX = 240, bool verify = false) {
     int top = r * 320 / NANCH, bottom = (r + 1) * 320 / NANCH;
     uint16_t colour = r == hotRow ? C_ACC : C_CARD;
     tft.fillRect(1, top + 1, 478, bottom - top - 2, colour);
-    textAt(8, top + 7, 2, C_TXT, String(r + 1));
+    textAt(8, top + 7, 2, r == hotRow ? 0xFFFF : C_TXT, String(r + 1));
     if (r == hotRow) {
       int centre = (top + bottom) / 2;
-      tft.drawRect(targetX - 10, centre - 10, 20, 20, C_TXT);
-      textAt(80, top + 4, 1, C_TXT,
+      tft.drawRect(targetX - 10, centre - 10, 20, 20, 0xFFFF);
+      textAt(80, top + 4, 1, 0xFFFF,
              verify ? "CHECK: tap white square" : "CALIBRATE: tap white square");
     }
   }
@@ -444,80 +449,116 @@ void bevel(int x, int y, int w) { tft.drawFastHLine(x + 1, y + 1, w - 2, C_BEVEL
 static int bandTop(int band) { return band * 320 / NANCH; }
 static int bandHeight(int band) { return bandTop(band + 1) - bandTop(band); }
 
+// Rasterize type in RAM, then send horizontal runs through the fast LCD path.
+// Direct GFX font drawing would send a window command for every lit pixel.
+void label(int x, int baseline, const GFXfont *font, uint16_t colour, const String& s) {
+  GFXcanvas1 measure(1, 1);
+  measure.setFont(font);
+  int16_t bx, by; uint16_t w, h;
+  measure.getTextBounds(s, 0, 0, &bx, &by, &w, &h);
+  if (!w || !h) return;
+  GFXcanvas1 mask(w, h);
+  if (!mask.getBuffer()) return;
+  mask.setFont(font); mask.setTextWrap(false);
+  mask.setTextColor(1); mask.setCursor(-bx, -by); mask.print(s);
+  for (int yy = 0; yy < h; yy++) {
+    int xx = 0;
+    while (xx < w) {
+      while (xx < w && !mask.getPixel(xx, yy)) xx++;
+      int start = xx;
+      while (xx < w && mask.getPixel(xx, yy)) xx++;
+      if (xx > start) tft.fillRect(x + bx + start, baseline + by + yy, xx - start, 1, colour);
+    }
+  }
+}
+
+void chevron(int x, int y, uint16_t colour) {
+  for (int i = 0; i < 6; i++) {
+    tft.fillRect(x + i, y + i, 2, 2, colour);
+    tft.fillRect(x + i, y + 10 - i, 2, 2, colour);
+  }
+}
+
 void header(const String& title, bool back) {
   tft.fillRect(0, 0, 480, bandHeight(0), C_BAR);
-  if (back) textAt(16, 18, 2, C_ACC, "< BACK");
-  int x = back ? 240 - title.length() * 6 : 16;
-  textAt(x, 18, 2, C_TXT, title);
-  tft.drawFastHLine(0, bandTop(1) - 1, 480, C_EDGE);
+  if (back) {
+    label(18, 33, &FreeSans9pt7b, C_ACC, "< Back");
+    label(166, 34, &FreeSansBold12pt7b, C_TXT, title);
+  } else label(18, 34, &FreeSansBold12pt7b, C_TXT, title);
+  tft.drawFastHLine(16, bandTop(1) - 1, 448, C_EDGE);
 }
 
 void row(int i, const String& name, const String& val, uint16_t vc) {
-  int y = bandTop(i + 1) + 3, h = bandHeight(i + 1) - 6;
-  tft.fillRect(8, y, 464, h, C_CARD);
-  tft.drawRect(8, y, 464, h, C_EDGE);
-  bevel(8, y, 464);
-  tft.fillRect(9, y + 1, 3, h - 2, C_ACC);
-  int textY = y + (h - 16) / 2;
-  textAt(24, textY, 2, C_TXT, name);
-  if (val.length()) textAt(448 - val.length() * 12, textY, 2, vc, val);
-  else textAt(444, textY, 2, C_ACC, ">");
+  int y = bandTop(i + 1), h = bandHeight(i + 1);
+  tft.fillRoundRect(16, y + 3, 448, h - 6, 12, C_CARD);
+  tft.fillRoundRect(26, y + 12, 28, 28, 7, i == 2 ? C_OK : C_ACC);
+  label(35, y + 32, &FreeSansBold9pt7b, 0xFFFF, String(i + 1));
+  label(62, y + 33, &FreeSansBold9pt7b, C_TXT, name);
+  if (val.length()) label(346, y + 32, &FreeSans9pt7b, vc, val);
+  chevron(450, y + 21, C_LABEL);
 }
 
 // PRESSED FLASH -- universal. Repaint the element in C_ACC with its text in
 // C_BG, hold 140ms, then the caller acts / redraws. No silent taps anywhere.
 void flashRow(int i, const String& name) {
   int y = bandTop(i + 1) + 3, h = bandHeight(i + 1) - 6;
-  tft.fillRect(8, y, 464, h, C_ACC);
-  textAt(24, y + (h - 16) / 2, 2, C_TXT, name);
+  tft.fillRoundRect(16, y, 448, h, 12, C_ACC);
+  label(62, y + (h + 12) / 2, &FreeSansBold9pt7b, 0xFFFF, name);
   delay(160);                         // visible pressed-state feedback
 }
 void flashHeader(const String& s) {
   tft.fillRect(0, 0, 480, bandHeight(0), C_ACC);
-  textAt(16, 18, 2, C_TXT, s);
+  label(18, 34, &FreeSansBold12pt7b, 0xFFFF, s);
   delay(160);
 }
 void drawSettingsBand(bool pressed) {
   int y = bandTop(5);
-  tft.fillRect(0, y, 480, 320 - y, pressed ? C_ACC : C_CARD);
-  if (!pressed) tft.drawFastHLine(0, y, 480, C_ACC);
-  textAt(192, y + 19, 2, C_TXT, "SETTINGS");
-  textAt(444, y + 19, 2, C_TXT, ">");
+  tft.fillRect(0, y, 480, 320 - y, C_BG);
+  tft.fillRoundRect(16, y + 4, 448, 44, 14, pressed ? RGB(0,86,200) : C_ACC);
+  // Sliders icon, matching the configuration action.
+  for (int i = 0; i < 3; i++) {
+    int lineY = y + 17 + i * 8;
+    tft.fillRect(32, lineY, 22, 2, 0xFFFF);
+    tft.fillRect(36 + (i % 2) * 10, lineY - 3, 4, 8, 0xFFFF);
+  }
+  label(70, y + 33, &FreeSansBold12pt7b, 0xFFFF, "Settings");
+  chevron(437, y + 20, 0xFFFF);
   if (pressed) delay(140);
-}
-
-void drawJack(int x, int y, uint8_t st) {
-  uint16_t shell = st ? RGB(140,140,145) : RGB(60,60,70);
-  uint16_t pins  = st ? RGB(255,210,0)   : RGB(130,100,0);
-  tft.fillRoundRect(x, y, 56, 44, 4, shell);
-  tft.fillRect(x + 6, y + 8, 44, 28, C_BG);
-  for (int i = 0; i < 8; i++) tft.fillRect(x + 9 + i*5, y + 11, 3, 11, pins);
-  tft.fillRect(x + 20, y + 36, 16, 8, shell);
 }
 
 void drawHome() {
   tft.fillScreen(C_BG);
-  header("FreeISP", false);
-  tft.fillRoundRect(368, 14, 100, 24, 12, C_WARN);
-  textAt(376, 18, 2, C_BG, "OFFLINE");
+  // Compact brand mark: ascending signal bars.
+  tft.fillRoundRect(17, 26, 5, 11, 2, C_ACC);
+  tft.fillRoundRect(25, 19, 5, 18, 2, C_ACC);
+  tft.fillRoundRect(33, 12, 5, 25, 2, C_ACC);
+  label(49, 35, &FreeSansBold12pt7b, C_TXT, "FreeISP");
+  label(160, 34, &FreeSans9pt7b, C_LABEL, "Overview");
+  tft.fillRoundRect(358, 14, 106, 28, 14, C_CARD);
+  tft.fillCircle(372, 28, 3, C_WARN);
+  label(383, 34, &FreeSans9pt7b, C_WARN, "Offline");
 
-  tft.fillRect(12, 56, 220, 88, C_CARD); tft.drawRect(12, 56, 220, 88, C_EDGE);
-  bevel(12, 56, 220);
-  textAt(26, 64, 1, C_LABEL, "USERS ONLINE");
-  textAt(26, 84, 5, C_ACC, "42");
-  tft.fillRect(248, 56, 220, 88, C_CARD); tft.drawRect(248, 56, 220, 88, C_EDGE);
-  bevel(248, 56, 220);
-  textAt(262, 64, 1, C_LABEL, "PPPoE");
-  textAt(262, 84, 5, C_OK, "17");
+  // A single generous overview surface; colour distinguishes the metrics.
+  tft.fillRoundRect(16, 58, 448, 106, 14, C_CARD);
+  tft.fillRoundRect(16, 76, 3, 70, 1, C_ACC);
+  label(32, 85, &FreeSans9pt7b, C_LABEL, "Connected users");
+  label(29, 141, &FreeSansBold24pt7b, C_TXT, "42");
+  label(98, 137, &FreeSans9pt7b, C_LABEL, "users");
+  tft.drawFastVLine(276, 77, 68, C_EDGE);
+  label(296, 85, &FreeSans9pt7b, C_LABEL, "Sessions");
+  label(293, 138, &FreeSansBold18pt7b, C_ACC, "17");
+  label(344, 137, &FreeSans9pt7b, C_LABEL, "active");
 
-  textAt(12, 154, 2, C_LABEL, "PORTS");
+  label(18, 186, &FreeSansBold9pt7b, C_TXT, "Ethernet");
+  label(361, 185, &FreeSans9pt7b, C_LABEL, "Preview data");
   const uint8_t st[5] = {1,1,1,0,1};
-  for (int i = 0; i < 5; i++) {            // pitch 100: jack 5 ends at x=468,
-    drawJack(12 + i*100, 174, st[i]);      // flush with the cards above
-    textAt(12 + i*100 + 25, 224, 1, st[i] ? C_TXT : C_LABEL, String(i + 1));
+  for (int i = 0; i < 5; i++) {
+    int x = 16 + i * 92;
+    tft.fillRoundRect(x, 194, 80, 61, 10, C_CARD);
+    tft.fillCircle(x + 62, 208, 3, st[i] ? C_OK : C_LABEL);
+    label(x + 12, 220, &FreeSansBold12pt7b, st[i] ? C_TXT : C_LABEL, String(i + 1));
+    label(x + 12, 244, &FreeSans9pt7b, st[i] ? C_OK : C_LABEL, st[i] ? "Active" : "Idle");
   }
-
-  textAt(12, 246, 1, C_LABEL, "Sample data - connect a router for live status");
   drawSettingsBand(false);
 }
 
@@ -536,20 +577,16 @@ void drawInfo() {
   tft.fillScreen(C_BG);
   header("About", true);
 
-  tft.fillRect(8, 60, 464, 252, C_CARD);
-  tft.drawRect(8, 60, 464, 252, C_EDGE);
-  bevel(8, 60, 464);
-
-  textAt(24, 76, 3, C_TXT, "FreeISP module");
-  textAt(24, 110, 1, C_LABEL, "FaceUI / " __DATE__);
-  tft.drawFastHLine(24, 134, 432, C_EDGE);
-  textAt(24, 150, 2, C_LABEL, "Connection");
-  textAt(324, 150, 2, C_WARN, "Offline");
-  textAt(24, 186, 2, C_LABEL, "Touch setup");
-  textAt(348, 186, 2, C_OK, calibrated ? "Saved" : "Needed");
-  textAt(24, 226, 1, C_LABEL, "Dashboard values are a preview.");
-  textAt(24, 244, 1, C_LABEL, "Screen and alarm presets are stored locally.");
-  textAt(24, 284, 2, C_ACC, "Tap anywhere to return");
+  tft.fillRoundRect(16, 66, 448, 192, 14, C_CARD);
+  label(32, 104, &FreeSansBold12pt7b, C_TXT, "Your network. At a glance.");
+  textAt(34, 122, 1, C_LABEL, "FREEISP  /  FACEUI  /  " __DATE__);
+  tft.drawFastHLine(32, 145, 416, C_EDGE);
+  label(32, 173, &FreeSans9pt7b, C_LABEL, "Connection");
+  label(366, 173, &FreeSans9pt7b, C_WARN, "Offline");
+  label(32, 203, &FreeSans9pt7b, C_LABEL, "Touch calibration");
+  label(366, 203, &FreeSans9pt7b, C_OK, calibrated ? "Saved" : "Needed");
+  textAt(34, 234, 1, C_LABEL, "Preview data / screen and alarm presets saved locally");
+  label(32, 295, &FreeSans9pt7b, C_ACC, "<  Tap anywhere to return");
 }
 
 // ------------------------------------------------------------------ sketch --
