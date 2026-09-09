@@ -1,4 +1,4 @@
-# FaceUI: working landscape touch and UI
+# FaceUI: working landscape touch and iPhone-inspired UI
 
 The owner confirmed that touches were working well on 9 September 2026.
 Commit `4d7d2cd` preserves that touch implementation before the UI polish.
@@ -22,6 +22,17 @@ GPIO/debug details with a readable About screen. Dashboard figures are
 explicitly labelled sample data. WiFi remains a placeholder; screen and alarm
 presets are saved locally and are not connected to hardware controls here.
 
+The subsequent front-screen redesign uses a light grouped background, rounded
+white cards, blue actions, green port indicators and proportional FreeSans
+bitmap fonts. Settings and About use the same typography and colour system.
+Font masks are rendered in RAM and sent as horizontal spans to avoid the
+LCD driver's costly per-pixel window writes. Touch sampling is unchanged
+from working commit `f9ae322`; calibration remains version 13.
+
+`home-preview.png` is a desktop layout preview, not a device photograph.
+`Preview.ps1` regenerates it using the installed Adafruit font bitmaps;
+its font path can be adjusted for a different workstation.
+
 ## Build and upload
 
 ```powershell
@@ -30,7 +41,7 @@ presets are saved locally and are not connected to hardware controls here.
 
 Do not use `--output-dir`. Retry once for an intermittent upload failure.
 
-The UI polish compiled on Arduino-ESP32 3.3.10 (347,764 bytes program,
+The latest redesign compiled on Arduino-ESP32 3.3.10 (371,640 bytes program,
 25,884 bytes globals), uploaded to COM6, and passed the flasher's hash
 verification. The normal UI loop reported idle contact after reboot, without
 entering first-boot calibration. Physical visual acceptance of the new UI
